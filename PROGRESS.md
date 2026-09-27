@@ -26,6 +26,76 @@ A phase is complete when all of its features are **done** through the evidence g
 
 ## Session log
 
+### 2026-09-27 (cont. 10) — three real, pre-existing CI failures fixed
+
+- Every commit from P0 through COR-11 had claimed a clean local gate, but
+  **no GitHub Actions run on this repository had ever actually gone
+  green** -- all 16 runs on `main` show `conclusion: failure` (checked via
+  the GitHub API, per the session protocol's step 1.3, at the start of
+  this session). Local runs never caught this because this sandbox's bare
+  `mypy`/`pip` on `PATH` resolve to tool installs unrelated to the
+  project's own dependency closure (a `uv tool install`-managed `mypy` in
+  one case) -- worth remembering: `python3 -m mypy`/`python3 -m ruff`/
+  `python3 -m pip_audit`, not the bare commands, are what actually check
+  this project's own code against its own installed dependencies here.
+  Three distinct, real bugs were behind the failures, found from the
+  actual CI job logs (`actions_list`/`get_job_logs`), not guessed at:
+  1. **`numpy==2.5.3` (pinned in P1) requires Python >=3.12 and has no
+     3.11 wheel at all** -- confirmed against PyPI's own metadata -- so
+     `pip install -e ".[dev]"` failed outright on every Python-3.11 CI
+     shard (this project declares `requires-python = ">=3.11"` and tests
+     3.11 in the matrix). Repinned to `numpy==2.4.6`, confirmed via the
+     wheel's own METADATA to declare `Requires-Python: >=3.11` and to
+     have working wheels for both 3.11 and 3.13.
+  2. **`engine/fonts/match.py`'s `extract_metrics` crashed outright** with
+     `fontTools.ttLib.TTLibError: Font contains no outlines` on
+     `ubuntu-latest` specifically, breaking `rank_by_metrics` (FNT-07,
+     Tier 3) for any document needing it and taking
+     `test_replace_text_op_require_tier_rejects_a_weak_match` and
+     `test_reflow_text_op_require_tier_rejects_a_weak_match` down with
+     it. Root cause: `tt.getGlyphSet()` was called unguarded, and at
+     least one font installed on that runner's image has neither a
+     `glyf` nor a `CFF `/`CFF2` table (a bitmap- or color-bitmap-only
+     font -- the same general class of "quirky installed font" that
+     P2-part6 already had to special-case for `.ttc` files, just a
+     different failure mode). Fixed the same way the surrounding code
+     already handles a broken/unreadable font: caught and treated as "not
+     a usable Tier 3 candidate," skipped rather than aborting the whole
+     ranking pass.
+  3. **`test_serve_command_is_registered` asserted `"--port" in
+     result.output`** against Typer/Click's Rich-rendered `--help` text.
+     Rich wraps that text to the detected terminal width, which is
+     narrower and inconsistent across CI runners/OSes than this sandbox's
+     shell, and was splitting the literal substring `--port` across a
+     line break -- reproduced exactly from the CI logs (ubuntu-3.13,
+     macos-3.13 and windows-3.13 all failed here, on this string, once
+     the numpy fix let them reach it). Rewrote the test to check the
+     actual Click command's own registered parameters
+     (`typer.main.get_command(app).commands["serve"].params`) instead of
+     parsing rendered text -- deterministic regardless of terminal width,
+     Rich version or OS.
+  4. Added two more `server/app.py` tests while re-verifying COR-11's
+     evidence end to end (`GET .../file`, added below): confirms it
+     returns the current in-memory document as real PDF bytes, and that
+     it reflects an edit already applied, not just the on-disk original.
+  5. `server/app.py` gained one small, undramatic route needed for the
+     P3 UI work that follows this fix: `GET /documents/{id}/file`,
+     returning `journal.document.to_bytes()` as `application/pdf` --
+     the same direct-Document-method-call pattern `render`/`inspect`/
+     `save` already use (not everything server-side needs to be an Op;
+     only actions the undo/redo journal must track do). This is what lets
+     the browser's pdf.js (SPEC.md section 4.1's chosen viewer library)
+     render the real document client-side instead of only ever seeing
+     page images.
+- 329 tests total (2 net new); ruff, `python3 -m mypy` --strict, bandit
+  and pip-audit all still clean. No feature changed status -- COR-11 was
+  already "done" and stays done; this makes its evidence (and every other
+  phase's) actually trustworthy in CI, which it demonstrably was not
+  before. Pushing this and confirming the next Actions run is green is
+  this session's immediate next step, before any further feature work,
+  per the session protocol's own rule ("if CI is red, fixing it becomes
+  the next task").
+
 ### 2026-09-27 (cont. 9) — COR-11, starting P3
 
 - `server/app.py`: a FastAPI server exposing the same `Op` layer the CLI

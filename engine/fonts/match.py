@@ -194,7 +194,15 @@ def extract_metrics(source: Path | bytes) -> FontMetrics | None:
         cmap = tt.getBestCmap() or {}
     except Exception:
         cmap = {}
-    glyph_set = tt.getGlyphSet()
+    try:
+        # A font with neither a `glyf` nor a `CFF `/`CFF2` table (a bitmap-only or
+        # color-bitmap font, such as some system emoji fonts) has no outlines at all --
+        # confirmed via a real one found among a CI runner's installed fonts. It can't
+        # be used to draw or shape-compare text, so it's not a usable Tier 3 candidate;
+        # treat it the same as any other unreadable font rather than crashing ranking.
+        glyph_set = tt.getGlyphSet()
+    except Exception:
+        return None
 
     cap_height = _os2_ratio(os2, "sCapHeight", units_per_em) or _bbox_top_ratio(glyph_set, cmap, "H", units_per_em)
     x_height = _os2_ratio(os2, "sxHeight", units_per_em) or _bbox_top_ratio(glyph_set, cmap, "x", units_per_em)

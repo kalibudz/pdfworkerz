@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from cli.main import app
@@ -245,8 +246,12 @@ def test_cli_uses_the_same_op_classes_as_the_engine(corpus: Corpus) -> None:
 @pytest.mark.feature("COR-11")
 def test_serve_command_is_registered() -> None:
     """Doesn't actually start the server (that would block forever) -- just
-    confirms `pdfworkerz serve --help` resolves through the same command
-    the server module builds, per --help's own text mentioning the port."""
-    result = runner.invoke(app, ["serve", "--help"])
-    assert result.exit_code == 0
-    assert "--port" in result.output
+    confirms `serve` is wired up with its `--port` option. Checked against
+    the Click command's own params, not rendered `--help` text: Rich wraps
+    that text to the detected terminal width, which is narrow and
+    inconsistent across CI runners/OSes and can split "--port" across
+    lines, making a substring check on it flaky by environment rather than
+    by behavior (confirmed failing this way on real CI before this fix)."""
+    command = typer.main.get_command(app)
+    serve_command = command.commands["serve"]
+    assert "port" in {param.name for param in serve_command.params}

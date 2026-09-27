@@ -186,6 +186,14 @@ def render_page(document_id: str, page_index: int, journal: JournalDep, dpi: int
     return Response(content=png_bytes, media_type="image/png")
 
 
+@router.get("/documents/{document_id}/file")
+def document_file(document_id: str, journal: JournalDep) -> Response:
+    """The document's current state (post-edit, pre-save) as raw PDF bytes --
+    UI-01's page canvas loads this into pdf.js for client-side rendering,
+    rather than round-tripping every page through the PNG render route."""
+    return Response(content=journal.document.to_bytes(), media_type="application/pdf")
+
+
 @router.post("/documents/{document_id}/undo", response_model=UndoRedoResponse)
 def undo(document_id: str, journal: JournalDep) -> UndoRedoResponse:
     undone = journal.undo()

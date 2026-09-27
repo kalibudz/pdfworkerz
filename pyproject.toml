@@ -18,7 +18,7 @@ dependencies = [
   "fonttools==4.66.0",
   "pydantic==2.13.5",
   "typer==0.27.2",
-  "numpy==2.5.3",
+  "numpy==2.4.6",
   "fastapi==0.141.1",
   "uvicorn==0.54.0",
 ]

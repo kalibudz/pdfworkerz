@@ -164,6 +164,28 @@ def test_render_page_returns_png_bytes(client: TestClient, simple_path: Path) ->
 
 
 @pytest.mark.feature("COR-11")
+def test_document_file_route_returns_the_current_pdf_bytes(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.get(f"/documents/{document_id}/file", headers=AUTH)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF-")
+
+
+@pytest.mark.feature("COR-11")
+def test_document_file_route_reflects_edits_already_applied(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    before = client.get(f"/documents/{document_id}/file", headers=AUTH).content
+    client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "replace_text", "match": "PDFWorkerz", "replacement": "Changed"},
+        headers=AUTH,
+    )
+    after = client.get(f"/documents/{document_id}/file", headers=AUTH).content
+    assert before != after
+
+
+@pytest.mark.feature("COR-11")
 def test_undo_redo_round_trip_through_the_api(client: TestClient, simple_path: Path) -> None:
     document_id = _open(client, simple_path)
     client.post(
