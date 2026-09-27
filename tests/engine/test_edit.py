@@ -132,6 +132,60 @@ def test_replace_span_text_respects_explicit_tc_tw_tz(work_dir: Path, font_index
     doc.close()
 
 
+@pytest.mark.feature("FNT-10")
+def test_replace_span_text_with_fit_matches_the_original_width(
+    corpus: Corpus, work_dir: Path, font_index: list
+) -> None:
+    """fit=True is meant for near-length replacements (SPEC.md 5.4's "slightly
+    longer or shorter"): a same-length swap should land within a tight tolerance
+    of the original width via tracking/scaling."""
+    source = work_dir / "simple.pdf"
+    shutil.copy(corpus.simple, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+    original_width = spans[0].style.bbox[2] - spans[0].style.bbox[0]
+
+    replace_span_text(doc, 0, spans[0], "Howdy, PDFEditorz!", font_index=font_index, fit=True)
+
+    after_spans = extract_page_spans(doc.raw, 0)
+    new_width = after_spans[-1].style.bbox[2] - after_spans[0].style.bbox[0]
+    assert new_width == pytest.approx(original_width, rel=0.05)
+    doc.close()
+
+
+@pytest.mark.feature("FNT-10")
+def test_replace_span_text_without_fit_does_not_match_width(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    """Without fit=True, a much shorter replacement is drawn at its natural
+    (shorter) width -- the default, chainable behavior."""
+    source = work_dir / "simple.pdf"
+    shutil.copy(corpus.simple, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+    original_width = spans[0].style.bbox[2] - spans[0].style.bbox[0]
+
+    replace_span_text(doc, 0, spans[0], "Short", font_index=font_index, fit=False)
+
+    after_spans = extract_page_spans(doc.raw, 0)
+    new_width = after_spans[0].style.bbox[2] - after_spans[0].style.bbox[0]
+    assert new_width < original_width * 0.9
+    doc.close()
+
+
+@pytest.mark.feature("FNT-10")
+def test_replace_span_text_with_fit_flags_an_extreme_overflow_in_its_note(
+    corpus: Corpus, work_dir: Path, font_index: list
+) -> None:
+    source = work_dir / "simple.pdf"
+    shutil.copy(corpus.simple, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+
+    result = replace_span_text(doc, 0, spans[0], "Hi", font_index=font_index, fit=True)
+
+    assert "fit-to-width could not match" in result.note
+    doc.close()
+
+
 @pytest.mark.feature("EDT-04")
 def test_delete_by_replacing_with_empty_text_removes_the_span(corpus: Corpus, work_dir: Path, font_index: list) -> None:
     source = work_dir / "simple.pdf"

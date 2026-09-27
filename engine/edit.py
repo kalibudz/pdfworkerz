@@ -38,9 +38,10 @@ from numpy.typing import NDArray
 
 from engine.document import Document
 from engine.fonts.classify import classify_font, split_subset_tag
+from engine.fonts.fit import fit_to_width
 from engine.fonts.match import FontCandidate
 from engine.fonts.resolve import FontResolution, resolve_font
-from engine.fonts.style import SpanTrace, TextState, extract_page_spans
+from engine.fonts.style import SpanTrace, TextState, advance_for_char, extract_page_spans
 from engine.verify import DiffResult, pixel_diff, render_to_array
 
 VERIFY_DPI = 150
@@ -84,12 +85,6 @@ class EditResult:
     """None only when the caller passed verify=False."""
 
 
-def _advance(base_width: float, char: str, text_state: TextState) -> float:
-    """ISO 32000-1 9.4.3: tx = (w0 + Tc + Tw) * Th, Tw only for the space character."""
-    word_spacing = text_state.word_spacing if char == " " else 0.0
-    return (base_width + text_state.char_spacing + word_spacing) * (text_state.horizontal_scale / 100.0)
-
-
 def _collect_font_usage(spans: list[SpanTrace], font_name: str) -> str:
     """Every character already shown anywhere on the page with the given font."""
     return "".join(trace.style.text for trace in spans if trace.style.font == font_name)
@@ -116,6 +111,15 @@ def _resolve_font_resource(page: pymupdf.Page, resolution: FontResolution) -> st
         raise ValueError("FontResolution has neither fontname nor font_bytes set")
     page.insert_font(fontname=_EDIT_FONT_RESOURCE, fontbuffer=resolution.font_bytes)
     return _EDIT_FONT_RESOURCE
+
+
+def _load_font(resolution: FontResolution) -> pymupdf.Font:
+    """A pymupdf.Font for measuring or drawing with the resolved font program."""
+    if resolution.fontname is not None:
+        return pymupdf.Font(resolution.fontname)
+    if resolution.font_bytes is None:
+        raise ValueError("FontResolution has neither fontname nor font_bytes set")
+    return pymupdf.Font(fontbuffer=resolution.font_bytes)
 
 
 def _is_default_spacing(text_state: TextState) -> bool:
@@ -148,11 +152,7 @@ def draw_styled_text(
         return origin
 
     fontname = _resolve_font_resource(page, resolution)
-    font = (
-        pymupdf.Font(resolution.fontname)
-        if resolution.fontname is not None
-        else pymupdf.Font(fontbuffer=resolution.font_bytes)
-    )
+    font = _load_font(resolution)
 
     if rotation_degrees == 0.0 and text_state.rise == 0.0 and _is_default_spacing(text_state):
         page.insert_text(
@@ -176,7 +176,7 @@ def draw_styled_text(
             color=color,
             render_mode=text_state.render_mode,
         )
-        advance = _advance(base_width, char, text_state)
+        advance = advance_for_char(base_width, char, text_state)
         x += advance * cos_a
         y += advance * sin_a
     return (x, y)
@@ -237,11 +237,23 @@ def replace_span_text(
     font_index: list[FontCandidate],
     override_size: float | None = None,
     override_color: tuple[float, float, float] | None = None,
+    fit: bool = False,
     verify: bool = True,
 ) -> EditResult:
     """EDT-01/EDT-02/EDT-04/EDT-06: replace one span's text with `new_text`
     (empty text deletes it; the same text with an override restyles it),
     matching its original style as closely as the resolved font allows.
+
+    `fit` (FNT-10, off by default): when the replacement's natural width
+    differs from the original span's, adjust tracking or horizontal
+    scaling within tolerance so it occupies the same width, rather than
+    running long or short (SPEC.md section 5.4). Off by default because
+    any nonzero adjustment forces per-character drawing, which fragments
+    the result into one texttrace span per character (see
+    draw_styled_text) -- fine for a one-off edit, but it means a second
+    edit can no longer find that text as one span. Turn it on when
+    matching the original width matters more than staying chainable, for
+    example filling a fixed-width field.
     """
     page = document.raw[page_index]
     style = span.style
@@ -250,11 +262,18 @@ def replace_span_text(
     resolution = resolve_font_for_span(document, page_index, span, new_text, font_index=font_index)
     before = render_to_array(document.raw, page_index, dpi=VERIFY_DPI) if verify else None
 
+    font_size = override_size if override_size is not None else (text_state.font_size or style.size)
+    color = override_color if override_color is not None else style.color
+
+    fit_result = None
+    if fit and new_text and override_size is None:
+        target_width = style.bbox[2] - style.bbox[0]
+        fit_result = fit_to_width(_load_font(resolution), new_text, font_size, text_state, target_width)
+        text_state = fit_result.text_state
+
     page.add_redact_annot(pymupdf.Rect(style.bbox))
     page.apply_redactions(**_REDACT_KWARGS)
 
-    font_size = override_size if override_size is not None else (text_state.font_size or style.size)
-    color = override_color if override_color is not None else style.color
     end_point = draw_styled_text(
         page,
         text=new_text,
@@ -267,11 +286,17 @@ def replace_span_text(
     )
 
     verification = _verify_edit(document, page_index, before, new_text) if before is not None else None
+    note = resolution.note
+    if fit_result is not None and not fit_result.fits:
+        note += (
+            f"; fit-to-width could not match the original {fit_result.target_width:.1f}pt width "
+            f"within tolerance (drew at {fit_result.natural_width:.1f}pt) -- consider reflow"
+        )
     return EditResult(
         tier=resolution.tier,
         confidence=resolution.confidence,
         requires_approval=resolution.requires_approval,
-        note=resolution.note,
+        note=note,
         end_point=end_point,
         verification=verification,
     )

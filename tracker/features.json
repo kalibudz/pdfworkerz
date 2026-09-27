@@ -86,7 +86,7 @@
     {"id": "FNT-07", "category": "FNT", "name": "Metric-similarity font matching with confidence score", "parity": ["Beyond"], "libs": ["fontTools", "numpy"], "phase": "P2", "estTokens": "L", "status": "done"},
     {"id": "FNT-08", "category": "FNT", "name": "Glyph-borrow merge into the embedded subset font", "parity": ["Beyond"], "libs": ["fontTools"], "phase": "P2", "estTokens": "L", "status": "done"},
     {"id": "FNT-09", "category": "FNT", "name": "Kerning and ligature preservation", "parity": ["Beyond"], "libs": ["fontTools"], "phase": "P2", "estTokens": "M", "status": "planned"},
-    {"id": "FNT-10", "category": "FNT", "name": "Fit-to-width (tracking or horizontal scaling within tolerance)", "parity": ["Beyond"], "libs": ["PyMuPDF"], "phase": "P2", "estTokens": "M", "status": "planned"},
+    {"id": "FNT-10", "category": "FNT", "name": "Fit-to-width (tracking or horizontal scaling within tolerance)", "parity": ["Beyond"], "libs": ["PyMuPDF"], "phase": "P2", "estTokens": "M", "status": "done"},
     {"id": "FNT-11", "category": "FNT", "name": "Line and block reflow preserving justification and baseline", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P2", "estTokens": "L", "status": "planned"},
     {"id": "FNT-12", "category": "FNT", "name": "Pixel-verified edit (before/after region diff with mismatch flag)", "parity": ["Beyond"], "libs": ["PyMuPDF", "numpy"], "phase": "P2", "estTokens": "M", "status": "done"},
     {"id": "FNT-13", "category": "FNT", "name": "Missing-ToUnicode recovery (glyph names, shape matching)", "parity": ["Beyond"], "libs": ["fontTools", "PyMuPDF"], "phase": "P2", "estTokens": "L", "status": "planned"},

@@ -8,7 +8,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 |---|---|---|---|
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P2 | Font identification & style-matched text editing | 🔶 In progress: 13/20 features proven by tests (FNT-01..08, EDT-01/02/03/04/06) | |
+| P2 | Font identification & style-matched text editing | 🔶 In progress: 15/20 features proven by tests (FNT-01..10, FNT-12, EDT-01/02/03/04/06) | |
 | P3 | Web UI with click-to-edit | Planned | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
@@ -74,6 +74,29 @@ A phase is complete when all of its features are **done** through the evidence g
   length-mismatched replacement), FNT-11 (reflow), FNT-12 (wiring the existing
   pixel-diff harness into the edit pipeline itself), FNT-13 (missing-ToUnicode
   recovery), FNT-14 (CJK/RTL/vertical), FNT-15 (Type3 editing).
+
+### 2026-09-27 (cont. 2) — FNT-12 and FNT-10
+
+- `engine/edit.py`: wired `engine.verify`'s pixel-diff into `replace_span_text`
+  and `insert_text_near` (FNT-12, `verify=True` by default). Verification
+  checks the intended text via texttrace's own character list rather than
+  `get_text()`, whose word-break heuristics can be fooled by wide Tc/Tw.
+- `engine/fonts/fit.py`: fit-to-width (FNT-10) -- solves directly for the Tc
+  (then, if that would need too large a change, the Tz) that makes a
+  replacement occupy the original span's width, clamped to the 94-106% scaling
+  band, reporting `fits=False` when even that isn't enough.
+- **Found the fit/chainability tension before shipping it as a default**: any
+  nonzero Tc/Tz forces per-character drawing, which fragments the result into
+  one texttrace span per character (see the P2-part1 log entry) -- so a
+  `fit=True` replace would silently break any edit chained after it, most of
+  the time (natural widths essentially never match exactly). `fit` therefore
+  defaults to `False` on `replace_span_text` and on the Ops; it's real, tested
+  functionality, opt-in for a caller that needs width-matching (a fixed-width
+  field) more than it needs the result to stay easily editable further.
+- 22 new tests (231 total, 94.8% coverage). FNT-10 and FNT-12 moved to "done"
+  (37/161 total). Still open in P2: FNT-09 (kerning/ligature), FNT-11
+  (reflow), FNT-13 (ToUnicode recovery), FNT-14 (CJK/RTL/vertical), FNT-15
+  (Type3 editing).
 
 ### 2026-09-27 — P1 engine core
 

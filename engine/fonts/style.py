@@ -113,6 +113,17 @@ class TextState(BaseModel):
         return RENDER_MODE_NAMES.get(self.render_mode, "unknown")
 
 
+def advance_for_char(base_width: float, char: str, text_state: TextState) -> float:
+    """ISO 32000-1 9.4.3: tx = (w0 + Tc + Tw) * Th, Tw only for the space character.
+
+    `base_width` is the glyph's plain advance at the target font size (for
+    example from ``pymupdf.Font.char_lengths``), with no Tc/Tw/Tz applied.
+    Shared by engine.edit (drawing) and engine.fonts.fit (FNT-10).
+    """
+    word_spacing = text_state.word_spacing if char == " " else 0.0
+    return (base_width + text_state.char_spacing + word_spacing) * (text_state.horizontal_scale / 100.0)
+
+
 class SpanTrace(BaseModel):
     """FNT-01 + FNT-02 combined for one span."""
 

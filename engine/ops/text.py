@@ -73,6 +73,9 @@ class _FindReplaceOp(Op):
     page_index: int | None = None
     """None means every page."""
     require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
+    fit: bool = False
+    """FNT-10: match the original span's width via Tc/Tz. Off by default -- see
+    engine.edit.replace_span_text's docstring for the chainability trade-off."""
     verify: bool = True
     """FNT-12: render before/after and confirm the text landed (engine.edit)."""
 
@@ -96,7 +99,7 @@ class _FindReplaceOp(Op):
                 if new_text == text:
                     break  # a zero-width regex match on an already-handled span: stop, don't loop forever
                 result = replace_span_text(
-                    document, page_index, span, new_text, font_index=font_index, verify=self.verify
+                    document, page_index, span, new_text, font_index=font_index, fit=self.fit, verify=self.verify
                 )
                 _check_tier(result, self.require_tier, where=type(self).__name__)
                 results.append(result)
