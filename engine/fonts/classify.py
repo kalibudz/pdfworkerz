@@ -72,7 +72,7 @@ class StyleFingerprint(BaseModel):
     """CSS-style weight: 400 normal, 700 bold."""
 
 
-def _split_subset_tag(base_font: str) -> tuple[str | None, str]:
+def split_subset_tag(base_font: str) -> tuple[str | None, str]:
     match = SUBSET_TAG_PATTERN.match(base_font)
     if match:
         return match.group(1), match.group(2)
@@ -117,7 +117,7 @@ def classify_font(pdf: pikepdf.Pdf, page_index: int, resource_name: str) -> Font
     """FNT-03: classify the font a page refers to by its Tf resource name (e.g. "F1")."""
     font_dict = pdf.pages[page_index].Resources.Font[f"/{resource_name}"]
     base_font = str(font_dict.get("/BaseFont", "")).lstrip("/")
-    subset_tag, _ = _split_subset_tag(base_font)
+    subset_tag, _ = split_subset_tag(base_font)
     subtype = str(font_dict.get("/Subtype", "")).lstrip("/")
     descriptor, descendant_type = _descriptor_for(font_dict)
 
@@ -153,7 +153,7 @@ def _matches_any(name: str, tokens: tuple[str, ...]) -> bool:
 
 def fingerprint_style(classification: FontClassification) -> StyleFingerprint:
     """FNT-04: infer bold/italic/family from name tokens, corroborated by descriptor fields."""
-    _, plain_name = _split_subset_tag(classification.base_font)
+    _, plain_name = split_subset_tag(classification.base_font)
 
     name_says_bold = _matches_any(plain_name, _BOLD_NAME_TOKENS)
     descriptor_says_bold = (classification.flags is not None and bool(classification.flags & _FLAG_FORCE_BOLD)) or (

@@ -47,8 +47,15 @@ class CoverageResult:
 
 
 def _cmap_coverage(font_bytes: bytes, characters: set[str]) -> set[str] | None:
-    """The characters covered by a font's own cmap + non-empty glyph outlines,
-    or None when the font has no cmap to check (the common subset case)."""
+    """The characters covered by a font's own cmap, or None when the font has no
+    cmap to check at all (the common subset case).
+
+    A glyph with no outline (space, non-breaking space, ...) is not "missing" --
+    it is correctly blank by design. What matters is only that the cmap points
+    at a glyph the font actually still has; fontTools-built subsets (see
+    engine.fonts.merge) never leave a cmap entry pointing at a glyph they drop,
+    so presence in ``glyf``/``CFF`` is a reliable enough signal on its own.
+    """
     tt = TTFont(io.BytesIO(font_bytes), lazy=True)
     try:
         cmap = tt.getBestCmap()
@@ -57,17 +64,8 @@ def _cmap_coverage(font_bytes: bytes, characters: set[str]) -> set[str] | None:
     if not cmap:
         return None
 
-    glyf = tt.get("glyf", None)
-    covered: set[str] = set()
-    for ch in characters:
-        glyph_name = cmap.get(ord(ch))
-        if glyph_name is None:
-            continue
-        # a real cmap entry can still point at an empty (stripped) outline
-        if glyf is not None and glyph_name in glyf and getattr(glyf[glyph_name], "numberOfContours", -1) == 0:
-            continue
-        covered.add(ch)
-    return covered
+    glyph_set = tt.getGlyphSet()
+    return {ch for ch in characters if cmap.get(ord(ch)) in glyph_set}
 
 
 def check_coverage(

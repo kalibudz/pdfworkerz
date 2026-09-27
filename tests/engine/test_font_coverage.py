@@ -100,6 +100,19 @@ def test_type3_font_is_never_reported_as_covered() -> None:
 
 
 @pytest.mark.feature("FNT-05")
+def test_full_embedded_font_reports_space_as_covered_not_missing(corpus: Corpus) -> None:
+    """Regression: a space glyph has zero contours by design (it's blank), which
+    must not be confused with a glyph a subsetter stripped out."""
+    with pymupdf.open(corpus.embedded_font_full) as doc:
+        font_bytes = _extract(doc, "EmbeddedVeraBold")
+    result = check_coverage(
+        font_type="Type0", embedded=True, font_bytes=font_bytes, already_rendered_text="", characters="A B"
+    )
+    assert result.fully_covered
+    assert " " in result.covered
+
+
+@pytest.mark.feature("FNT-05")
 def test_empty_characters_are_trivially_fully_covered() -> None:
     result = check_coverage(font_type="Type1", embedded=False, font_bytes=b"", already_rendered_text="", characters="")
     assert result.fully_covered
