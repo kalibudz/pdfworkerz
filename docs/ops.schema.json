@@ -89,6 +89,11 @@
           "title": "Require Tier",
           "type": "string"
         },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        },
         "op": {
           "const": "replace_text",
           "default": "replace_text",
@@ -150,6 +155,11 @@
           ],
           "title": "Require Tier",
           "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
         },
         "op": {
           "const": "delete_text",
@@ -250,6 +260,11 @@
           ],
           "title": "Require Tier",
           "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
         }
       },
       "required": [
@@ -308,6 +323,11 @@
           ],
           "title": "Require Tier",
           "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
         }
       },
       "required": [

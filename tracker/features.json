@@ -88,7 +88,7 @@
     {"id": "FNT-09", "category": "FNT", "name": "Kerning and ligature preservation", "parity": ["Beyond"], "libs": ["fontTools"], "phase": "P2", "estTokens": "M", "status": "planned"},
     {"id": "FNT-10", "category": "FNT", "name": "Fit-to-width (tracking or horizontal scaling within tolerance)", "parity": ["Beyond"], "libs": ["PyMuPDF"], "phase": "P2", "estTokens": "M", "status": "planned"},
     {"id": "FNT-11", "category": "FNT", "name": "Line and block reflow preserving justification and baseline", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P2", "estTokens": "L", "status": "planned"},
-    {"id": "FNT-12", "category": "FNT", "name": "Pixel-verified edit (before/after region diff with mismatch flag)", "parity": ["Beyond"], "libs": ["PyMuPDF", "numpy"], "phase": "P2", "estTokens": "M", "status": "planned"},
+    {"id": "FNT-12", "category": "FNT", "name": "Pixel-verified edit (before/after region diff with mismatch flag)", "parity": ["Beyond"], "libs": ["PyMuPDF", "numpy"], "phase": "P2", "estTokens": "M", "status": "done"},
     {"id": "FNT-13", "category": "FNT", "name": "Missing-ToUnicode recovery (glyph names, shape matching)", "parity": ["Beyond"], "libs": ["fontTools", "PyMuPDF"], "phase": "P2", "estTokens": "L", "status": "planned"},
     {"id": "FNT-14", "category": "FNT", "name": "CJK, right-to-left and vertical text support", "parity": ["Nitro"], "libs": ["PyMuPDF", "fontTools"], "phase": "P2", "estTokens": "L", "status": "planned"},
     {"id": "FNT-15", "category": "FNT", "name": "Type3 font handling (detect, reuse glyph procedures or fall back)", "parity": ["Beyond"], "libs": ["pikepdf"], "phase": "P2", "estTokens": "L", "status": "planned"},

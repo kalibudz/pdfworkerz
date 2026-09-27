@@ -16,6 +16,13 @@ a little file size on longer edits, but it means every character's exact
 advance is computed the same verified way regardless of length, and it
 sidesteps PyMuPDF's own text-shaping choices, which the caller doesn't
 control otherwise.
+
+5. Verify (FNT-12, SPEC.md section 5.6): render the page before and after,
+   confirm the intended text is now really present (checked against
+   texttrace's own character list, not ``get_text()``'s word-break
+   heuristics -- large Tc/Tw can fool those, see tests/engine/test_edit.py),
+   and report how much of the page's pixels changed. This never blocks the
+   edit; it reports what happened so a caller (or a person) can review it.
 """
 
 from __future__ import annotations
@@ -24,14 +31,19 @@ import io
 import math
 from dataclasses import dataclass
 
+import numpy as np
 import pikepdf
 import pymupdf
+from numpy.typing import NDArray
 
 from engine.document import Document
 from engine.fonts.classify import classify_font, split_subset_tag
 from engine.fonts.match import FontCandidate
 from engine.fonts.resolve import FontResolution, resolve_font
 from engine.fonts.style import SpanTrace, TextState, extract_page_spans
+from engine.verify import DiffResult, pixel_diff, render_to_array
+
+VERIFY_DPI = 150
 
 _EDIT_FONT_RESOURCE = "PDFWorkerzEdit"
 # Verified at runtime (pymupdf 1.28.2); missing from pymupdf's stub like PDF_ENCRYPT_KEEP
@@ -44,6 +56,21 @@ _REDACT_KWARGS: dict[str, int] = {
 
 
 @dataclass(frozen=True)
+class VerificationResult:
+    """FNT-12: what re-rendering and re-extracting the page after an edit found."""
+
+    text_matches: bool
+    """Whether the intended text is now present, checked via texttrace, not
+    ``get_text()`` (its word-break heuristics can be fooled by wide Tc/Tw)."""
+    diff: DiffResult
+    """The before/after pixel comparison of the whole page (engine.verify)."""
+
+    @property
+    def looks_right(self) -> bool:
+        return self.text_matches and self.diff.changed_fraction > 0.0
+
+
+@dataclass(frozen=True)
 class EditResult:
     """What a text edit did, and how much confidence backs the font it used."""
 
@@ -53,6 +80,8 @@ class EditResult:
     note: str
     end_point: tuple[float, float]
     """Where the next character after the drawn text would start (baseline)."""
+    verification: VerificationResult | None = None
+    """None only when the caller passed verify=False."""
 
 
 def _advance(base_width: float, char: str, text_state: TextState) -> float:
@@ -64,6 +93,19 @@ def _advance(base_width: float, char: str, text_state: TextState) -> float:
 def _collect_font_usage(spans: list[SpanTrace], font_name: str) -> str:
     """Every character already shown anywhere on the page with the given font."""
     return "".join(trace.style.text for trace in spans if trace.style.font == font_name)
+
+
+def _verify_edit(
+    document: Document, page_index: int, before: NDArray[np.uint8], expected_text: str
+) -> VerificationResult:
+    """FNT-12: confirm `expected_text` is now really on the page, and measure how
+    much of the page changed. `before` is a render_to_array() result from
+    just before the edit."""
+    after = render_to_array(document.raw, page_index, dpi=VERIFY_DPI)
+    diff = pixel_diff(before, after)
+    flat_text = "".join(span.style.text for span in extract_page_spans(document.raw, page_index))
+    text_matches = expected_text in flat_text if expected_text else True
+    return VerificationResult(text_matches=text_matches, diff=diff)
 
 
 def _resolve_font_resource(page: pymupdf.Page, resolution: FontResolution) -> str:
@@ -195,6 +237,7 @@ def replace_span_text(
     font_index: list[FontCandidate],
     override_size: float | None = None,
     override_color: tuple[float, float, float] | None = None,
+    verify: bool = True,
 ) -> EditResult:
     """EDT-01/EDT-02/EDT-04/EDT-06: replace one span's text with `new_text`
     (empty text deletes it; the same text with an override restyles it),
@@ -205,6 +248,7 @@ def replace_span_text(
     text_state = span.text_state or TextState()
 
     resolution = resolve_font_for_span(document, page_index, span, new_text, font_index=font_index)
+    before = render_to_array(document.raw, page_index, dpi=VERIFY_DPI) if verify else None
 
     page.add_redact_annot(pymupdf.Rect(style.bbox))
     page.apply_redactions(**_REDACT_KWARGS)
@@ -222,12 +266,14 @@ def replace_span_text(
         resolution=resolution,
     )
 
+    verification = _verify_edit(document, page_index, before, new_text) if before is not None else None
     return EditResult(
         tier=resolution.tier,
         confidence=resolution.confidence,
         requires_approval=resolution.requires_approval,
         note=resolution.note,
         end_point=end_point,
+        verification=verification,
     )
 
 
@@ -239,6 +285,7 @@ def insert_text_near(
     origin: tuple[float, float],
     *,
     font_index: list[FontCandidate],
+    verify: bool = True,
 ) -> EditResult:
     """EDT-03: draw new `text` at `origin`, matching `reference_span`'s style.
 
@@ -250,6 +297,7 @@ def insert_text_near(
     text_state = reference_span.text_state or TextState()
 
     resolution = resolve_font_for_span(document, page_index, reference_span, text, font_index=font_index)
+    before = render_to_array(document.raw, page_index, dpi=VERIFY_DPI) if verify else None
 
     end_point = draw_styled_text(
         page,
@@ -262,10 +310,12 @@ def insert_text_near(
         resolution=resolution,
     )
 
+    verification = _verify_edit(document, page_index, before, text) if before is not None else None
     return EditResult(
         tier=resolution.tier,
         confidence=resolution.confidence,
         requires_approval=resolution.requires_approval,
         note=resolution.note,
         end_point=end_point,
+        verification=verification,
     )

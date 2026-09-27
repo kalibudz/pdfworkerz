@@ -182,6 +182,63 @@ def test_insert_text_near_does_not_touch_the_reference_span(corpus: Corpus, work
     doc.close()
 
 
+@pytest.mark.feature("FNT-12")
+def test_replace_span_text_verifies_by_default(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    source = work_dir / "simple.pdf"
+    shutil.copy(corpus.simple, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+
+    result = replace_span_text(doc, 0, spans[0], "Verified Text", font_index=font_index)
+
+    assert result.verification is not None
+    assert result.verification.text_matches is True
+    assert result.verification.diff.changed_fraction > 0.0
+    assert result.verification.looks_right is True
+    doc.close()
+
+
+@pytest.mark.feature("FNT-12")
+def test_replace_span_text_verify_false_skips_verification(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    source = work_dir / "simple.pdf"
+    shutil.copy(corpus.simple, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+
+    result = replace_span_text(doc, 0, spans[0], "No Verify", font_index=font_index, verify=False)
+
+    assert result.verification is None
+    doc.close()
+
+
+@pytest.mark.feature("FNT-12")
+def test_delete_text_verification_reports_a_real_pixel_change(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    source = work_dir / "simple.pdf"
+    shutil.copy(corpus.simple, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+
+    result = replace_span_text(doc, 0, spans[0], "", font_index=font_index)
+
+    assert result.verification is not None
+    assert result.verification.diff.changed_fraction > 0.0  # the deleted glyphs really disappeared
+    doc.close()
+
+
+@pytest.mark.feature("FNT-12")
+def test_insert_text_near_verifies_the_new_text_landed(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    source = work_dir / "simple.pdf"
+    shutil.copy(corpus.simple, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+
+    result = insert_text_near(doc, 0, spans[0], "Landed Here", (72, 300), font_index=font_index)
+
+    assert result.verification is not None
+    assert result.verification.text_matches is True
+    doc.close()
+
+
 @pytest.mark.feature("EDT-03")
 def test_insert_text_near_matches_reference_style(corpus: Corpus, work_dir: Path, font_index: list) -> None:
     source = work_dir / "simple.pdf"

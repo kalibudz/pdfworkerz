@@ -73,6 +73,8 @@ class _FindReplaceOp(Op):
     page_index: int | None = None
     """None means every page."""
     require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
+    verify: bool = True
+    """FNT-12: render before/after and confirm the text landed (engine.edit)."""
 
     def _replacement_for(self, matched_text: str) -> str:
         raise NotImplementedError
@@ -93,7 +95,9 @@ class _FindReplaceOp(Op):
                 new_text = text[: match_obj.start()] + replacement + text[match_obj.end() :]
                 if new_text == text:
                     break  # a zero-width regex match on an already-handled span: stop, don't loop forever
-                result = replace_span_text(document, page_index, span, new_text, font_index=font_index)
+                result = replace_span_text(
+                    document, page_index, span, new_text, font_index=font_index, verify=self.verify
+                )
                 _check_tier(result, self.require_tier, where=type(self).__name__)
                 results.append(result)
         return results
@@ -133,6 +137,7 @@ class RestyleTextOp(Op):
     size: float | None = None
     color: tuple[float, float, float] | None = None
     require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
+    verify: bool = True
 
     def apply(self, document: Document) -> list[EditResult]:
         if self.size is None and self.color is None:
@@ -153,6 +158,7 @@ class RestyleTextOp(Op):
                     font_index=font_index,
                     override_size=self.size,
                     override_color=self.color,
+                    verify=self.verify,
                 )
                 _check_tier(result, self.require_tier, where=self.op)
                 results.append(result)
@@ -172,6 +178,7 @@ class InsertTextOp(Op):
     """A literal substring identifying the span whose style to copy."""
     reference_case_sensitive: bool = True
     require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
+    verify: bool = True
 
     def apply(self, document: Document) -> EditResult:
         font_index = _font_index()
@@ -182,7 +189,13 @@ class InsertTextOp(Op):
         reference_span, _match_obj = found
 
         result = insert_text_near(
-            document, self.page_index, reference_span, self.text, self.position, font_index=font_index
+            document,
+            self.page_index,
+            reference_span,
+            self.text,
+            self.position,
+            font_index=font_index,
+            verify=self.verify,
         )
         _check_tier(result, self.require_tier, where=self.op)
         return result
