@@ -6,10 +6,10 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 
 | Phase | Scope | Status | Reviewer sign-off |
 |---|---|---|---|
-| P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
+| P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | First green GitHub Actions run: [run #17](https://github.com/kalibudz/pdfworkerz/actions/runs/36356246278), all 11 jobs, 2026-09-27 |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P3 | Web UI with click-to-edit | 🔶 In progress: 1/15 features proven by tests | |
+| P3 | Web UI with click-to-edit | 🔶 In progress: 3/15 features proven by tests | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,112 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-27 (cont. 11) — UI-01 and UI-06: the first real browser UI
+
+- `web/`: a new TypeScript + Vite + pdf.js frontend (SPEC.md section 4.1's
+  chosen stack), talking to `server/app.py` over plain JSON HTTP with no
+  build-time coupling between the two. `src/config.ts` reads
+  `?token=&api=` from the URL once (state/checkpoint.json's own suggested
+  design from the end of the COR-11 session), remembers them in
+  `sessionStorage`, and scrubs them from the address bar; `src/connect.ts`
+  is the manual fallback when neither is known. `src/open.ts` (UI-06) and
+  `src/viewer.ts` + `src/pdf.ts` (UI-01) are the two features themselves;
+  `src/api.ts` is the typed client and `src/app.ts` wires the three
+  screens together.
+- **Four real bugs found and fixed before this could be called done, each
+  through the same discipline the rest of this project already uses --
+  build it, then actually drive it with a real browser and see what
+  breaks, rather than trusting the code by inspection:**
+  1. **CORS.** The UI and the API are always two different origins
+     (different ports), even on one machine -- confirmed by hitting an
+     actual browser-blocked `fetch` (no `Access-Control-Allow-Origin`)
+     the first time the built UI tried to open a document from a static
+     file server on a different port than `pdfworkerz serve`.
+     `server/app.py` now adds `CORSMiddleware` scoped to loopback origins
+     only (`127.0.0.1`/`localhost`/`::1`, never a wildcard) -- safe to
+     scope this loosely (any port) because authentication here is the
+     `X-Session-Token` *header*, which unlike a cookie a browser never
+     attaches automatically, so a page on some other origin still can't
+     act as this user without already knowing the random token. Two new
+     direct tests confirm the header is actually granted for a loopback
+     `Origin` and actually absent for a non-loopback one, not just that
+     the regex looks right.
+  2. **A genuinely incompatible pdf.js release, caught by version, not by
+     guessing.** `pdfjs-dist` versions `>=5.6.83 <6.2.108` carry a public,
+     high-severity CVE (arbitrary JS execution opening a malicious PDF --
+     exactly this tool's own threat model); `npm audit` (now gated in the
+     `security` CI job too) refused every version in that range. But the
+     current, patched release (and, it turned out, everything back to at
+     least 5.5.207) throws `getOrInsertComputed is not a function` on
+     this sandbox's pinned test browser -- a `Map`/`WeakMap` method
+     (TC39's "Upsert" proposal) pdf.js relies on that a real, current
+     browser has natively by now but an older engine doesn't.
+     `src/polyfills.ts` fills the gap only when the native method is
+     missing (a no-op on any browser that already has it), and
+     `src/pdf.worker.ts` wraps pdfjs-dist's own worker script so the same
+     polyfill also installs in *that* separate realm -- confirmed by
+     testing that the error came from both the main-thread bundle and the
+     worker bundle before fixing only one and calling it done.
+  3. **A real race condition in `viewer.ts`.** The toolbar's prev/next/zoom
+     buttons and the keyboard-navigation handler were wired up *after* the
+     `await`s that fetch and parse the document, but `.pw-viewer` (and
+     those buttons) were already in the DOM before that -- so an
+     interaction fast enough to land in that window was simply lost, no
+     error, because no listener existed yet. Caught by the automated
+     Playwright tests failing intermittently, not by manual testing (whose
+     own incidental delays had been masking it). Fixed by attaching every
+     listener immediately and disabling the affected controls until the
+     document has actually loaded, rather than trying to guess a safe
+     delay.
+  4. **A real logic bug in the password-retry message**, caught the same
+     way: distinguishing "needs a password" from "wrong password" only
+     needs to look at whether *this* request sent one, not any memory of
+     earlier attempts -- the earlier, more complicated version compared
+     the current attempt against the *previous* attempt's state and picked
+     the wrong branch on the very first wrong-password retry.
+- `tests/web/`: real end-to-end evidence, not a DOM/unit test double --
+  a real `server/app.py` instance (uvicorn, background thread; an
+  in-process `TestClient` can't be navigated to by a browser), a real
+  static file server for `web/dist`, and `pytest-playwright` driving a
+  real Chromium. On this sandbox specifically, that browser is the
+  pre-installed one at a fixed path outside Playwright's own version-keyed
+  cache (see the repo's environment notes) -- `conftest.py`'s
+  `browser_type_launch_args` override only takes effect when that path
+  exists, so CI (which runs a real `playwright install --with-deps
+  chromium` step instead) and a normal dev machine both get Playwright's
+  own default resolution. 11 tests cover both features: the connect
+  screen, URL-config consumption, the missing-file error, all three
+  password-prompt states (needs one / wrong / correct), page count and
+  thumbnail count, next/prev, arrow keys, thumbnail-click navigation, and
+  zoom.
+- CI (`tests` job): added Node + `npm ci && npm run build` (in `web/`) and
+  `playwright install --with-deps chromium` ahead of the existing
+  `pytest --feature-results` step, so this evidence is produced in CI --
+  the same single pytest invocation the evidence gate already reads --
+  not only locally. Cost accepted deliberately: this runs once per OS ×
+  Python-version shard (6 times total) rather than once, since splitting
+  it into a separate job would put UI-01/UI-06's evidence in a
+  `feature_results.json` the `tests` job's own evidence-gate check never
+  sees.
+- **Also fixed, while verifying end to end**: this sandbox's bare `pip`
+  installs into a site-packages that this sandbox's bare `mypy`/`ruff`
+  binaries on `PATH` don't share (see the previous session entry) --
+  same root cause, newly relevant here because `pip install ".[dev]"` now
+  also has to make `playwright`/`pytest-playwright` visible to whichever
+  `pytest` actually runs; using `python3 -m <tool>` throughout stayed the
+  reliable fix.
+- 340 tests total (93.1% coverage); ruff, `python3 -m mypy` --strict,
+  bandit, pip-audit and `npm audit` (0 vulnerabilities on `web/`'s pinned
+  deps) all clean. UI-01 and UI-06 moved to "done" by the evidence gate
+  (45/161 total, 3/15 in P3).
+- Still open in P3: UI-02/03/04/05/08/09 (click-to-edit overlay,
+  inspector, history panel, before/after split view, keyboard shortcuts,
+  themes) and EDT-05/07/08/09/10/11 (block move/resize, format painter,
+  images, shapes, hyperlinks, spell-check). Per the checkpoint's own
+  ordering: UI-03 (inspector) and UI-02 (click-to-edit) next, since they
+  share the same per-span style data and nothing else in P3 needs new
+  frontend scaffolding the way those two still do.
 
 ### 2026-09-27 (cont. 10) — three real, pre-existing CI failures fixed
 

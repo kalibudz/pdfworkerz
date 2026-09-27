@@ -38,6 +38,7 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
@@ -221,6 +222,9 @@ def save(document_id: str, body: SaveRequest, journal: JournalDep) -> SaveRespon
     return SaveResponse(path=str(result.path), mode=result.mode, bytes_written=result.bytes_written)
 
 
+_LOOPBACK_ORIGIN = r"^https?://(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?$"
+
+
 def create_app(*, token: str | None = None) -> FastAPI:
     """Build the server. ``token`` is normally left as None (a fresh random
     token is generated); tests pass a known value so they can authenticate."""
@@ -228,6 +232,22 @@ def create_app(*, token: str | None = None) -> FastAPI:
     app.state.session_token = token or secrets.token_urlsafe(32)
     app.state.documents = {}
     app.include_router(router)
+    # The browser UI (web/) and this API are two different origins/ports even
+    # when both run on the same machine (SPEC.md section 4.2 rule 5: "local
+    # only" describes the *listening address*, not that UI and API must share
+    # one origin) -- without this, the browser's own CORS check blocks every
+    # request before it reaches verify_token at all. Scoped to loopback
+    # origins only, never a wildcard: authentication here is a header
+    # (X-Session-Token), which -- unlike a cookie -- a browser never attaches
+    # automatically, so a page on some other origin still can't act as this
+    # user without already knowing the random token; restricting the origin
+    # regex is a defense-in-depth boundary on top of that, not the primary one.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=_LOOPBACK_ORIGIN,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.exception_handler(PdfWorkerzError)
     def handle_engine_error(_request: Request, exc: PdfWorkerzError) -> JSONResponse:

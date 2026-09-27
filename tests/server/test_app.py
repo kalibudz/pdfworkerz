@@ -42,6 +42,21 @@ def test_health_needs_no_auth(client: TestClient) -> None:
 
 
 @pytest.mark.feature("COR-11")
+def test_cors_allows_a_loopback_origin(client: TestClient) -> None:
+    """The browser UI (web/) is always a different origin from this API, even
+    on the same machine -- confirms the CORS policy actually grants it, not
+    just that it's configured with the right-looking regex."""
+    response = client.get("/health", headers={"Origin": "http://127.0.0.1:5173"})
+    assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
+
+
+@pytest.mark.feature("COR-11")
+def test_cors_does_not_allow_a_non_loopback_origin(client: TestClient) -> None:
+    response = client.get("/health", headers={"Origin": "https://evil.example.com"})
+    assert "access-control-allow-origin" not in response.headers
+
+
+@pytest.mark.feature("COR-11")
 def test_create_app_generates_a_random_token_by_default() -> None:
     first = create_app()
     second = create_app()
