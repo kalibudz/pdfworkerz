@@ -15,7 +15,22 @@ from pathlib import Path
 
 import pytest
 
+from tests.corpus.build_corpus import Corpus, build_corpus
+
 RESULTS_PATH = Path(__file__).resolve().parent.parent / "build" / "feature_results.json"
+
+
+@pytest.fixture(scope="session")
+def corpus() -> Corpus:
+    """The shared golden PDF corpus (INF-06), built once per test session."""
+    return build_corpus()
+
+
+@pytest.fixture
+def work_dir(tmp_path: Path) -> Path:
+    """A throwaway directory for tests that write files."""
+    return tmp_path
+
 
 _links: dict[str, list[tuple[str, int]]] = {}
 _counts: dict[str, dict[str, dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: {"passed": 0, "failed": 0}))

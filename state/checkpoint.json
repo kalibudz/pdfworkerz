@@ -1,12 +1,13 @@
 {
-  "phase": "P0",
-  "taskId": "INF-01..INF-05",
-  "step": "P0 deliverables written and pushed; awaiting first green CI run",
+  "phase": "P1",
+  "taskId": "P1 complete (INF-06, INF-07, COR-01..COR-10, SEC-01, SEC-02, SEC-03, SEC-07, OPT-06)",
+  "step": "All 17 P1 features done via the evidence gate (130 tests passing); pushed to main",
   "branch": "main",
   "lastGreenCommit": null,
-  "nextAction": "Confirm CI is green on main, then start P1 with INF-06 (golden corpus generator) after running tools/session_budget.py",
+  "nextAction": "Start P2 with FNT-01 (per-span style extraction), after running tools/session_budget.py. P2 is the flagship font-identification and style-matched-editing phase (20 features, ~4.55M estimated tokens) -- see SPEC.md section 5 for the tier strategy (stream surgery -> glyph borrow -> metric match -> fallback).",
   "openQuestions": [
-    "Re-verify iLovePDF / Nitro parity tags against the vendors' current feature pages before the first release"
+    "Re-verify iLovePDF / Nitro parity tags against the vendors' current feature pages before the first release",
+    "P1 was self-reviewed (builder and reviewer were the same session); an independent reviewer pass is still owed before calling the phase fully signed off"
   ],
-  "updated": "2026-09-26"
+  "updated": "2026-09-27"
 }

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PDFWorkerz Op",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "Produce the COR-03 inspection report for the target document.",
+      "properties": {
+        "op": {
+          "const": "inspect",
+          "default": "inspect",
+          "title": "Op",
+          "type": "string"
+        },
+        "password": {
+          "default": "",
+          "title": "Password",
+          "type": "string"
+        }
+      },
+      "title": "InspectOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Render one page to PNG bytes (COR-02).",
+      "properties": {
+        "op": {
+          "const": "render_page",
+          "default": "render_page",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "dpi": {
+          "default": 150,
+          "title": "Dpi",
+          "type": "integer"
+        }
+      },
+      "title": "RenderPageOp",
+      "type": "object"
+    }
+  ]
+}

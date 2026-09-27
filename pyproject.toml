@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = []  # the engine package is added in phase P1
+packages = ["engine", "engine.ops", "cli"]
 
 [project]
 name = "pdfworkerz"
@@ -12,7 +12,17 @@ description = "Free, offline, token-free PDF editing worker with style-faithful 
 readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.11"
-dependencies = []  # engine dependencies are added and pinned in phase P1
+dependencies = [
+  "pymupdf==1.28.2",
+  "pikepdf==10.14.0",
+  "fonttools==4.66.0",
+  "pydantic==2.13.5",
+  "typer==0.27.2",
+  "numpy==2.5.3",
+]
+
+[project.scripts]
+pdfworkerz = "cli.main:app"
 
 [project.optional-dependencies]
 dev = [
@@ -24,16 +34,17 @@ dev = [
   "pip-audit>=2.7",
   "pyyaml>=6",
   "types-PyYAML",
+  "reportlab==5.0.1",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["tools"]
+pythonpath = ["tools", "."]
 addopts = "-ra --strict-markers"
 markers = ["feature(id, criterion=1): the feature this test proves"]
 
 [tool.coverage.run]
-source = ["tools"]
+source = ["tools", "engine", "cli"]
 
 [tool.coverage.report]
 fail_under = 85
@@ -54,3 +65,18 @@ known-first-party = ["features", "gen_spec_catalog", "session_budget", "update_t
 strict = true
 mypy_path = "tools"
 explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["fitz.*", "pymupdf.*", "pikepdf.*", "fontTools.*", "reportlab.*"]
+ignore_missing_imports = true
+
+# pymupdf and pikepdf ship partial, inconsistent type stubs (some methods carry
+# real signatures, many others are `(*args, **kwargs)` or missing constants
+# entirely -- verified against the installed versions, see engine/document.py).
+# Every call into them is checked for its *behavior* by tests/engine, so relaxing
+# these two strict sub-checks only for the modules that touch those libraries
+# directly is a deliberate, scoped trade-off, not a general weakening of strict mode.
+[[tool.mypy.overrides]]
+module = ["engine.*", "cli.*"]
+disallow_untyped_calls = false
+warn_return_any = false

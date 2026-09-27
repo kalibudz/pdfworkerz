@@ -7,8 +7,8 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | Phase | Scope | Status | Reviewer sign-off |
 |---|---|---|---|
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
-| P1 | Engine core, inspection, encryption, repair, CLI | ⏳ Next | |
-| P2 | Font identification & style-matched text editing | Planned | |
+| P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
+| P2 | Font identification & style-matched text editing | ⏳ Next | |
 | P3 | Web UI with click-to-edit | Planned | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
@@ -25,6 +25,43 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-27 — P1 engine core
+
+- Pinned runtime deps (pymupdf 1.28.2, pikepdf 10.14.0, fonttools 4.66.0, pydantic 2.13.5,
+  typer 0.27.2, numpy 2.5.3) in `pyproject.toml`; every library call used below was verified
+  against the installed version with a short REPL check before being relied on in code.
+- `engine/document.py`: `Document.open/from_bytes/save/render_page/iter_pages/inspect`
+  (COR-01, COR-02, COR-06, COR-07, COR-08, COR-09). Atomic same-path overwrite (temp file +
+  `Path.replace`), auto incremental-vs-full save mode (signed documents get incremental),
+  `filetype="pdf"` forced so PyMuPDF never silently opens a non-PDF via extension sniffing,
+  and a `RepairFailedError`/`NotAPdfError` split so "too damaged to repair" is distinguished
+  from "never a PDF" (OPT-06).
+- `engine/security.py` + `engine/inspect.py`: encryption/permission reporting for every
+  revision (RC4-40/128, AES-128, AES-256) and owner-only-restricted files (SEC-01, SEC-02,
+  SEC-03), certificate-encryption detection via pikepdf's `PdfError` message on an
+  unsupported filter (SEC-07), and the full COR-03 inspection report (fonts, images, forms,
+  signatures, layers, bookmarks).
+- `engine/ops/base.py` + `engine/ops/journal.py`: the typed, registered Op model with a
+  JSON-schema export (`docs/ops.schema.json`, kept in sync by `tools/gen_ops_schema.py`) and
+  a snapshot-based undo/redo journal (COR-04, COR-05).
+- `engine/verify.py`: the pixel-diff harness (INF-07), reused later by FNT-12.
+- `cli/main.py`: `pdfworkerz inspect/render/repair/version`, built on the same Op classes the
+  future UI and command bar will use (COR-10).
+- `tests/corpus/build_corpus.py`: the golden PDF corpus (INF-06) — plain, multi-page and
+  1,000-page docs; all four encryption revisions; an owner-only-restricted file; a
+  repairable (tail-truncated) and an unrepairable (header-only) broken file; a hand-built
+  incremental-update PDF announcing `Adobe.PubSec` for certificate-encryption detection; a
+  form+signature-field file; and an optional-content-layer file.
+- 130 tests, all passing; 93% coverage of `tools/engine/cli`; ruff, mypy --strict and bandit
+  all clean; pip-audit found no known vulnerabilities in the pinned dependencies.
+- All 17 P1 features moved to `done` by `tools/update_tracker.py --write` (evidence gate),
+  bringing the total to 22/161.
+- Two things learned the hard way, worth remembering: (1) `Document.save()` needs
+  `encryption=PDF_ENCRYPT_KEEP` or PyMuPDF silently strips encryption on save; (2) PyMuPDF
+  refuses a full (non-incremental) save back to the path it opened from, so an in-place
+  overwrite has to go through a temp file and `Path.replace`.
+- Next: P2 (font identification & style-matched text editing) — the flagship feature set.
 
 ### 2026-09-26 — P0 bootstrap
 
