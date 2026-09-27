@@ -64,7 +64,7 @@
     {"id": "COR-08", "category": "COR", "name": "Never overwrite the original by default (versioned outputs)", "parity": ["Beyond"], "libs": ["Python"], "phase": "P1", "estTokens": "S", "status": "done"},
     {"id": "COR-09", "category": "COR", "name": "Large-document handling (1,000+ pages, lazy page loading)", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P1", "estTokens": "M", "status": "done"},
     {"id": "COR-10", "category": "COR", "name": "CLI entry point (pdfworkerz)", "parity": ["Beyond"], "libs": ["Typer"], "phase": "P1", "estTokens": "M", "status": "done"},
-    {"id": "COR-11", "category": "COR", "name": "Local-only HTTP API server (127.0.0.1)", "parity": ["Beyond"], "libs": ["FastAPI", "uvicorn"], "phase": "P3", "estTokens": "M", "status": "planned"},
+    {"id": "COR-11", "category": "COR", "name": "Local-only HTTP API server (127.0.0.1)", "parity": ["Beyond"], "libs": ["FastAPI", "uvicorn"], "phase": "P3", "estTokens": "M", "status": "done"},
     {"id": "COR-12", "category": "COR", "name": "Optional content (layers/OCG) read and toggle", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P5", "estTokens": "S", "status": "planned"},
     {"id": "SEC-01", "category": "SEC", "name": "Open encrypted PDFs with user password (RC4 40/128, AES-128, AES-256 R5/R6)", "parity": ["iLovePDF", "Nitro"], "libs": ["PyMuPDF", "pikepdf"], "phase": "P1", "estTokens": "M", "status": "done"},
     {"id": "SEC-02", "category": "SEC", "name": "Open owner-restricted PDFs and report permission flags", "parity": ["Nitro"], "libs": ["pikepdf"], "phase": "P1", "estTokens": "S", "status": "done"},

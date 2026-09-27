@@ -12,7 +12,7 @@ You tell it what to do in one of two ways:
 
 ## Try it on a real PDF
 
-Phases P0 and P1 are complete, and P2 (the flagship font-identification and style-matched editing engine) is mostly done. That means real editing already works from the command line:
+Phases P0, P1 and P2 (the flagship font-identification and style-matched editing engine) are complete. That means real editing already works from the command line:
 
 ```bash
 python -m venv .venv && .venv/Scripts/pip install -e .   # use .venv/bin/pip on macOS/Linux
@@ -29,7 +29,28 @@ pdfworkerz insert mydoc.pdf "new text" --position 72,700 --reference "existing t
 
 Every edit command prints which font-match tier it used (exact / approximate / fallback) and whether the result needs a look — `--require-tier exact` refuses to proceed on anything weaker. `--out` is optional; without it, the edited copy goes to `<name>.edited.pdf` next to the original, which is never touched (`--overwrite` writes back to it explicitly, when that's what you want).
 
-There's no web UI yet (that's P3) and no natural-language command bar (P4) — for now, testing means the CLI above, or scripting against `engine.document.Document` and `engine.ops.text` directly.
+## Local API server (P3, in progress)
+
+`pdfworkerz serve` starts a local-only HTTP server (COR-11) that the future web UI talks to — the same `Op` classes as the CLI, over JSON:
+
+```bash
+pdfworkerz serve --port 8000
+```
+
+It binds to `127.0.0.1` only and prints a random session token; every request must send it back in an `X-Session-Token` header (a request without it gets `401`). Roughly:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/documents \
+  -H "X-Session-Token: <token>" -H "Content-Type: application/json" \
+  -d '{"path": "mydoc.pdf"}'
+# -> {"document_id": "...", "page_count": 3, "is_encrypted": false, "is_repaired": false}
+
+curl -s -X POST http://127.0.0.1:8000/documents/<document_id>/ops \
+  -H "X-Session-Token: <token>" -H "Content-Type: application/json" \
+  -d '{"op": "replace_text", "match": "old text", "replacement": "new text"}'
+```
+
+`GET /documents/{id}/pages/{n}/render` returns a PNG; `/undo`, `/redo` and `GET /history` drive the same undo/redo journal COR-05 built. The web UI itself (pdf.js canvas, click-to-edit overlay, inspector, command bar) is the rest of P3 and hasn't been built yet — for now, testing beyond the CLI means this API directly, or scripting against `engine.document.Document` and `engine.ops.text`.
 
 ## Status
 

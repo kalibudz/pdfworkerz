@@ -240,3 +240,13 @@ def test_cli_uses_the_same_op_classes_as_the_engine(corpus: Corpus) -> None:
         direct_report = InspectOp().apply(document)
 
     assert cli_report == json.loads(direct_report.model_dump_json())
+
+
+@pytest.mark.feature("COR-11")
+def test_serve_command_is_registered() -> None:
+    """Doesn't actually start the server (that would block forever) -- just
+    confirms `pdfworkerz serve --help` resolves through the same command
+    the server module builds, per --help's own text mentioning the port."""
+    result = runner.invoke(app, ["serve", "--help"])
+    assert result.exit_code == 0
+    assert "--port" in result.output

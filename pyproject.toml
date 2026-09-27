@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["engine", "engine.ops", "cli"]
+packages = ["engine", "engine.ops", "cli", "server"]
 
 [project]
 name = "pdfworkerz"
@@ -19,6 +19,8 @@ dependencies = [
   "pydantic==2.13.5",
   "typer==0.27.2",
   "numpy==2.5.3",
+  "fastapi==0.141.1",
+  "uvicorn==0.54.0",
 ]
 
 [project.scripts]
@@ -35,6 +37,7 @@ dev = [
   "pyyaml>=6",
   "types-PyYAML",
   "reportlab==5.0.1",
+  "httpx2==2.13.1",
 ]
 
 [tool.pytest.ini_options]
@@ -44,7 +47,7 @@ addopts = "-ra --strict-markers"
 markers = ["feature(id, criterion=1): the feature this test proves"]
 
 [tool.coverage.run]
-source = ["tools", "engine", "cli"]
+source = ["tools", "engine", "cli", "server"]
 
 [tool.coverage.report]
 fail_under = 85

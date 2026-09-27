@@ -20,6 +20,7 @@ from engine.edit import EditResult
 from engine.errors import PdfWorkerzError
 from engine.ops.base import InspectOp, RenderPageOp
 from engine.ops.text import DeleteTextOp, InsertTextOp, ReplaceTextOp, RestyleTextOp
+from server.app import create_app, run_server
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="PDFWorkerz: free, offline, token-free PDF editing.")
 
@@ -254,6 +255,22 @@ def repair(
         raise _fail(exc) from exc
     verb = "repaired and saved" if was_repaired else "no repair was needed; saved a clean copy"
     typer.echo(f"{verb} -> {out}")
+
+
+@app.command()
+def serve(
+    port: Annotated[int, typer.Option(help="TCP port to listen on")] = 8000,
+) -> None:
+    """Start the local HTTP API server (COR-11) that the web UI talks to.
+
+    Binds to 127.0.0.1 only (SPEC.md section 4.2 rule 5) and prints a
+    random session token that every request must send back in the
+    X-Session-Token header.
+    """
+    server_app = create_app()
+    typer.echo(f"PDFWorkerz server starting at http://127.0.0.1:{port}")
+    typer.echo(f"Session token: {server_app.state.session_token}")
+    run_server(server_app, port=port)
 
 
 @app.command()

@@ -9,7 +9,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P3 | Web UI with click-to-edit | 🔶 In progress: 0/15 features proven by tests | |
+| P3 | Web UI with click-to-edit | 🔶 In progress: 1/15 features proven by tests | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,57 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-27 (cont. 9) — COR-11, starting P3
+
+- `server/app.py`: a FastAPI server exposing the same `Op` layer the CLI
+  uses (SPEC.md section 4.2 rule 1), the foundation everything else in P3
+  builds on. Every route but `/health` requires an `X-Session-Token` header
+  matching a random token generated per server instance (SPEC.md section
+  4.2 rule 5, "local only"); `server.run_server` binds uvicorn to
+  `127.0.0.1` only, never configurable wider. Endpoints: open/inspect/close
+  a document, apply any registered Op (`POST .../ops`, generic -- not just
+  text edits), render a page to PNG, and undo/redo/history wired straight
+  onto the existing `engine.ops.journal.UndoRedoJournal` (COR-05), which
+  turned out to need no changes at all to serve UI-04 later. `pdfworkerz
+  serve` (cli/main.py) starts it and prints the token.
+- Added `fastapi==0.141.1` and `uvicorn==0.54.0` as runtime dependencies,
+  and `httpx2==2.13.1` (not `httpx`, which this FastAPI/Starlette version's
+  own TestClient deprecates in favor of it -- confirmed by installing both,
+  seeing the deprecation warning, then uninstalling `httpx` and confirming
+  `TestClient` still works with only `httpx2` present) as a dev dependency
+  for `fastapi.testclient.TestClient`.
+- **One real bug found and fixed, worth remembering for any future FastAPI
+  route in this codebase**: this project's modules all start with `from
+  __future__ import annotations` (postponed evaluation), and FastAPI
+  resolves an `Annotated[X, Depends(f)]` parameter by `eval`-ing the
+  stringified annotation against the route function's `__globals__`. A
+  dependency function defined as a *closure inside* an app-building
+  function (`f` only existing as a local variable, not a module global)
+  isn't resolvable that way -- it fails silently and FastAPI falls back to
+  treating the parameter as a plain (missing) query parameter instead of a
+  dependency, breaking every route that used it, with no error at
+  startup. Reproduced in isolation before writing the real fix: route
+  handlers and their dependencies (`verify_token`, `_get_journal`) now live
+  as module-level functions on a shared `APIRouter`, reading
+  `request.app.state` instead of closing over a particular `app` instance,
+  which `create_app()` just includes -- also a cleaner design, not only a
+  workaround.
+- Verified end to end twice: once in-process via `TestClient` (open a
+  document, run a real `replace_text` Op through the API and see its
+  result, render a page and check the PNG magic bytes, undo/redo through
+  the API, save with and without `overwrite`), and once as a real spawned
+  `pdfworkerz serve` process hit with `curl` over an actual socket on
+  `127.0.0.1`, confirmed working, then stopped.
+- 22 new tests (325 total, 93.1% coverage: 20 for `server/app.py` at 97%
+  itself, 1 for the `pdfworkerz serve` CLI command, 1 confirming
+  `create_app()` generates a different random token each time); ruff, mypy
+  --strict, bandit and pip-audit all clean on `server/` alongside
+  everything else. COR-11 moved to "done" (43/161 total, 1/15 in P3).
+- Still open in P3: UI-01..06/08/09 (the actual pdf.js + TypeScript
+  frontend -- a genuine tech-stack shift, nothing in `web/` exists yet) and
+  EDT-05/07/08/09/10/11 (block move/resize, format painter, images,
+  shapes, hyperlinks, spell-check), independent of the UI scaffolding.
 
 ### 2026-09-27 (cont. 8) — FNT-11, closing out P2
 
