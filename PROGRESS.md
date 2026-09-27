@@ -8,7 +8,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 |---|---|---|---|
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P2 | Font identification & style-matched text editing | 🔶 In progress: 17/20 features proven by tests (FNT-01..10, FNT-12, FNT-13, FNT-15, EDT-01/02/03/04/06) | |
+| P2 | Font identification & style-matched text editing | 🔶 In progress: 18/20 features proven by tests (FNT-01..10, FNT-12, FNT-13, FNT-15, EDT-01/02/03/04/06) | |
 | P3 | Web UI with click-to-edit | Planned | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
@@ -176,6 +176,32 @@ A phase is complete when all of its features are **done** through the evidence g
   pip-audit all clean. FNT-13 moved to "done" (39/161 total, 17/20 in P2).
 - Still open in P2: FNT-09 (kerning/ligature), FNT-11 (reflow), FNT-14
   (CJK/RTL/vertical -- needs a CJK font asset first).
+
+### 2026-09-27 (cont. 6) — FNT-09
+
+- Checked the premise before building anything: does PyMuPDF's text
+  insertion apply kerning at all? No -- confirmed empirically that a
+  rendered "AV" measures exactly the naive sum of "A" and "V"'s individual
+  advance widths, in both the single-call and per-character drawing paths.
+  So this was never really "kerning lost by drawing per character"; it's
+  "kerning PyMuPDF never applied in the first place."
+- `engine/fonts/kerning.py`: reads a font's legacy `kern` table (format 0)
+  via fontTools, reversed through its cmap into (char, char) -> adjustment
+  as a fraction of the em square. Wired into `engine.edit.draw_styled_text`'s
+  per-character path (the one already used for non-default spacing, `fit`,
+  or rotation) -- applied there rather than added as a new reason to leave
+  the fast, chainable single-call path, matching the trade-off FNT-10
+  already established. GPOS pair positioning (more common in newer fonts)
+  and GSUB ligature substitution (would need glyph count to stop matching
+  character count, which the whole per-character path assumes) are
+  documented gaps, not silent ones.
+- Verified the exact adjustment value end to end: drawing "AV" at 24pt
+  shifted the second glyph by precisely `(-131/2048) * 24` points, matching
+  the font's own kern table entry read directly with fontTools.
+- 8 new tests (262 total, 94.3% coverage); ruff, mypy --strict, bandit and
+  pip-audit all clean. FNT-09 moved to "done" (40/161 total, 18/20 in P2).
+- Still open in P2: FNT-11 (reflow), FNT-14 (CJK/RTL/vertical -- needs a
+  CJK font asset first).
 
 ### 2026-09-27 — P1 engine core
 

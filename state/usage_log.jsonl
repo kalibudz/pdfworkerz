@@ -5,3 +5,4 @@
 {"date": "2026-09-27", "taskId": "P2-part3", "estimate": "FNT-15 (1 feature)", "estTokens": 150000, "actualTokens": null, "outcome": "done", "note": "Type3 detection and honest fallback routing; session stopping point for P2 reached"}
 {"date": "2026-09-27", "taskId": "CLI-edit-commands", "estimate": "M", "estTokens": 150000, "actualTokens": null, "outcome": "done", "note": "Wired replace/delete/restyle/insert to the CLI in response to a user question about real-document testing"}
 {"date": "2026-09-27", "taskId": "P2-part4-FNT13", "estimate": "M", "estTokens": 200000, "actualTokens": null, "outcome": "done", "note": "ToUnicode recovery plus a real pre-existing font-name-matching bug found and fixed for full-embedded-font editing"}
+{"date": "2026-09-27", "taskId": "P2-part5-FNT09", "estimate": "S", "estTokens": 150000, "actualTokens": null, "outcome": "done", "note": "Kerning-pair support via legacy kern table, wired into the existing per-character drawing path"}

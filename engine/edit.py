@@ -39,6 +39,7 @@ from numpy.typing import NDArray
 from engine.document import Document
 from engine.fonts.classify import classify_font, split_subset_tag
 from engine.fonts.fit import fit_to_width
+from engine.fonts.kerning import build_kern_pairs
 from engine.fonts.match import FontCandidate, normalize_font_name
 from engine.fonts.resolve import FontResolution, resolve_font
 from engine.fonts.style import SpanTrace, TextState, advance_for_char, extract_page_spans
@@ -146,7 +147,10 @@ def draw_styled_text(
     follows (confirmed: per-character calls fragment texttrace's spans one
     character each, which then only a single-character search can find).
     Non-default spacing or rotation still needs per-character control, and
-    accepts that fragmentation as a known trade-off.
+    accepts that fragmentation as a known trade-off; the one upside is that
+    the font's own kerning pairs (FNT-09) are applied there too, since
+    PyMuPDF's own text insertion never applies any kerning at all, in
+    either drawing path (also confirmed empirically).
     """
     if not text:
         return origin
@@ -161,13 +165,22 @@ def draw_styled_text(
         return (origin[0] + font.text_length(text, fontsize=font_size), origin[1])
 
     widths = font.char_lengths(text, fontsize=font_size)
+    # FNT-09: PyMuPDF applies no kerning at all in either drawing path (confirmed
+    # empirically), so read the font's own kern table for one, here where per-
+    # character positioning is already happening for another reason anyway.
+    kern_pairs = build_kern_pairs(resolution.font_bytes) if resolution.font_bytes else {}
 
     angle = math.radians(rotation_degrees)
     cos_a, sin_a = math.cos(angle), math.sin(angle)
     rise_dx, rise_dy = -text_state.rise * sin_a, -text_state.rise * cos_a
 
     x, y = origin
+    previous_char: str | None = None
     for char, base_width in zip(text, widths, strict=True):
+        if previous_char is not None:
+            kern = kern_pairs.get((previous_char, char), 0.0) * font_size
+            x += kern * cos_a
+            y += kern * sin_a
         page.insert_text(
             (x + rise_dx, y + rise_dy),
             char,
@@ -179,6 +192,7 @@ def draw_styled_text(
         advance = advance_for_char(base_width, char, text_state)
         x += advance * cos_a
         y += advance * sin_a
+        previous_char = char
     return (x, y)
 
 
