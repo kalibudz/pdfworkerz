@@ -44,6 +44,280 @@
       },
       "title": "RenderPageOp",
       "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "EDT-02: find text (literal or regex) and replace it, matching the original style.",
+      "properties": {
+        "match": {
+          "title": "Match",
+          "type": "string"
+        },
+        "mode": {
+          "default": "literal",
+          "enum": [
+            "literal",
+            "regex"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "case_sensitive": {
+          "default": true,
+          "title": "Case Sensitive",
+          "type": "boolean"
+        },
+        "page_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Index"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "op": {
+          "const": "replace_text",
+          "default": "replace_text",
+          "title": "Op",
+          "type": "string"
+        },
+        "replacement": {
+          "default": "",
+          "title": "Replacement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "match"
+      ],
+      "title": "ReplaceTextOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "EDT-04: find and remove text, closing the gap in its style-matched span.",
+      "properties": {
+        "match": {
+          "title": "Match",
+          "type": "string"
+        },
+        "mode": {
+          "default": "literal",
+          "enum": [
+            "literal",
+            "regex"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "case_sensitive": {
+          "default": true,
+          "title": "Case Sensitive",
+          "type": "boolean"
+        },
+        "page_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Index"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "op": {
+          "const": "delete_text",
+          "default": "delete_text",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "match"
+      ],
+      "title": "DeleteTextOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "EDT-06: change the size and/or color of text that already matches, leaving its\nwording unchanged.",
+      "properties": {
+        "op": {
+          "const": "restyle_text",
+          "default": "restyle_text",
+          "title": "Op",
+          "type": "string"
+        },
+        "match": {
+          "title": "Match",
+          "type": "string"
+        },
+        "mode": {
+          "default": "literal",
+          "enum": [
+            "literal",
+            "regex"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "case_sensitive": {
+          "default": true,
+          "title": "Case Sensitive",
+          "type": "boolean"
+        },
+        "page_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Index"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "match"
+      ],
+      "title": "RestyleTextOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "EDT-03: add new text near an existing span, matching its style (or an\nexplicit override) -- nothing existing is touched.",
+      "properties": {
+        "op": {
+          "const": "insert_text",
+          "default": "insert_text",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "position": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Position",
+          "type": "array"
+        },
+        "reference_match": {
+          "title": "Reference Match",
+          "type": "string"
+        },
+        "reference_case_sensitive": {
+          "default": true,
+          "title": "Reference Case Sensitive",
+          "type": "boolean"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page_index",
+        "text",
+        "position",
+        "reference_match"
+      ],
+      "title": "InsertTextOp",
+      "type": "object"
     }
   ]
 }

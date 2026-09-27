@@ -113,6 +113,21 @@ def test_full_embedded_font_reports_space_as_covered_not_missing(corpus: Corpus)
 
 
 @pytest.mark.feature("FNT-05")
+def test_a_truetype_collection_does_not_crash_coverage_checking() -> None:
+    """Regression: a .ttc file's raw bytes are a multi-font collection, not a single
+    sfnt font; TTFont() without fontNumber raised TTLibFileIsCollectionError."""
+    import struct
+
+    # A minimal, syntactically valid 'ttcf' header naming zero fonts is enough to
+    # reach the code path that used to crash before it returns "can't tell."
+    ttc_header = struct.pack(">4sHHI", b"ttcf", 1, 0, 0)
+    result = check_coverage(
+        font_type="TrueType", embedded=True, font_bytes=ttc_header, already_rendered_text="", characters="A"
+    )
+    assert result.missing == frozenset("A")
+
+
+@pytest.mark.feature("FNT-05")
 def test_empty_characters_are_trivially_fully_covered() -> None:
     result = check_coverage(font_type="Type1", embedded=False, font_bytes=b"", already_rendered_text="", characters="")
     assert result.fully_covered

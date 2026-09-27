@@ -1,13 +1,14 @@
 {
-  "phase": "P1",
-  "taskId": "P1 complete (INF-06, INF-07, COR-01..COR-10, SEC-01, SEC-02, SEC-03, SEC-07, OPT-06)",
-  "step": "All 17 P1 features done via the evidence gate (130 tests passing); pushed to main",
+  "phase": "P2",
+  "taskId": "FNT-01..FNT-08, EDT-01/02/03/04/06 done; FNT-09..FNT-15 remaining",
+  "step": "Font-intelligence pipeline and text-editing Ops built and tested (216 tests); pushing this checkpoint",
   "branch": "main",
   "lastGreenCommit": null,
-  "nextAction": "Start P2 with FNT-01 (per-span style extraction), after running tools/session_budget.py. P2 is the flagship font-identification and style-matched-editing phase (20 features, ~4.55M estimated tokens) -- see SPEC.md section 5 for the tier strategy (stream surgery -> glyph borrow -> metric match -> fallback).",
+  "nextAction": "Continue P2 with FNT-12 (wire engine.verify's pixel-diff into replace_span_text/insert_text_near so every edit self-verifies, per SPEC.md 5.6) -- low effort, high value since engine.verify already exists. Then FNT-10 (fit-to-width: when a replacement's natural width differs from the original span's, adjust Tc/Tz within tolerance before falling back to reflow). FNT-09 (kerning/ligature), FNT-11 (reflow), FNT-13 (ToUnicode recovery), FNT-14 (CJK/RTL/vertical) and FNT-15 (Type3 editing) are larger and still fully open -- pick them up after 10/12, run tools/session_budget.py first.",
   "openQuestions": [
     "Re-verify iLovePDF / Nitro parity tags against the vendors' current feature pages before the first release",
-    "P1 was self-reviewed (builder and reviewer were the same session); an independent reviewer pass is still owed before calling the phase fully signed off"
+    "P1 and P2-so-far were self-reviewed (builder and reviewer were the same session); an independent reviewer pass is still owed before calling either phase fully signed off",
+    "assets/fonts/ currently ships only Bitstream Vera (not literally OFL); README.md there tracks widening it to a proper OFL family set with CJK/Cyrillic/Greek coverage"
   ],
   "updated": "2026-09-27"
 }

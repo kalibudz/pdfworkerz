@@ -55,9 +55,13 @@ def _cmap_coverage(font_bytes: bytes, characters: set[str]) -> set[str] | None:
     at a glyph the font actually still has; fontTools-built subsets (see
     engine.fonts.merge) never leave a cmap entry pointing at a glyph they drop,
     so presence in ``glyf``/``CFF`` is a reliable enough signal on its own.
+
+    Construction can fail outright (a TrueType Collection's raw bytes, a
+    truly corrupt file); that is treated the same as "no cmap" rather than
+    raised, since callers use None to mean "can't tell, fall back."
     """
-    tt = TTFont(io.BytesIO(font_bytes), lazy=True)
     try:
+        tt = TTFont(io.BytesIO(font_bytes), lazy=True, fontNumber=0)
         cmap = tt.getBestCmap()
     except Exception:
         return None

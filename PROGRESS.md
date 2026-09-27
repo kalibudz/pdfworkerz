@@ -8,7 +8,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 |---|---|---|---|
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P2 | Font identification & style-matched text editing | ⏳ Next | |
+| P2 | Font identification & style-matched text editing | 🔶 In progress: 13/20 features proven by tests (FNT-01..08, EDT-01/02/03/04/06) | |
 | P3 | Web UI with click-to-edit | Planned | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
@@ -25,6 +25,55 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-27 (cont.) — P2 style-matched text editing
+
+- `engine/fonts/style.py`, `classify.py`, `coverage.py`, `match.py`, `merge.py`,
+  `resolve.py`: the full font-intelligence pipeline (FNT-01..08) -- per-span style
+  and per-glyph text-state extraction, font classification and name-based style
+  fingerprinting, glyph-coverage checking, cross-platform font lookup with a
+  bundled fallback family, metric-similarity ranking with a confidence score, and
+  glyph-borrow merging into a fresh subset -- feeding a single `resolve_font()`
+  decision (exact / approximate / fallback) used by every edit.
+- `engine/edit.py` + `engine/ops/text.py`: `ReplaceTextOp` (EDT-02), `DeleteTextOp`
+  (EDT-04), `RestyleTextOp` (EDT-06), `InsertTextOp` (EDT-03), and the shared
+  `replace_span_text`/`insert_text_near` primitives underneath (EDT-01). Redacts
+  the target region, then draws the replacement through the resolved font at
+  positions computed from Tc/Tw/Tz/Ts/Tr, with rotation support. `require_tier`
+  lets an Op refuse a weak font match outright, standing in for the UI approval
+  step SPEC.md describes until one exists.
+- **A deliberate, documented departure from SPEC.md's literal Tier 1** ("rewrite
+  the Tj/TJ operands in place"): PyMuPDF cannot draw through a font program with
+  no `cmap` table, which is exactly what its own subsetting produces (confirmed:
+  inserting through raw extracted subset bytes drew glyphs that could not be
+  read back as the text they were meant to be). So "exact" match always goes
+  through a freshly merged subset cut from the *same*, full font instead --
+  identical typeface, different embedding mechanism.
+- Five more real bugs found by testing against actual PyMuPDF/pikepdf/fontTools
+  output rather than assumption, each fixed before being marked done:
+  1. `extract_metrics` required a font's `post` table unconditionally; PyMuPDF's
+     subsetting strips it (like `cmap`), so Tier 3 could never actually fire.
+  2. `resolve_font`'s Tier 3 branch measured metrics from a variable that was
+     always None by the time that line ran (the other branch had already
+     returned) -- Tier 3 was unreachable code.
+  3. `check_coverage` misclassified a zero-contour glyph (space, by design) as
+     "stripped by subsetting."
+  4. `_cmap_coverage` crashed outright on a TrueType Collection's raw bytes
+     (`TTLibFileIsCollectionError`), reached whenever a `.ttc` system font was a
+     ranking candidate.
+  5. Per-character `insert_text` calls fragmented texttrace's spans into one
+     span per character, silently breaking any edit chained after another (a
+     second replace, or an insert referencing already-edited text, could no
+     longer find its target). Fixed by drawing default-spacing, unrotated text
+     in a single call, falling back to per-character drawing only when Tc/Tw/Tz
+     or rotation actually require it.
+- 216 tests total (94.6% coverage); ruff, mypy --strict and bandit clean;
+  pip-audit clean.
+- FNT-01..FNT-08 and EDT-01/02/03/04/06 moved to "done" (35/161 total). Still
+  open in P2: FNT-09 (kerning/ligature), FNT-10 (fit-to-width for a
+  length-mismatched replacement), FNT-11 (reflow), FNT-12 (wiring the existing
+  pixel-diff harness into the edit pipeline itself), FNT-13 (missing-ToUnicode
+  recovery), FNT-14 (CJK/RTL/vertical), FNT-15 (Type3 editing).
 
 ### 2026-09-27 — P1 engine core
 
