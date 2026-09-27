@@ -9,7 +9,7 @@ import pikepdf
 import pytest
 
 from engine.document import Document
-from engine.edit import insert_text_near, replace_span_text
+from engine.edit import _find_font_entry, insert_text_near, replace_span_text
 from engine.fonts.match import build_font_index
 from engine.fonts.style import extract_page_spans
 from engine.verify import pixel_diff, render_to_array
@@ -55,6 +55,31 @@ def test_replace_span_text_on_a_full_non_subset_embedded_font(corpus: Corpus, wo
     assert result.tier == "exact"
     assert doc.raw[0].get_text().strip() == "Fixed the bug!"
     doc.close()
+
+
+@pytest.mark.feature("EDT-01")
+def test_find_font_entry_containment_fallback_for_a_style_suffix_mismatch(corpus: Corpus, work_dir: Path) -> None:
+    """Regression: a Windows system CJK font ("Malgun Gothic") reproduced a
+    third variant of the texttrace-vs-get_fonts name mismatch -- texttrace
+    reported "MalgunGothic" while get_fonts reported "Malgun Gothic Regular"
+    from the same /BaseFont, a style-suffix discrepancy normalization alone
+    doesn't resolve. _find_font_entry's fallback pass (containment, not exact
+    equality) is exercised directly here with the same pattern, since the
+    real font that produced it isn't redistributable to keep as a fixture."""
+    source = work_dir / "doc.pdf"
+    shutil.copy(corpus.simple, source)
+    with pikepdf.open(source) as pdf:
+        font = pdf.pages[0].Resources.Font["/helv"]
+        font["/BaseFont"] = pikepdf.Name("/SomeFontFamily Regular")
+        pdf.save(work_dir / "renamed.pdf")
+
+    import pymupdf
+
+    with pymupdf.open(work_dir / "renamed.pdf") as doc:
+        page = doc[0]
+        found = _find_font_entry(page, "SomeFontFamily")  # the condensed name, as texttrace might report it
+    assert found is not None
+    assert found[1] == "helv"
 
 
 @pytest.mark.feature("EDT-01")

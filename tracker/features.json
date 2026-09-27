@@ -90,7 +90,7 @@
     {"id": "FNT-11", "category": "FNT", "name": "Line and block reflow preserving justification and baseline", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P2", "estTokens": "L", "status": "planned"},
     {"id": "FNT-12", "category": "FNT", "name": "Pixel-verified edit (before/after region diff with mismatch flag)", "parity": ["Beyond"], "libs": ["PyMuPDF", "numpy"], "phase": "P2", "estTokens": "M", "status": "done"},
     {"id": "FNT-13", "category": "FNT", "name": "Missing-ToUnicode recovery (glyph names, shape matching)", "parity": ["Beyond"], "libs": ["fontTools", "PyMuPDF"], "phase": "P2", "estTokens": "L", "status": "done"},
-    {"id": "FNT-14", "category": "FNT", "name": "CJK, right-to-left and vertical text support", "parity": ["Nitro"], "libs": ["PyMuPDF", "fontTools"], "phase": "P2", "estTokens": "L", "status": "planned"},
+    {"id": "FNT-14", "category": "FNT", "name": "CJK, right-to-left and vertical text support", "parity": ["Nitro"], "libs": ["PyMuPDF", "fontTools"], "phase": "P2", "estTokens": "L", "status": "done"},
     {"id": "FNT-15", "category": "FNT", "name": "Type3 font handling (detect, reuse glyph procedures or fall back)", "parity": ["Beyond"], "libs": ["pikepdf"], "phase": "P2", "estTokens": "L", "status": "done"},
     {"id": "FNT-16", "category": "FNT", "name": "Scanned-text style estimation (font class, size, color)", "parity": ["Beyond"], "libs": ["Tesseract", "OpenCV"], "phase": "P7", "estTokens": "L", "status": "planned"},
     {"id": "EDT-01", "category": "EDT", "name": "Inline text edit that matches the original style", "parity": ["iLovePDF", "Nitro"], "libs": ["PyMuPDF", "fontTools"], "phase": "P2", "estTokens": "L", "status": "done"},

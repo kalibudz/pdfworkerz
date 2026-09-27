@@ -48,6 +48,7 @@ from engine.verify import DiffResult, pixel_diff, render_to_array
 VERIFY_DPI = 150
 
 _EDIT_FONT_RESOURCE = "PDFWorkerzEdit"
+_MIN_CONTAINMENT_MATCH_LENGTH = 6  # see _find_font_entry's fallback pass
 # Verified at runtime (pymupdf 1.28.2); missing from pymupdf's stub like PDF_ENCRYPT_KEEP
 # (see engine/document.py's note on the same class of gap).
 _REDACT_KWARGS: dict[str, int] = {
@@ -211,16 +212,34 @@ def _find_font_entry(page: pymupdf.Page, basefont: str) -> tuple[int, str] | Non
     with no real BaseFont at all (Type3 commonly has none, FNT-15) gets a
     synthesized "<FontType> (<ref>)" name from texttrace instead; matched
     here by font type against get_fonts's empty entry.
+
+    A third confirmed variant, found testing a system CJK font: texttrace
+    can drop a style suffix get_fonts keeps ("MalgunGothic" vs "Malgun
+    Gothic Regular", the same /BaseFont). Rather than special-case every
+    such suffix, an exact normalized match is tried first on every entry,
+    and only if none matches at all does a second pass accept a
+    containment match (one normalized name a prefix/suffix of the other,
+    with a minimum length so short names can't false-match each other).
     """
     _, plain = split_subset_tag(basefont)
     target = normalize_font_name(plain)
-    for entry in page.get_fonts(full=True):
+    entries = list(page.get_fonts(full=True))
+
+    for entry in entries:
         xref, _ext, font_type, entry_basefont, resource_name, *_rest = entry
         _, entry_plain = split_subset_tag(entry_basefont)
         if normalize_font_name(entry_plain) == target:
             return xref, resource_name
         if not entry_basefont and plain.startswith(f"{font_type} ("):
             return xref, resource_name
+
+    if len(target) >= _MIN_CONTAINMENT_MATCH_LENGTH:
+        for entry in entries:
+            xref, _ext, _font_type, entry_basefont, resource_name, *_rest = entry
+            _, entry_plain = split_subset_tag(entry_basefont)
+            candidate = normalize_font_name(entry_plain)
+            if candidate and (candidate.startswith(target) or target.startswith(candidate)):
+                return xref, resource_name
     return None
 
 

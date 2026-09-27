@@ -102,3 +102,13 @@ def test_layered_fixture_has_an_optional_content_group(tmp_path: Path) -> None:
     corpus = build_corpus(tmp_path)
     with pymupdf.open(corpus.layered) as doc:
         assert doc.get_ocgs()
+
+
+@pytest.mark.feature("INF-06")
+def test_cjk_fixture_has_chinese_text_in_a_composite_font(tmp_path: Path) -> None:
+    corpus = build_corpus(tmp_path)
+    with pymupdf.open(corpus.cjk) as doc:
+        assert doc[0].get_text().strip() == "你好世界"
+        _xref, _ext, font_type, basefont, *_rest = doc[0].get_fonts(full=True)[0]
+        assert font_type == "Type0"
+        assert "Noto Sans CJK" in basefont

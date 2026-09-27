@@ -22,6 +22,14 @@ def bundled_index() -> list:
     return build_font_index(include_system=False)
 
 
+@pytest.fixture(scope="module")
+def vera_index(bundled_index: list) -> list:
+    """Just the Bitstream Vera family, for tests written against exactly those
+    four faces -- the bundled set also includes assets/fonts/NotoSansSC-Subset.otf
+    (FNT-14) and is expected to keep growing, see assets/fonts/README.md."""
+    return [c for c in bundled_index if c.family_name == "Bitstream Vera Sans"]
+
+
 @pytest.mark.feature("FNT-06")
 def test_bundled_fonts_directory_is_shipped_and_readable() -> None:
     assert BUNDLED_FONTS_DIR.is_dir()
@@ -29,13 +37,17 @@ def test_bundled_fonts_directory_is_shipped_and_readable() -> None:
 
 
 @pytest.mark.feature("FNT-06")
-def test_build_font_index_reads_real_names_from_the_bundled_family(bundled_index: list) -> None:
-    assert len(bundled_index) == 4
-    families = {c.family_name for c in bundled_index}
-    assert families == {"Bitstream Vera Sans"}
-    subfamilies = {c.subfamily_name for c in bundled_index}
+def test_build_font_index_reads_real_names_from_the_bundled_family(vera_index: list) -> None:
+    assert len(vera_index) == 4
+    subfamilies = {c.subfamily_name for c in vera_index}
     assert subfamilies == {"Roman", "Bold", "Oblique", "Bold Oblique"}
-    assert all(c.source == "bundled" for c in bundled_index)
+    assert all(c.source == "bundled" for c in vera_index)
+
+
+@pytest.mark.feature("FNT-06")
+def test_build_font_index_also_finds_the_bundled_cjk_font(bundled_index: list) -> None:
+    names = {c.family_name for c in bundled_index}
+    assert "Noto Sans CJK SC" in names
 
 
 @pytest.mark.feature("FNT-06")
@@ -109,10 +121,10 @@ def test_a_closer_style_scores_a_smaller_distance(bundled_index: list) -> None:
 
 
 @pytest.mark.feature("FNT-07")
-def test_rank_by_metrics_puts_the_exact_font_first(bundled_index: list) -> None:
-    target = extract_metrics(next(c for c in bundled_index if c.subfamily_name == "Roman").path)
+def test_rank_by_metrics_puts_the_exact_font_first(vera_index: list) -> None:
+    target = extract_metrics(next(c for c in vera_index if c.subfamily_name == "Roman").path)
     assert target is not None
-    ranked = rank_by_metrics(target, bundled_index)
+    ranked = rank_by_metrics(target, vera_index)
     assert len(ranked) == 4
     assert ranked[0].candidate.subfamily_name == "Roman"
     assert ranked[0].confidence == pytest.approx(1.0)
@@ -128,12 +140,12 @@ def test_rank_by_metrics_confidence_is_bounded(bundled_index: list) -> None:
 
 
 @pytest.mark.feature("FNT-07")
-def test_rank_by_metrics_drops_candidates_missing_required_glyphs(bundled_index: list) -> None:
-    target = extract_metrics(bundled_index[0].path)
+def test_rank_by_metrics_drops_candidates_missing_required_glyphs(vera_index: list) -> None:
+    target = extract_metrics(vera_index[0].path)
     assert target is not None
-    ranked = rank_by_metrics(target, bundled_index, covering=frozenset("Hello"))
+    ranked = rank_by_metrics(target, vera_index, covering=frozenset("Hello"))
     assert len(ranked) == 4
-    ranked_cjk = rank_by_metrics(target, bundled_index, covering=frozenset("日本語"))
+    ranked_cjk = rank_by_metrics(target, vera_index, covering=frozenset("日本語"))
     assert ranked_cjk == []
 
 

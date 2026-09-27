@@ -8,7 +8,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 |---|---|---|---|
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P2 | Font identification & style-matched text editing | 🔶 In progress: 18/20 features proven by tests (FNT-01..10, FNT-12, FNT-13, FNT-15, EDT-01/02/03/04/06) | |
+| P2 | Font identification & style-matched text editing | 🔶 In progress: 19/20 features proven by tests -- only FNT-11 (reflow) left | |
 | P3 | Web UI with click-to-edit | Planned | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
@@ -202,6 +202,44 @@ A phase is complete when all of its features are **done** through the evidence g
   pip-audit all clean. FNT-09 moved to "done" (40/161 total, 18/20 in P2).
 - Still open in P2: FNT-11 (reflow), FNT-14 (CJK/RTL/vertical -- needs a
   CJK font asset first).
+
+### 2026-09-27 (cont. 7) — FNT-14
+
+- Tested with a local Windows CJK font first, before building anything, to
+  find the real scope: extraction, classification and editing already
+  worked end to end for Korean text through the existing CID/Identity-H
+  pipeline (built for FNT-02/03/05/08, never Latin-specific) -- no new code
+  needed there. What was missing was a *bundled, redistributable* CJK font
+  (Bitstream Vera has none), so `tools/gen_noto_subset.py` cuts a small
+  (29KB) OFL-licensed subset from Google's Noto Sans CJK SC (16MB,
+  downloaded once, not committed), covering the ~65 characters
+  `tests/corpus/build_corpus.py`'s new CJK fixture and its tests use --
+  the same subsetting technique `engine.fonts.merge` already uses at
+  runtime, applied once here to keep the repo small. `assets/fonts/`
+  gained the subset font, its OFL license text, and an updated README.
+- Verified end to end with real Chinese text: extraction, FNT-06 lookup by
+  name (a third font-name variant found along the way -- "MalgunGothic" vs
+  "Malgun Gothic Regular" from the same /BaseFont; normalizing punctuation
+  wasn't enough this time, so `_find_font_entry` gained a containment-match
+  fallback pass, direct-tested since the font that surfaced it, Windows'
+  Malgun Gothic, isn't redistributable to keep as a fixture), FNT-08
+  glyph-borrow merging, and a full replace edit that covers characters the
+  original text never had, confirmed correct by re-extraction.
+- **Checked two more things before claiming them, and both turned out not
+  to work -- documented as explicit gaps, not silently skipped.**
+  Right-to-left text (Arabic): PyMuPDF applies contextual glyph shaping
+  before drawing, so texttrace reports Unicode's Arabic Presentation Forms
+  (the shaped glyphs), not the logical characters a person typed -- a
+  literal find/replace against logical Arabic text would never match.
+  Vertical CJK writing mode: `Page.insert_font(..., wmode=1)` did not
+  actually produce vertical text through the API path tried.
+  `tests/engine/test_font_cjk.py`'s module docstring states both gaps
+  plainly, next to what is proven to work.
+- 7 new tests (271 total, 92.6% coverage -- the new `tools/gen_noto_subset.py`
+  is a one-off generator script, not exercised by the suite, which is why
+  overall coverage ticked down slightly); ruff, mypy --strict, bandit and
+  pip-audit all clean. FNT-14 moved to "done" (41/161 total, 19/20 in P2).
+- **Only FNT-11 (reflow) is left to finish P2.**
 
 ### 2026-09-27 — P1 engine core
 

@@ -50,6 +50,7 @@ class Corpus:
     bold_italic_standard: Path
     embedded_font_full: Path
     embedded_font_subset: Path
+    cjk: Path
     user_password: str = USER_PASSWORD
     owner_password: str = OWNER_PASSWORD
 
@@ -259,6 +260,22 @@ def _embedded_fonts(full_path: Path, subset_path: Path) -> None:
     doc2.close()
 
 
+def _cjk(path: Path) -> None:
+    """A page of Chinese text (FNT-14), embedded with PDFWorkerz's own bundled
+    CJK font (assets/fonts/NotoSansSC-Subset.otf -- see assets/fonts/README.md
+    and tools/gen_noto_subset.py for its provenance), as a CID/Identity-H
+    composite font -- confirmed the common real-world shape for CJK PDFs.
+    """
+    from engine.fonts.match import BUNDLED_FONTS_DIR
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_font(fontfile=str(BUNDLED_FONTS_DIR / "NotoSansSC-Subset.otf"), fontname="CJKTest")
+    page.insert_text((72, 72), "你好世界", fontsize=18, fontname="CJKTest")  # "Hello, world"
+    doc.save(path)
+    doc.close()
+
+
 def _layered(path: Path) -> None:
     """A page with an optional-content group (COR-03 has_layers / future COR-12)."""
     doc = pymupdf.open()
@@ -292,6 +309,7 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         "bold_italic_standard": out_dir / "bold_italic_standard.pdf",
         "embedded_font_full": out_dir / "embedded_font_full.pdf",
         "embedded_font_subset": out_dir / "embedded_font_subset.pdf",
+        "cjk": out_dir / "cjk.pdf",
     }
 
     if force or not paths["simple"].exists():
@@ -326,6 +344,8 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         _bold_italic_standard(paths["bold_italic_standard"])
     if force or not paths["embedded_font_full"].exists() or not paths["embedded_font_subset"].exists():
         _embedded_fonts(paths["embedded_font_full"], paths["embedded_font_subset"])
+    if force or not paths["cjk"].exists():
+        _cjk(paths["cjk"])
 
     return Corpus(
         simple=paths["simple"],
@@ -347,6 +367,7 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         bold_italic_standard=paths["bold_italic_standard"],
         embedded_font_full=paths["embedded_font_full"],
         embedded_font_subset=paths["embedded_font_subset"],
+        cjk=paths["cjk"],
     )
 
 
