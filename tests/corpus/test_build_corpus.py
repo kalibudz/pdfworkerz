@@ -112,3 +112,13 @@ def test_cjk_fixture_has_chinese_text_in_a_composite_font(tmp_path: Path) -> Non
         _xref, _ext, font_type, basefont, *_rest = doc[0].get_fonts(full=True)[0]
         assert font_type == "Type0"
         assert "Noto Sans CJK" in basefont
+
+
+@pytest.mark.feature("INF-06")
+def test_paragraph_fixture_has_a_three_line_block_and_a_separate_one_line_block(tmp_path: Path) -> None:
+    corpus = build_corpus(tmp_path)
+    with pymupdf.open(corpus.paragraph) as doc:
+        assert doc.page_count == 1
+        text = doc[0].get_text().strip().splitlines()
+        assert len(text) == 4  # 3 lines of the paragraph + the separate one-line paragraph
+        assert text[3] == "A separate paragraph starts here."

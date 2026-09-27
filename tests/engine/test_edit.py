@@ -9,7 +9,8 @@ import pikepdf
 import pytest
 
 from engine.document import Document
-from engine.edit import _find_font_entry, insert_text_near, replace_span_text
+from engine.edit import _find_font_entry, insert_text_near, reflow_block, replace_span_text
+from engine.fonts.blocks import detect_blocks
 from engine.fonts.match import build_font_index
 from engine.fonts.style import extract_page_spans
 from engine.verify import pixel_diff, render_to_array
@@ -352,4 +353,154 @@ def test_insert_text_near_matches_reference_style(corpus: Corpus, work_dir: Path
     inserted = next(s for s in after_spans if s.style.text == "Matching")
     assert inserted.style.font == reference.style.font
     assert inserted.style.size == pytest.approx(reference.style.size)
+    doc.close()
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_block_rewraps_text_across_the_blocks_own_lines(
+    corpus: Corpus, work_dir: Path, font_index: list
+) -> None:
+    source = work_dir / "paragraph.pdf"
+    shutil.copy(corpus.paragraph, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+    block = detect_blocks(spans)[0]
+    assert len(block.lines) == 3
+    before_y = [line.style.chars[0].origin[1] for line in block.lines]
+
+    results = reflow_block(doc, 0, block, "Short replacement text that still fits.", font_index=font_index)
+
+    assert len(results) == 3
+    assert all(r.requires_approval is False for r in results)
+    # editing appends fresh draw operators to the content stream, so post-edit
+    # span ORDER no longer matches visual order -- locate each line by the Y
+    # position it must have kept (asserted separately below) rather than by
+    # re-running detect_blocks, which assumes list order is visual order.
+    after_spans = extract_page_spans(doc.raw, 0)
+    edited_text_by_y = {span.style.chars[0].origin[1]: span.style.text for span in after_spans if span.style.chars}
+    rewrapped = "".join(edited_text_by_y[y] for y in before_y if y in edited_text_by_y)
+    assert rewrapped.replace(" ", "") == "Shortreplacementtextthatstillfits."
+    # the separate second paragraph is untouched
+    assert any(s.style.text == "A separate paragraph starts here." for s in after_spans)
+    doc.close()
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_block_preserves_each_used_lines_y_position(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    """Text needing exactly as many lines as the block has must land each
+    line on its original baseline Y -- a line left unused because new_text
+    wrapped shorter (blanked, see the "fewer lines" test below) is not
+    expected to still have a Y position."""
+    source = work_dir / "paragraph.pdf"
+    shutil.copy(corpus.paragraph, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+    block = detect_blocks(spans)[0]
+    before_y = [line.style.chars[0].origin[1] for line in block.lines]
+
+    text = "New words go here spread out across every one of these three lines."
+    results = reflow_block(doc, 0, block, text, font_index=font_index)
+    assert all("overflow:" not in r.note for r in results)  # confirms this text used all 3 lines, none extra
+
+    after_spans = extract_page_spans(doc.raw, 0)
+    after_y_positions = {span.style.chars[0].origin[1] for span in after_spans if span.style.chars}
+    for y in before_y:
+        assert any(y == pytest.approx(after_y) for after_y in after_y_positions)
+    doc.close()
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_block_blanks_unused_trailing_lines_when_text_is_shorter(
+    corpus: Corpus, work_dir: Path, font_index: list
+) -> None:
+    source = work_dir / "paragraph.pdf"
+    shutil.copy(corpus.paragraph, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+    block = detect_blocks(spans)[0]
+    third_line_y = block.lines[2].style.chars[0].origin[1]
+
+    text = "New words go here across the lines now."
+    results = reflow_block(doc, 0, block, text, font_index=font_index)
+
+    assert len(results) == 3  # one EditResult per original line, even the blanked one
+    after_spans = extract_page_spans(doc.raw, 0)
+    assert not any(s.style.chars and s.style.chars[0].origin[1] == pytest.approx(third_line_y) for s in after_spans)
+    combined = " ".join(s.style.text for s in after_spans if s.style.text != "A separate paragraph starts here.")
+    assert combined.replace("  ", " ") == text
+    doc.close()
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_block_flags_overflow_when_text_needs_more_lines_than_the_block_has(
+    corpus: Corpus, work_dir: Path, font_index: list
+) -> None:
+    source = work_dir / "paragraph.pdf"
+    shutil.copy(corpus.paragraph, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+    block = detect_blocks(spans)[0]
+
+    huge_text = " ".join(f"word{i}" for i in range(200))
+    results = reflow_block(doc, 0, block, huge_text, font_index=font_index)
+
+    assert len(results) == 3  # never more results than the block's own line count
+    assert results[-1].requires_approval is True
+    assert "overflow:" in results[-1].note
+    doc.close()
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_block_clean_fit_reports_no_overflow(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    source = work_dir / "paragraph.pdf"
+    shutil.copy(corpus.paragraph, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+    block = detect_blocks(spans)[0]
+
+    results = reflow_block(doc, 0, block, "Fits.", font_index=font_index)
+
+    assert all("overflow:" not in r.note for r in results)
+    doc.close()
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_block_verifies_by_default(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    source = work_dir / "paragraph.pdf"
+    shutil.copy(corpus.paragraph, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+    block = detect_blocks(spans)[0]
+
+    results = reflow_block(doc, 0, block, "Verify this reflowed text please.", font_index=font_index)
+
+    assert all(r.verification is not None for r in results)
+    doc.close()
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_block_verify_false_skips_verification(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    source = work_dir / "paragraph.pdf"
+    shutil.copy(corpus.paragraph, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+    block = detect_blocks(spans)[0]
+
+    results = reflow_block(doc, 0, block, "No verification here.", font_index=font_index, verify=False)
+
+    assert all(r.verification is None for r in results)
+    doc.close()
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_block_on_an_empty_block_returns_no_results(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    from engine.fonts.blocks import TextBlock
+
+    source = work_dir / "paragraph.pdf"
+    shutil.copy(corpus.paragraph, source)
+    doc = Document.open(source)
+
+    results = reflow_block(doc, 0, TextBlock(lines=()), "anything", font_index=font_index)
+
+    assert results == []
     doc.close()

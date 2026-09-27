@@ -348,6 +348,62 @@
       ],
       "title": "InsertTextOp",
       "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FNT-11: replace an entire paragraph's text, re-wrapping it across the\nparagraph's own existing lines (engine.fonts.blocks/engine.fonts.reflow).\n`match` identifies which paragraph to reflow -- a literal substring found\nwithin any one of its lines.",
+      "properties": {
+        "op": {
+          "const": "reflow_text",
+          "default": "reflow_text",
+          "title": "Op",
+          "type": "string"
+        },
+        "match": {
+          "title": "Match",
+          "type": "string"
+        },
+        "new_text": {
+          "title": "New Text",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "case_sensitive": {
+          "default": true,
+          "title": "Case Sensitive",
+          "type": "boolean"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "allow_overflow": {
+          "default": false,
+          "title": "Allow Overflow",
+          "type": "boolean"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "match",
+        "new_text",
+        "page_index"
+      ],
+      "title": "ReflowTextOp",
+      "type": "object"
     }
   ]
 }

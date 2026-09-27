@@ -8,8 +8,8 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 |---|---|---|---|
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P2 | Font identification & style-matched text editing | 🔶 In progress: 19/20 features proven by tests -- only FNT-11 (reflow) left | |
-| P3 | Web UI with click-to-edit | Planned | |
+| P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
+| P3 | Web UI with click-to-edit | 🔶 In progress: 0/15 features proven by tests | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,54 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-27 (cont. 8) — FNT-11, closing out P2
+
+- `engine/fonts/blocks.py`: groups a page's spans into left-aligned,
+  same-font/size, vertically-adjacent, non-rotated multi-line blocks
+  (paragraphs) -- the unit SPEC.md's reflow feature operates on. Adjacency is
+  gated on a line-height-relative gap (0.5x-3.0x the font size) so a genuine
+  paragraph break (a much larger gap, as in the new `paragraph` corpus
+  fixture) correctly starts a new block instead of merging into it.
+- `engine/fonts/reflow.py`: word-wraps replacement text to a given max width,
+  falling back to character-by-character wrapping whenever there is no space
+  to break on -- covers CJK text (which has no spaces) and an unbreakable
+  overlong Latin "word" with the same code path, rather than leaving either
+  case overflowing a line silently.
+- `engine/edit.reflow_block()`: redraws a block's *own* lines with re-wrapped
+  text, deliberately bounded to never draw more lines than the block already
+  has -- so a reflow edit can never overlap or shift unrelated content below
+  it, the specific risk that made this the last P2 feature attempted. Fewer
+  wrapped lines than the block has blanks the unused trailing lines; more
+  flags the last result with `requires_approval=True` and an "overflow:" note
+  instead of drawing past the block, or silently truncating.
+- `engine/ops/text.py`: `ReflowTextOp` (FNT-11) -- `match` finds the target
+  line, `engine.fonts.blocks.find_block_containing` locates its block, and
+  `allow_overflow` (default `False`) gates whether an overflowing edit is
+  rejected outright or allowed through with the last result flagged, the same
+  "never guess silently" shape `require_tier` already uses for a weak font
+  match.
+- One real bug found while building this: `find_block_containing` used `in`
+  on a list of `SpanTrace` (pydantic value equality), which could false-match
+  two structurally-identical spans, such as two blank lines, to the wrong
+  block. Fixed to identity comparison (`is`).
+- One test-writing lesson, not a code bug: `detect_blocks` assumes its input
+  list is already in visual (top-to-bottom) order, true for freshly-authored
+  content but not guaranteed after an edit -- `replace_span_text` appends
+  fresh draw operators to the end of the content stream, so a page's
+  post-edit span order no longer matches Y position even though the Y
+  positions themselves are unchanged. Tests that need to find a specific
+  post-edit line look it up by its preserved Y, not by re-running
+  `detect_blocks` on the edited page.
+- Added a `paragraph` fixture to the golden corpus (a three-line, single-
+  column paragraph followed by a separate one-line paragraph) so
+  `detect_blocks` has a real multi-line block plus a clear cross-block
+  boundary to test against.
+- 33 new tests (304 total, 92.9% coverage); ruff, mypy --strict, bandit and
+  pip-audit all clean; `docs/ops.schema.json` regenerated for the new
+  `ReflowTextOp`. FNT-11 moved to "done" (42/161 total).
+- **P2 is now complete: 20/20 features proven by tests.** Per the user's
+  instruction, moving on to P3 (web UI with click-to-edit) next.
 
 ### 2026-09-27 (cont.) — P2 style-matched text editing
 

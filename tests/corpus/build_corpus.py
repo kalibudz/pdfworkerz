@@ -51,6 +51,7 @@ class Corpus:
     embedded_font_full: Path
     embedded_font_subset: Path
     cjk: Path
+    paragraph: Path
     user_password: str = USER_PASSWORD
     owner_password: str = OWNER_PASSWORD
 
@@ -276,6 +277,29 @@ def _cjk(path: Path) -> None:
     doc.close()
 
 
+def _paragraph(path: Path) -> None:
+    """A three-line, left-aligned, single-column paragraph followed by a
+    second, separate one-line paragraph (FNT-11) -- one page, one font/size
+    throughout, so engine.fonts.blocks.detect_blocks has a real multi-line
+    block to find, and a clear boundary (a much larger line gap) where the
+    next block correctly starts instead of merging into the first.
+    """
+    doc = pymupdf.open()
+    page = doc.new_page()
+    lines = [
+        "This is line one of a paragraph.",
+        "This is line two continuing on.",
+        "And this is line three, the last.",
+    ]
+    y = 100.0
+    for line in lines:
+        page.insert_text((72, y), line, fontsize=12, fontname="helv")
+        y += 14.4  # a typical single-spaced leading (1.2x the font size)
+    page.insert_text((72, 200), "A separate paragraph starts here.", fontsize=12, fontname="helv")
+    doc.save(path)
+    doc.close()
+
+
 def _layered(path: Path) -> None:
     """A page with an optional-content group (COR-03 has_layers / future COR-12)."""
     doc = pymupdf.open()
@@ -310,6 +334,7 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         "embedded_font_full": out_dir / "embedded_font_full.pdf",
         "embedded_font_subset": out_dir / "embedded_font_subset.pdf",
         "cjk": out_dir / "cjk.pdf",
+        "paragraph": out_dir / "paragraph.pdf",
     }
 
     if force or not paths["simple"].exists():
@@ -344,6 +369,8 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         _bold_italic_standard(paths["bold_italic_standard"])
     if force or not paths["embedded_font_full"].exists() or not paths["embedded_font_subset"].exists():
         _embedded_fonts(paths["embedded_font_full"], paths["embedded_font_subset"])
+    if force or not paths["paragraph"].exists():
+        _paragraph(paths["paragraph"])
     if force or not paths["cjk"].exists():
         _cjk(paths["cjk"])
 
@@ -368,6 +395,7 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         embedded_font_full=paths["embedded_font_full"],
         embedded_font_subset=paths["embedded_font_subset"],
         cjk=paths["cjk"],
+        paragraph=paths["paragraph"],
     )
 
 

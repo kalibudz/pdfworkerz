@@ -12,7 +12,7 @@ import pytest
 from engine.document import Document
 from engine.errors import OpValidationError
 from engine.ops.base import parse_op
-from engine.ops.text import DeleteTextOp, InsertTextOp, ReplaceTextOp, RestyleTextOp
+from engine.ops.text import DeleteTextOp, InsertTextOp, ReflowTextOp, ReplaceTextOp, RestyleTextOp
 from tests.corpus.build_corpus import Corpus
 
 
@@ -20,6 +20,15 @@ from tests.corpus.build_corpus import Corpus
 def simple_doc(corpus: Corpus, work_dir: Path) -> Iterator[Document]:
     source = work_dir / "simple.pdf"
     shutil.copy(corpus.simple, source)
+    doc = Document.open(source)
+    yield doc
+    doc.close()
+
+
+@pytest.fixture
+def paragraph_doc(corpus: Corpus, work_dir: Path) -> Iterator[Document]:
+    source = work_dir / "paragraph.pdf"
+    shutil.copy(corpus.paragraph, source)
     doc = Document.open(source)
     yield doc
     doc.close()
@@ -176,5 +185,76 @@ def test_insert_text_op_raises_when_reference_not_found(simple_doc: Document) ->
 @pytest.mark.feature("EDT-03")
 def test_insert_text_op_round_trips_through_json() -> None:
     op = InsertTextOp(page_index=1, text="hi", position=(10.5, 20.5), reference_match="ref")
+    restored = parse_op(op.model_dump())
+    assert restored == op
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_text_op_rewraps_the_matched_paragraph(paragraph_doc: Document) -> None:
+    op = ReflowTextOp(match="line two", new_text="Short new text.", page_index=0)
+    results = op.apply(paragraph_doc)
+
+    assert len(results) == 3
+    text = paragraph_doc.raw[0].get_text()
+    assert "Short new text." in text.replace("\n", " ")
+    assert "A separate paragraph starts here." in text  # the other paragraph is untouched
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_text_op_matches_by_any_line_in_the_block(paragraph_doc: Document) -> None:
+    op_first_line = ReflowTextOp(match="line one", new_text="A", page_index=0)
+    op_first_line.apply(paragraph_doc)
+    # after reflowing via the first line's text, the third line's original wording is gone
+    assert "line three" not in paragraph_doc.raw[0].get_text()
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_text_op_raises_when_no_line_matches(paragraph_doc: Document) -> None:
+    op = ReflowTextOp(match="NoSuchLineHere", new_text="x", page_index=0)
+    with pytest.raises(OpValidationError, match="no line matches"):
+        op.apply(paragraph_doc)
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_text_op_rejects_overflow_by_default(paragraph_doc: Document) -> None:
+    huge_text = " ".join(f"word{i}" for i in range(200))
+    op = ReflowTextOp(match="line one", new_text=huge_text, page_index=0)
+    with pytest.raises(OpValidationError, match="overflow"):
+        op.apply(paragraph_doc)
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_text_op_allow_overflow_true_succeeds_with_truncated_result(paragraph_doc: Document) -> None:
+    huge_text = " ".join(f"word{i}" for i in range(200))
+    op = ReflowTextOp(match="line one", new_text=huge_text, page_index=0, allow_overflow=True)
+    results = op.apply(paragraph_doc)
+
+    assert len(results) == 3
+    assert results[-1].requires_approval is True
+    assert "overflow:" in results[-1].note
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_text_op_require_tier_rejects_a_weak_match(corpus: Corpus, work_dir: Path) -> None:
+    path = work_dir / "unmatchable_paragraph.pdf"
+    with pikepdf.open(corpus.embedded_font_subset) as pdf:
+        font = pdf.pages[0].Resources.Font["/EmbeddedVeraBold"]
+        font["/BaseFont"] = pikepdf.Name("/XYZUNK+TotallyUnknownFontXYZ")
+        font["/DescendantFonts"][0]["/BaseFont"] = pikepdf.Name("/XYZUNK+TotallyUnknownFontXYZ")
+        pdf.save(path)
+
+    doc = Document.open(path)
+    # allow_overflow=True: the fixture's only line is "AB" (a 2-character-wide
+    # block), so any non-trivial replacement overflows it regardless of font
+    # tier -- allowing overflow isolates the tier check this test targets.
+    op = ReflowTextOp(match="AB", new_text="world", page_index=0, require_tier="exact", allow_overflow=True)
+    with pytest.raises(OpValidationError, match="fell back to tier"):
+        op.apply(doc)
+    doc.close()
+
+
+@pytest.mark.feature("FNT-11")
+def test_reflow_text_op_round_trips_through_json() -> None:
+    op = ReflowTextOp(match="line one", new_text="new", page_index=0, allow_overflow=True, case_sensitive=False)
     restored = parse_op(op.model_dump())
     assert restored == op

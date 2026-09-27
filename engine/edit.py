@@ -27,6 +27,7 @@ control otherwise.
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import math
 from dataclasses import dataclass
@@ -37,10 +38,12 @@ import pymupdf
 from numpy.typing import NDArray
 
 from engine.document import Document
+from engine.fonts.blocks import TextBlock
 from engine.fonts.classify import classify_font, split_subset_tag
 from engine.fonts.fit import fit_to_width
 from engine.fonts.kerning import build_kern_pairs
 from engine.fonts.match import FontCandidate, normalize_font_name
+from engine.fonts.reflow import wrap_text
 from engine.fonts.resolve import FontResolution, resolve_font
 from engine.fonts.style import SpanTrace, TextState, advance_for_char, extract_page_spans
 from engine.verify import DiffResult, pixel_diff, render_to_array
@@ -388,3 +391,53 @@ def insert_text_near(
         end_point=end_point,
         verification=verification,
     )
+
+
+def reflow_block(
+    document: Document,
+    page_index: int,
+    block: TextBlock,
+    new_text: str,
+    *,
+    font_index: list[FontCandidate],
+    verify: bool = True,
+) -> list[EditResult]:
+    """FNT-11: replace an entire block's text with `new_text`, re-wrapping it
+    across the block's own existing lines -- see engine.fonts.reflow for why
+    this never grows past the block's original line count. Returns one
+    EditResult per line actually drawn (one per line of the block, in order);
+    if `new_text` needed more lines than the block has, the last result's
+    note says so and its `requires_approval` is set.
+    """
+    if not block.lines:
+        return []
+
+    reference = block.lines[0]
+    text_state = reference.text_state or TextState()
+    font_size = text_state.font_size or reference.style.size
+    resolution = resolve_font_for_span(document, page_index, reference, new_text, font_index=font_index)
+    font = _load_font(resolution)
+
+    max_width = max(line.style.bbox[2] - line.style.bbox[0] for line in block.lines)
+    wrapped = wrap_text(new_text, font, font_size, max_width)
+
+    results = [
+        replace_span_text(
+            document,
+            page_index,
+            line,
+            wrapped[i] if i < len(wrapped) else "",
+            font_index=font_index,
+            verify=verify,
+        )
+        for i, line in enumerate(block.lines)
+    ]
+
+    if len(wrapped) > len(block.lines):
+        extra_lines = len(wrapped) - len(block.lines)
+        note = (
+            f"{results[-1].note}; overflow: {extra_lines} more line(s) needed than "
+            f"this block has ({len(block.lines)}), not drawn"
+        )
+        results[-1] = dataclasses.replace(results[-1], requires_approval=True, note=note)
+    return results

@@ -1,4 +1,4 @@
-"""EDT-01, EDT-02, EDT-03, EDT-04, EDT-06: typed text-editing Ops.
+"""EDT-01, EDT-02, EDT-03, EDT-04, EDT-06, FNT-11: typed text-editing Ops.
 
 Each Op finds its target span(s) with :func:`engine.fonts.style.extract_page_spans`
 and draws through :mod:`engine.edit`. A match is only supported when it lies
@@ -15,8 +15,9 @@ import re
 from typing import Literal
 
 from engine.document import Document
-from engine.edit import EditResult, insert_text_near, replace_span_text
+from engine.edit import EditResult, insert_text_near, reflow_block, replace_span_text
 from engine.errors import OpValidationError
+from engine.fonts.blocks import detect_blocks, find_block_containing
 from engine.fonts.match import FontCandidate, build_font_index
 from engine.fonts.style import SpanTrace, extract_page_spans
 from engine.ops.base import Op, register_op
@@ -202,3 +203,45 @@ class InsertTextOp(Op):
         )
         _check_tier(result, self.require_tier, where=self.op)
         return result
+
+
+@register_op
+class ReflowTextOp(Op):
+    """FNT-11: replace an entire paragraph's text, re-wrapping it across the
+    paragraph's own existing lines (engine.fonts.blocks/engine.fonts.reflow).
+    `match` identifies which paragraph to reflow -- a literal substring found
+    within any one of its lines."""
+
+    op: Literal["reflow_text"] = "reflow_text"
+    match: str
+    new_text: str
+    page_index: int
+    case_sensitive: bool = True
+    require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
+    allow_overflow: bool = False
+    """When False (default), raise instead of leaving text undrawn because
+    `new_text` needed more lines than the paragraph has (engine.edit.reflow_block's
+    "overflow" outcome) -- the same "never guess silently" principle require_tier
+    implements for a weak font match, applied to an incomplete edit instead."""
+    verify: bool = True
+
+    def apply(self, document: Document) -> list[EditResult]:
+        font_index = _font_index()
+        pattern = _compile_pattern(self.match, "literal", self.case_sensitive)
+        spans = extract_page_spans(document.raw, self.page_index)
+        target_line = next((span for span in spans if pattern.search(span.style.text)), None)
+        if target_line is None:
+            raise OpValidationError(f"reflow_text: no line matches {self.match!r}")
+
+        block = find_block_containing(detect_blocks(spans), target_line)
+        if block is None:
+            raise OpValidationError("reflow_text: matched line could not be placed in a block")
+
+        results = reflow_block(
+            document, self.page_index, block, self.new_text, font_index=font_index, verify=self.verify
+        )
+        if not self.allow_overflow and "overflow:" in results[-1].note:
+            raise OpValidationError(f"reflow_text: {results[-1].note}")
+        for result in results:
+            _check_tier(result, self.require_tier, where=type(self).__name__)
+        return results
