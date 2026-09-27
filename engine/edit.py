@@ -39,7 +39,7 @@ from numpy.typing import NDArray
 from engine.document import Document
 from engine.fonts.classify import classify_font, split_subset_tag
 from engine.fonts.fit import fit_to_width
-from engine.fonts.match import FontCandidate
+from engine.fonts.match import FontCandidate, normalize_font_name
 from engine.fonts.resolve import FontResolution, resolve_font
 from engine.fonts.style import SpanTrace, TextState, advance_for_char, extract_page_spans
 from engine.verify import DiffResult, pixel_diff, render_to_array
@@ -185,20 +185,27 @@ def draw_styled_text(
 def _find_font_entry(page: pymupdf.Page, basefont: str) -> tuple[int, str] | None:
     """The (xref, Tf resource name) of the page's font whose BaseFont matches, if any.
 
-    Compared with the subset tag stripped from both sides: PyMuPDF's texttrace
-    reports a subset font's name without its "ABCDEF+" prefix (confirmed
-    empirically), while ``Page.get_fonts()`` reports the BaseFont as-is, prefix
-    included. A font with no real BaseFont at all (Type3 commonly has none,
-    FNT-15) gets a synthesized "<FontType> (<ref>)" name from texttrace
-    instead; matched here by font type against get_fonts's empty entry.
+    Matched with the subset tag stripped and both sides case/punctuation-
+    normalized (engine.fonts.match.normalize_font_name), because two real,
+    confirmed discrepancies exist between what texttrace reports and what
+    ``Page.get_fonts()`` reports for the *same* font: a subset font's name
+    loses its "ABCDEF+" prefix in texttrace but not in get_fonts, and --
+    separately -- texttrace reports a full (non-subset) embedded font by
+    its PostScript name ("BitstreamVeraSans-Bold") while get_fonts reports
+    its full name ("Bitstream Vera Sans Bold") from the same /BaseFont
+    entry. Normalizing away case, spaces and hyphens resolves both. A font
+    with no real BaseFont at all (Type3 commonly has none, FNT-15) gets a
+    synthesized "<FontType> (<ref>)" name from texttrace instead; matched
+    here by font type against get_fonts's empty entry.
     """
-    _, target = split_subset_tag(basefont)
+    _, plain = split_subset_tag(basefont)
+    target = normalize_font_name(plain)
     for entry in page.get_fonts(full=True):
         xref, _ext, font_type, entry_basefont, resource_name, *_rest = entry
         _, entry_plain = split_subset_tag(entry_basefont)
-        if entry_plain == target:
+        if normalize_font_name(entry_plain) == target:
             return xref, resource_name
-        if not entry_basefont and target.startswith(f"{font_type} ("):
+        if not entry_basefont and plain.startswith(f"{font_type} ("):
             return xref, resource_name
     return None
 

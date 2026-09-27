@@ -136,7 +136,7 @@ def build_font_index(*, include_system: bool = True, extra_dirs: list[Path] | No
     return candidates
 
 
-def _normalize(name: str) -> str:
+def normalize_font_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
@@ -144,13 +144,13 @@ def find_by_name(index: list[FontCandidate], base_font: str) -> FontCandidate | 
     """FNT-06: an exact (normalized) name match for `base_font` (its subset tag, if any,
     is ignored -- see engine.fonts.classify.SUBSET_TAG_PATTERN)."""
     _, plain_name = split_subset_tag(base_font)
-    target = _normalize(plain_name)
+    target = normalize_font_name(plain_name)
     if not target:
         return None
     for candidate in index:
-        if _normalize(candidate.postscript_name) == target:
+        if normalize_font_name(candidate.postscript_name) == target:
             return candidate
-        if _normalize(candidate.family_name + candidate.subfamily_name) == target:
+        if normalize_font_name(candidate.family_name + candidate.subfamily_name) == target:
             return candidate
     return None
 

@@ -38,6 +38,26 @@ def test_replace_span_text_on_a_standard_font(corpus: Corpus, work_dir: Path, fo
 
 
 @pytest.mark.feature("EDT-01")
+def test_replace_span_text_on_a_full_non_subset_embedded_font(corpus: Corpus, work_dir: Path, font_index: list) -> None:
+    """Regression: texttrace reports a full (non-subset) embedded font by its
+    PostScript name ("BitstreamVeraSans-Bold"), while Page.get_fonts() reports
+    the same font's full name ("Bitstream Vera Sans Bold") from the same
+    /BaseFont entry -- confirmed empirically. Without normalizing both sides,
+    _find_font_entry never finds the resource and every edit on a document
+    using a full embedded font fails outright."""
+    source = work_dir / "full_embed.pdf"
+    shutil.copy(corpus.embedded_font_full, source)
+    doc = Document.open(source)
+    spans = extract_page_spans(doc.raw, 0)
+
+    result = replace_span_text(doc, 0, spans[0], "Fixed the bug!", font_index=font_index)
+
+    assert result.tier == "exact"
+    assert doc.raw[0].get_text().strip() == "Fixed the bug!"
+    doc.close()
+
+
+@pytest.mark.feature("EDT-01")
 def test_replace_span_text_on_an_embedded_subset_font(corpus: Corpus, work_dir: Path, font_index: list) -> None:
     source = work_dir / "subset.pdf"
     shutil.copy(corpus.embedded_font_subset, source)

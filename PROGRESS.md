@@ -8,7 +8,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 |---|---|---|---|
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P2 | Font identification & style-matched text editing | 🔶 In progress: 16/20 features proven by tests (FNT-01..10, FNT-12, FNT-15, EDT-01/02/03/04/06) | |
+| P2 | Font identification & style-matched text editing | 🔶 In progress: 17/20 features proven by tests (FNT-01..10, FNT-12, FNT-13, FNT-15, EDT-01/02/03/04/06) | |
 | P3 | Web UI with click-to-edit | Planned | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
@@ -143,6 +143,39 @@ A phase is complete when all of its features are **done** through the evidence g
   for COR-10, EDT-02, EDT-03, EDT-04 and EDT-06, all already "done."
   README.md now documents these commands as the real way to try the tool
   on a document today.
+
+### 2026-09-27 (cont. 5) — FNT-13, and a significant pre-existing bug found
+
+- `engine/fonts/tounicode.py`: recovers readable text when a span's font
+  lacks (or has a broken) ToUnicode CMap. Confirmed empirically: stripping
+  `/ToUnicode` from an embedded Identity-H font makes MuPDF's own extraction
+  return the Unicode replacement character for every glyph, even though the
+  *same* embedded font still has its own perfectly usable `cmap` -- MuPDF
+  doesn't fall back to a CID-keyed font's own cmap for this. Recovered by
+  reversing the font's cmap (Unicode -> glyph name -> GID) into GID ->
+  Unicode and looking up each glyph's raw content-stream code there, which
+  equals the GID directly for the common Identity-H + Identity CIDToGIDMap
+  case. Needed a new `engine.fonts.style.walk_raw_glyph_codes` to capture
+  actual per-glyph code *values* (FNT-02's existing walker only tracked
+  *state*, since that's all drawing needs).
+- **Building this exposed a real, previously undetected bug affecting every
+  edit on a document with a full (non-subset) embedded font**: texttrace
+  reports such a font by its PostScript name ("BitstreamVeraSans-Bold"),
+  while `Page.get_fonts()` reports the same font's full name ("Bitstream
+  Vera Sans Bold") from the very same `/BaseFont` entry. `_find_font_entry`
+  (engine/edit.py, added in the P2-part1 commit) compared these strings
+  directly, so it silently never matched, and every edit on such a document
+  failed with "could not find the page's own font resource" -- something
+  none of P2's test fixtures had exercised until this investigation reused
+  `embedded_font_full.pdf` for a different purpose. Fixed by normalizing
+  both sides (case, spaces, hyphens) before comparing; promoted
+  `engine.fonts.match`'s internal `_normalize` to a shared
+  `normalize_font_name`, since both bugs needed it. Added a dedicated
+  regression test using that exact fixture with `replace_span_text`.
+- 9 new tests (254 total, 94.4% coverage); ruff, mypy --strict, bandit and
+  pip-audit all clean. FNT-13 moved to "done" (39/161 total, 17/20 in P2).
+- Still open in P2: FNT-09 (kerning/ligature), FNT-11 (reflow), FNT-14
+  (CJK/RTL/vertical -- needs a CJK font asset first).
 
 ### 2026-09-27 — P1 engine core
 

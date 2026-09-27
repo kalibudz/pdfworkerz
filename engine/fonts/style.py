@@ -247,6 +247,42 @@ def _walk_glyph_states(pdf_page: pikepdf.Page) -> list[TextState]:
     return per_glyph
 
 
+def _split_codes(value: pikepdf.Object, bytes_per_glyph: int) -> list[int]:
+    raw = bytes(value)
+    step = bytes_per_glyph or 1
+    return [int.from_bytes(raw[i : i + step], "big") for i in range(0, len(raw), step)]
+
+
+def walk_raw_glyph_codes(pdf_page: pikepdf.Page) -> list[int]:
+    """Every glyph's raw character code (its Tj/TJ byte value, decoded at the
+    active font's byte width), in the same document order as texttrace's
+    flattened character list. Used only for ToUnicode recovery (FNT-13,
+    engine.fonts.tounicode) -- a code is meaningful chiefly for an
+    Identity-H/V composite font, where it equals the glyph's GID directly.
+    """
+    codes: list[int] = []
+    current_font_resource: str | None = None
+
+    def glyph_width() -> int:
+        return _bytes_per_glyph(pdf_page, current_font_resource)
+
+    for instr in pikepdf.parse_content_stream(pdf_page):
+        op = str(instr.operator)
+        operands = instr.operands
+        if op == "Tf":
+            current_font_resource = str(operands[0]).lstrip("/")
+        elif op == "Tj" or op == "'":
+            codes.extend(_split_codes(operands[0], glyph_width()))
+        elif op == '"':
+            codes.extend(_split_codes(operands[2], glyph_width()))
+        elif op == "TJ":
+            width = glyph_width()
+            for item in operands[0]:
+                if isinstance(item, pikepdf.String):
+                    codes.extend(_split_codes(item, width))
+    return codes
+
+
 def extract_page_spans(doc: pymupdf.Document, page_index: int) -> list[SpanTrace]:
     """FNT-01 + FNT-02: every text span on a page, with its style and (when the
     content stream correlates cleanly) its text state, as of its first glyph."""
