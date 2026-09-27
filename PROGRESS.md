@@ -124,6 +124,26 @@ A phase is complete when all of its features are **done** through the evidence g
   pip-audit all clean, and every "done" status in tracker/features.json set
   only by the evidence gate reading real test results -- never by hand.
 
+### 2026-09-27 (cont. 4) — CLI editing commands
+
+- The user asked when the team could test the worker against real documents.
+  Answer at the time: `inspect`/`render`/`repair` worked from the CLI, but
+  the four text-editing Ops (built and tested in P2) were only reachable by
+  writing Python. Added `pdfworkerz replace/delete/restyle/insert`, thin
+  wrappers around the same `ReplaceTextOp`/`DeleteTextOp`/`RestyleTextOp`/
+  `InsertTextOp` classes (one code path, per SPEC.md section 4.2 rule 1),
+  with `--regex`, `--case-insensitive`, `--require-tier`, `--fit`, `--out`/
+  `--overwrite` and per-edit reporting (tier, confidence, whether the drawn
+  text was confirmed by re-extraction).
+- Ran every new command against a real chained sequence on an actual file
+  (replace -> delete -> restyle -> insert) before writing tests, not just
+  the automated corpus.
+- 11 new tests (245 total, 94.3% coverage); ruff, mypy --strict, bandit and
+  pip-audit all clean. No new feature IDs -- this is deeper test coverage
+  for COR-10, EDT-02, EDT-03, EDT-04 and EDT-06, all already "done."
+  README.md now documents these commands as the real way to try the tool
+  on a document today.
+
 ### 2026-09-27 — P1 engine core
 
 - Pinned runtime deps (pymupdf 1.28.2, pikepdf 10.14.0, fonttools 4.66.0, pydantic 2.13.5,

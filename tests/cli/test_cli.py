@@ -86,6 +86,147 @@ def test_repair_command_reports_whether_repair_was_needed(corpus: Corpus, work_d
     assert repaired_out.exists()
 
 
+@pytest.mark.feature("EDT-02")
+def test_replace_command(corpus: Corpus, work_dir: Path) -> None:
+    out = work_dir / "out.pdf"
+    result = runner.invoke(
+        app, ["replace", str(corpus.simple), "PDFWorkerz", "Editor", "--require-tier", "exact", "--out", str(out)]
+    )
+    assert result.exit_code == 0
+    assert "1 edit(s) applied" in result.output
+    assert out.exists()
+
+    inspect_result = runner.invoke(app, ["inspect", str(out)])
+    assert inspect_result.exit_code == 0
+
+
+@pytest.mark.feature("EDT-02")
+def test_replace_command_regex_and_case_insensitive(corpus: Corpus, work_dir: Path) -> None:
+    out = work_dir / "out.pdf"
+    result = runner.invoke(
+        app,
+        [
+            "replace",
+            str(corpus.simple),
+            r"pdf\w+",
+            "App",
+            "--regex",
+            "--case-insensitive",
+            "--out",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0
+    assert "1 edit(s) applied" in result.output
+
+
+@pytest.mark.feature("EDT-02")
+def test_replace_command_no_match_exits_cleanly(corpus: Corpus, work_dir: Path) -> None:
+    out = work_dir / "out.pdf"
+    result = runner.invoke(app, ["replace", str(corpus.simple), "NotThere", "X", "--out", str(out)])
+    assert result.exit_code == 0
+    assert "no matches found" in result.output
+
+
+@pytest.mark.feature("EDT-02")
+def test_replace_command_rejects_an_invalid_tier_name(corpus: Corpus, work_dir: Path) -> None:
+    result = runner.invoke(
+        app, ["replace", str(corpus.simple), "a", "b", "--require-tier", "bogus", "--out", str(work_dir / "o.pdf")]
+    )
+    assert result.exit_code != 0
+
+
+@pytest.mark.feature("EDT-04")
+def test_delete_command(corpus: Corpus, work_dir: Path) -> None:
+    out = work_dir / "out.pdf"
+    result = runner.invoke(app, ["delete", str(corpus.simple), "PDFWorkerz", "--out", str(out)])
+    assert result.exit_code == 0
+    assert "1 edit(s) applied" in result.output
+
+
+@pytest.mark.feature("EDT-06")
+def test_restyle_command_size_and_color(corpus: Corpus, work_dir: Path) -> None:
+    out = work_dir / "out.pdf"
+    result = runner.invoke(
+        app,
+        ["restyle", str(corpus.simple), "PDFWorkerz", "--size", "20", "--color", "1,0,0", "--out", str(out)],
+    )
+    assert result.exit_code == 0
+    assert "1 edit(s) applied" in result.output
+
+
+@pytest.mark.feature("EDT-06")
+def test_restyle_command_rejects_a_malformed_color(corpus: Corpus, work_dir: Path) -> None:
+    result = runner.invoke(
+        app, ["restyle", str(corpus.simple), "PDFWorkerz", "--color", "not-a-color", "--out", str(work_dir / "o.pdf")]
+    )
+    assert result.exit_code != 0
+    assert "color must be" in result.output
+
+
+@pytest.mark.feature("EDT-03")
+def test_insert_command(corpus: Corpus, work_dir: Path) -> None:
+    out = work_dir / "out.pdf"
+    result = runner.invoke(
+        app,
+        [
+            "insert",
+            str(corpus.simple),
+            " Extra",
+            "--position",
+            "300,72",
+            "--reference",
+            "PDFWorkerz",
+            "--out",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0
+    assert "1 edit(s) applied" in result.output
+
+
+@pytest.mark.feature("EDT-03")
+def test_insert_command_rejects_a_malformed_position(corpus: Corpus, work_dir: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "insert",
+            str(corpus.simple),
+            "x",
+            "--position",
+            "not-a-point",
+            "--reference",
+            "PDFWorkerz",
+            "--out",
+            str(work_dir / "o.pdf"),
+        ],
+    )
+    assert result.exit_code != 0
+
+
+@pytest.mark.feature("COR-10")
+def test_edit_commands_default_to_a_versioned_output_name(corpus: Corpus, work_dir: Path) -> None:
+    import shutil
+
+    source = work_dir / "doc.pdf"
+    shutil.copy(corpus.simple, source)
+    result = runner.invoke(app, ["replace", str(source), "PDFWorkerz", "Editor"])
+    assert result.exit_code == 0
+    assert (work_dir / "doc.edited.pdf").exists()
+    assert source.read_bytes() == corpus.simple.read_bytes()  # the original is untouched (COR-08)
+
+
+@pytest.mark.feature("COR-10")
+def test_edit_commands_can_overwrite_the_original(corpus: Corpus, work_dir: Path) -> None:
+    import shutil
+
+    source = work_dir / "doc.pdf"
+    shutil.copy(corpus.simple, source)
+    result = runner.invoke(app, ["replace", str(source), "PDFWorkerz", "Editor", "--overwrite"])
+    assert result.exit_code == 0
+    assert f"saved -> {source}" in result.output
+
+
 @pytest.mark.feature("COR-10")
 def test_cli_uses_the_same_op_classes_as_the_engine(corpus: Corpus) -> None:
     """The CLI must not duplicate logic: it applies the registered InspectOp/RenderPageOp."""
