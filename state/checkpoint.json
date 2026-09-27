@@ -1,15 +1,16 @@
 {
   "phase": "P2",
-  "taskId": "FNT-01..FNT-10, FNT-12, EDT-01/02/03/04/06 done; FNT-09, FNT-11, FNT-13, FNT-14, FNT-15 remaining",
-  "step": "Font-intelligence pipeline, fit-to-width, and pixel verification built and tested (231 tests); pushing this checkpoint",
+  "taskId": "FNT-01..FNT-10, FNT-12, FNT-15, EDT-01/02/03/04/06 done (16/20); FNT-09, FNT-11, FNT-13, FNT-14 remaining",
+  "step": "Session stopping point: 234 tests passing, all pushed to main. Font-intelligence pipeline, style-matched text editing, fit-to-width, pixel verification, and Type3 detection are all real, tested and working.",
   "branch": "main",
   "lastGreenCommit": null,
-  "nextAction": "Continue P2 with whichever of the remaining five features fits the session budget: FNT-09 (kerning/ligature -- likely already mostly satisfied by advance_for_char's per-glyph widths; check what a real kerning-pair table would add before building more), FNT-11 (reflow: when fit-to-width's Tz hits its clamp and still doesn't fit, wrap into the next line of the same block instead of just flagging), FNT-13 (missing-ToUnicode recovery via AGL glyph names / shape matching), FNT-14 (CJK/RTL/vertical text -- needs its own corpus fixture with a real CJK font), FNT-15 (Type3 font editing -- corpus fixture already exists in tests/corpus/build_corpus.py, classification already works, only the editing path is missing). Run tools/session_budget.py first. Once P2 is fully done, move to P3 (web UI, click-to-edit).",
+  "nextAction": "Finish P2 with the four remaining features, each is its own bounded task -- run tools/session_budget.py first, then pick one: (1) FNT-09 kerning/ligature: the per-character drawing path in engine/edit.py's draw_styled_text currently draws each glyph independently, losing native kerning pairs and ligature substitution that PyMuPDF's single-call insert_text would otherwise apply; investigate fontTools GPOS kern-pair lookup or accept the single-call path's implicit kerning as sufficient and document the per-character path's limitation explicitly. (2) FNT-11 reflow: when FNT-10's fit_to_width reports fits=False, wrap the overflow into the next line of the same block instead of just flagging it in EditResult.note -- needs multi-line block detection from extract_page_spans, out of scope for a single span. (3) FNT-13 missing-ToUnicode recovery: PyMuPDF's own text extraction already does some glyph-name-based Unicode inference; determine what gap (if any) remains for engine.fonts.style to detect and supplement. (4) FNT-14 CJK/RTL/vertical: needs a real CJK-covering font asset in assets/fonts/ first (Bitstream Vera doesn't cover CJK) -- source one before starting. After P2 is fully done, move to P3 (web UI, click-to-edit) per SPEC.md section 8.",
   "openQuestions": [
     "Re-verify iLovePDF / Nitro parity tags against the vendors' current feature pages before the first release",
     "P1 and P2-so-far were self-reviewed (builder and reviewer were the same session); an independent reviewer pass is still owed before calling either phase fully signed off",
-    "assets/fonts/ currently ships only Bitstream Vera (not literally OFL); README.md there tracks widening it to a proper OFL family set with CJK/Cyrillic/Greek coverage -- needed before FNT-14 can do much for CJK text specifically",
-    "fit=True (FNT-10) fragments a span's texttrace into one span per character, breaking a second edit's ability to find that text as one span -- documented as a known trade-off in engine/edit.py's replace_span_text docstring, defaults to False"
+    "assets/fonts/ currently ships only Bitstream Vera (not literally OFL); README.md there tracks widening it to a proper OFL family set with CJK/Cyrillic/Greek coverage -- required before FNT-14 can do much for CJK text specifically",
+    "fit=True (FNT-10) fragments a span's texttrace into one span per character, breaking a second edit's ability to find that text as one span -- documented as a known trade-off in engine/edit.py's replace_span_text docstring, defaults to False",
+    "engine.edit's per-character drawing path (used whenever Tc/Tw/Tz differ from default, or for fit=True) does not apply font kerning pairs or ligature substitution -- see FNT-09 in nextAction"
   ],
   "updated": "2026-09-27"
 }

@@ -8,7 +8,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 |---|---|---|---|
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P2 | Font identification & style-matched text editing | 🔶 In progress: 15/20 features proven by tests (FNT-01..10, FNT-12, EDT-01/02/03/04/06) | |
+| P2 | Font identification & style-matched text editing | 🔶 In progress: 16/20 features proven by tests (FNT-01..10, FNT-12, FNT-15, EDT-01/02/03/04/06) | |
 | P3 | Web UI with click-to-edit | Planned | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
@@ -97,6 +97,32 @@ A phase is complete when all of its features are **done** through the evidence g
   (37/161 total). Still open in P2: FNT-09 (kerning/ligature), FNT-11
   (reflow), FNT-13 (ToUnicode recovery), FNT-14 (CJK/RTL/vertical), FNT-15
   (Type3 editing).
+
+### 2026-09-27 (cont. 3) — FNT-15 and a P2 wrap-up
+
+- `engine/fonts/resolve.py`: a Type3 font (no embedded program -- its glyphs
+  are content-stream procedures) was falling into the "standard font, exact,
+  no approval" path. Checked first now and routed to fallback with its own
+  note; full glyph-procedure reuse would need a different drawing path than
+  PyMuPDF's Font/insert_text API supports, and is left as a documented gap
+  rather than attempted partially.
+- Fixed the bug that surfaced alongside it: `_find_font_entry` never matched
+  a font with no real BaseFont at all (texttrace synthesizes a placeholder
+  like "Type3 (5 0 R)"), so any edit on a Type3 span failed outright before
+  it ever reached font resolution.
+- 3 new tests (234 total, 94.8% coverage). FNT-15 moved to "done" (38/161
+  total, 16/20 in P2).
+- **Stopping point for this session's P2 work.** FNT-09 (kerning/ligature),
+  FNT-11 (reflow), FNT-13 (ToUnicode recovery) and FNT-14 (CJK/RTL/vertical)
+  remain open -- each is a substantial, standalone piece (FNT-11 needs
+  multi-line block layout; FNT-14 needs a CJK font asset this repo doesn't
+  have yet) that deserves the same level of empirical verification the rest
+  of P2 got, rather than a rushed pass just to mark them done. See
+  state/checkpoint.json for exactly where to pick each one up.
+- Every commit this session (P0 through this one) passed the full local gate
+  before being pushed: pytest (234 tests), ruff, mypy --strict, bandit and
+  pip-audit all clean, and every "done" status in tracker/features.json set
+  only by the evidence gate reading real test results -- never by hand.
 
 ### 2026-09-27 — P1 engine core
 
