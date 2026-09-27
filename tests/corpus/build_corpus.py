@@ -46,6 +46,10 @@ class Corpus:
     certificate_stub: Path
     form_and_signature: Path
     layered: Path
+    type3: Path
+    bold_italic_standard: Path
+    embedded_font_full: Path
+    embedded_font_subset: Path
     user_password: str = USER_PASSWORD
     owner_password: str = OWNER_PASSWORD
 
@@ -182,6 +186,79 @@ def _form_and_signature(path: Path) -> None:
     doc.close()
 
 
+def _type3(path: Path) -> None:
+    """A minimal Type3 font: one glyph ("A"), drawn as a filled box by its own content-stream
+    procedure (FNT-03/FNT-15). Hand-built with pikepdf since no higher-level API creates Type3
+    fonts; ISO 32000-1 section 9.6.5 defines the dictionary shape used here.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page()
+
+    glyph_proc = pdf.make_stream(b"500 0 d0\n0 0 400 600 re\nf\n")
+    type3_font = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name.Font,
+            Subtype=pikepdf.Name("/Type3"),
+            FontBBox=pikepdf.Array([0, 0, 500, 700]),
+            FontMatrix=pikepdf.Array([0.001, 0, 0, 0.001, 0, 0]),
+            CharProcs=pikepdf.Dictionary(A=glyph_proc),
+            Encoding=pikepdf.Dictionary(Differences=pikepdf.Array([65, pikepdf.Name("/A")])),
+            FirstChar=65,
+            LastChar=65,
+            Widths=pikepdf.Array([500]),
+            Resources=pikepdf.Dictionary(),
+        )
+    )
+    page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(T3=type3_font))
+    page.Contents = pdf.make_stream(b"BT\n/T3 24 Tf\n1 0 0 1 72 700 Tm\n(A) Tj\nET\n")
+    pdf.save(path)
+    pdf.close()
+
+
+def _bundled_font(filename: str) -> Path:
+    """A cross-platform TTF from reportlab's own bundled Bitstream Vera family --
+    installed wherever reportlab is (Windows, macOS, Linux, CI), unlike a system font path."""
+    import reportlab
+
+    return Path(reportlab.__file__).resolve().parent / "fonts" / filename
+
+
+def _bold_italic_standard(path: Path) -> None:
+    """Three spans in the same page: regular, bold and italic standard (non-embedded) Helvetica.
+
+    Standard-14 fonts carry no FontDescriptor at all, so weight/style must
+    come from the BaseFont name itself (FNT-04) -- this fixture is exactly
+    that case.
+    """
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Regular text", fontsize=14, fontname="helv")
+    page.insert_text((72, 110), "Bold text", fontsize=14, fontname="hebo")
+    page.insert_text((72, 148), "Italic text", fontsize=14, fontname="heit")
+    doc.save(path)
+    doc.close()
+
+
+def _embedded_fonts(full_path: Path, subset_path: Path) -> None:
+    """A fully embedded TrueType font, and the same font embedded as a subset (FNT-03)."""
+    font_file = _bundled_font("VeraBd.ttf")
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_font(fontfile=str(font_file), fontname="EmbeddedVeraBold")
+    page.insert_text((72, 72), "Embedded bold, full font", fontsize=14, fontname="EmbeddedVeraBold")
+    doc.save(full_path)
+    doc.close()
+
+    doc2 = pymupdf.open()
+    page2 = doc2.new_page()
+    page2.insert_font(fontfile=str(font_file), fontname="EmbeddedVeraBold")
+    page2.insert_text((72, 72), "AB", fontsize=14, fontname="EmbeddedVeraBold")
+    doc2.subset_fonts()
+    doc2.save(subset_path)
+    doc2.close()
+
+
 def _layered(path: Path) -> None:
     """A page with an optional-content group (COR-03 has_layers / future COR-12)."""
     doc = pymupdf.open()
@@ -211,6 +288,10 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         "certificate_stub": out_dir / "certificate_stub.pdf",
         "form_and_signature": out_dir / "form_and_signature.pdf",
         "layered": out_dir / "layered.pdf",
+        "type3": out_dir / "type3.pdf",
+        "bold_italic_standard": out_dir / "bold_italic_standard.pdf",
+        "embedded_font_full": out_dir / "embedded_font_full.pdf",
+        "embedded_font_subset": out_dir / "embedded_font_subset.pdf",
     }
 
     if force or not paths["simple"].exists():
@@ -239,6 +320,12 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         _form_and_signature(paths["form_and_signature"])
     if force or not paths["layered"].exists():
         _layered(paths["layered"])
+    if force or not paths["type3"].exists():
+        _type3(paths["type3"])
+    if force or not paths["bold_italic_standard"].exists():
+        _bold_italic_standard(paths["bold_italic_standard"])
+    if force or not paths["embedded_font_full"].exists() or not paths["embedded_font_subset"].exists():
+        _embedded_fonts(paths["embedded_font_full"], paths["embedded_font_subset"])
 
     return Corpus(
         simple=paths["simple"],
@@ -256,6 +343,10 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         certificate_stub=paths["certificate_stub"],
         form_and_signature=paths["form_and_signature"],
         layered=paths["layered"],
+        type3=paths["type3"],
+        bold_italic_standard=paths["bold_italic_standard"],
+        embedded_font_full=paths["embedded_font_full"],
+        embedded_font_subset=paths["embedded_font_subset"],
     )
 
 
