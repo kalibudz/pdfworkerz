@@ -1,0 +1,12 @@
+{
+  "phase": "P0",
+  "taskId": "INF-01..INF-05",
+  "step": "P0 deliverables written and pushed; awaiting first green CI run",
+  "branch": "main",
+  "lastGreenCommit": null,
+  "nextAction": "Confirm CI is green on main, then start P1 with INF-06 (golden corpus generator) after running tools/session_budget.py",
+  "openQuestions": [
+    "Re-verify iLovePDF / Nitro parity tags against the vendors' current feature pages before the first release"
+  ],
+  "updated": "2026-09-26"
+}

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+
+# Node
+node_modules/
+tracker/dist/
+tracker/dist-artifact/
+
+# Test outputs and local PDFs
+tests/corpus/generated/
+*.edited.pdf
+out/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

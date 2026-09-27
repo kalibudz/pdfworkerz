@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []  # the engine package is added in phase P1
+
+[project]
+name = "pdfworkerz"
+version = "0.0.1"
+description = "Free, offline, token-free PDF editing worker with style-faithful text editing"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.11"
+dependencies = []  # engine dependencies are added and pinned in phase P1
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=5",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "bandit>=1.7",
+  "pip-audit>=2.7",
+  "pyyaml>=6",
+  "types-PyYAML",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tools"]
+addopts = "-ra --strict-markers"
+markers = ["feature(id, criterion=1): the feature this test proves"]
+
+[tool.coverage.run]
+source = ["tools"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["features", "gen_spec_catalog", "session_budget", "update_tracker"]
+
+[tool.mypy]
+strict = true
+mypy_path = "tools"
+explicit_package_bases = true

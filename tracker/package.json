@@ -1,0 +1,21 @@
+{
+  "name": "pdfworkerz-tracker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Live feature tracker for PDFWorkerz, driven by features.json",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "artifact": "node build-artifact.mjs"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.21.5",
+    "vite": "^5.4.11"
+  }
+}
