@@ -24,6 +24,7 @@ paths verified against real font files before being relied on here.
 
 from __future__ import annotations
 
+import io
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -168,24 +169,37 @@ def _os2_ratio(os2: object, field: str, units_per_em: float) -> float | None:
     return value / units_per_em if value else None
 
 
-def extract_metrics(path: Path) -> FontMetrics | None:
-    """FNT-07: read (or measure) a font's comparable shape metrics."""
+def extract_metrics(source: Path | bytes) -> FontMetrics | None:
+    """FNT-07: read (or measure) a font's comparable shape metrics.
+
+    `source` is a font file path, or the font program's own bytes (as
+    extracted from a PDF via ``pymupdf.Document.extract_font``).
+    """
+    # `head`/`hhea`/`hmtx` are required for a font to render at all, so a missing one
+    # means a genuinely broken font program -- return None. `OS/2`, `post` and `cmap`
+    # are all optional and, confirmed empirically, are exactly what PyMuPDF's
+    # subsetting drops (it only keeps what its own renderer needs): read each with a
+    # graceful fallback instead of letting a KeyError abort the whole extraction.
     try:
-        tt = TTFont(path, lazy=True, fontNumber=0)
+        tt = TTFont(io.BytesIO(source) if isinstance(source, bytes) else source, lazy=True, fontNumber=0)
         units_per_em = float(tt["head"].unitsPerEm)
         hhea = tt["hhea"]
-        post = tt["post"]
-        os2 = tt.get("OS/2", None)
-        cmap = tt.getBestCmap() or {}
-        glyph_set = tt.getGlyphSet()
+        hmtx = tt["hmtx"]
     except Exception:
         return None
+
+    post = tt.get("post", None)
+    os2 = tt.get("OS/2", None)
+    try:
+        cmap = tt.getBestCmap() or {}
+    except Exception:
+        cmap = {}
+    glyph_set = tt.getGlyphSet()
 
     cap_height = _os2_ratio(os2, "sCapHeight", units_per_em) or _bbox_top_ratio(glyph_set, cmap, "H", units_per_em)
     x_height = _os2_ratio(os2, "sxHeight", units_per_em) or _bbox_top_ratio(glyph_set, cmap, "x", units_per_em)
 
     widths = []
-    hmtx = tt["hmtx"]
     for char in _SAMPLE_LETTERS:
         glyph_name = cmap.get(ord(char))
         if glyph_name is not None and glyph_name in hmtx.metrics:
@@ -197,8 +211,8 @@ def extract_metrics(path: Path) -> FontMetrics | None:
         average_width_ratio=(sum(widths) / len(widths) / units_per_em) if widths else 0.5,
         ascender_ratio=hhea.ascender / units_per_em,
         descender_ratio=hhea.descender / units_per_em,
-        italic_angle=float(post.italicAngle),
-        is_fixed_pitch=bool(post.isFixedPitch),
+        italic_angle=float(post.italicAngle) if post is not None else 0.0,
+        is_fixed_pitch=bool(post.isFixedPitch) if post is not None else False,
         weight_class=int(os2.usWeightClass) if os2 is not None else 400,
     )
 

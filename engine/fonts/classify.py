@@ -151,21 +151,15 @@ def _matches_any(name: str, tokens: tuple[str, ...]) -> bool:
     return any(token in lowered for token in tokens)
 
 
-def fingerprint_style(classification: FontClassification) -> StyleFingerprint:
-    """FNT-04: infer bold/italic/family from name tokens, corroborated by descriptor fields."""
-    _, plain_name = split_subset_tag(classification.base_font)
+def infer_style_from_name(base_font: str) -> StyleFingerprint:
+    """The name-tokens-only part of FNT-04: what a BaseFont's own name says about
+    its weight, slant and family, with no descriptor to corroborate it. Used
+    directly for non-embedded (no-descriptor) fonts; fingerprint_style layers
+    descriptor evidence on top of this for embedded ones."""
+    _, plain_name = split_subset_tag(base_font)
 
-    name_says_bold = _matches_any(plain_name, _BOLD_NAME_TOKENS)
-    descriptor_says_bold = (classification.flags is not None and bool(classification.flags & _FLAG_FORCE_BOLD)) or (
-        classification.font_weight is not None and classification.font_weight >= 600
-    )
-    bold = name_says_bold or descriptor_says_bold
-
-    name_says_italic = _matches_any(plain_name, _ITALIC_NAME_TOKENS)
-    descriptor_says_italic = (classification.italic_angle is not None and abs(classification.italic_angle) >= 1.0) or (
-        classification.flags is not None and bool(classification.flags & _FLAG_ITALIC)
-    )
-    italic = name_says_italic or descriptor_says_italic
+    bold = _matches_any(plain_name, _BOLD_NAME_TOKENS)
+    italic = _matches_any(plain_name, _ITALIC_NAME_TOKENS)
 
     if _matches_any(plain_name, _MONOSPACE_NAME_TOKENS):
         family_class = "monospace"
@@ -173,6 +167,28 @@ def fingerprint_style(classification: FontClassification) -> StyleFingerprint:
         family_class = "serif"
     elif _matches_any(plain_name, _SANS_NAME_TOKENS):
         family_class = "sans"
+    else:
+        family_class = "unknown"
+
+    return StyleFingerprint(bold=bold, italic=italic, family_class=family_class, weight=700 if bold else 400)
+
+
+def fingerprint_style(classification: FontClassification) -> StyleFingerprint:
+    """FNT-04: infer bold/italic/family from name tokens, corroborated by descriptor fields."""
+    from_name = infer_style_from_name(classification.base_font)
+
+    descriptor_says_bold = (classification.flags is not None and bool(classification.flags & _FLAG_FORCE_BOLD)) or (
+        classification.font_weight is not None and classification.font_weight >= 600
+    )
+    bold = from_name.bold or descriptor_says_bold
+
+    descriptor_says_italic = (classification.italic_angle is not None and abs(classification.italic_angle) >= 1.0) or (
+        classification.flags is not None and bool(classification.flags & _FLAG_ITALIC)
+    )
+    italic = from_name.italic or descriptor_says_italic
+
+    if from_name.family_class != "unknown":
+        family_class = from_name.family_class
     elif classification.flags is not None and bool(classification.flags & _FLAG_SERIF):
         family_class = "serif"
     else:
