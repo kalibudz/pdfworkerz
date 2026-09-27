@@ -188,13 +188,17 @@ def _find_font_entry(page: pymupdf.Page, basefont: str) -> tuple[int, str] | Non
     Compared with the subset tag stripped from both sides: PyMuPDF's texttrace
     reports a subset font's name without its "ABCDEF+" prefix (confirmed
     empirically), while ``Page.get_fonts()`` reports the BaseFont as-is, prefix
-    included.
+    included. A font with no real BaseFont at all (Type3 commonly has none,
+    FNT-15) gets a synthesized "<FontType> (<ref>)" name from texttrace
+    instead; matched here by font type against get_fonts's empty entry.
     """
     _, target = split_subset_tag(basefont)
     for entry in page.get_fonts(full=True):
-        xref, _ext, _font_type, entry_basefont, resource_name, *_rest = entry
+        xref, _ext, font_type, entry_basefont, resource_name, *_rest = entry
         _, entry_plain = split_subset_tag(entry_basefont)
         if entry_plain == target:
+            return xref, resource_name
+        if not entry_basefont and target.startswith(f"{font_type} ("):
             return xref, resource_name
     return None
 

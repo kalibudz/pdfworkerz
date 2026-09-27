@@ -15,6 +15,17 @@ full font -- whenever that font can be found. The result is still the
 *same* font (identical outlines, weight and metrics); only the embedding
 mechanism differs from the literal description, and that is why the tier
 is still reported as "exact", not "approximate".
+
+FNT-15: a Type3 font's "glyphs" are content-stream drawing procedures, not
+a font program PyMuPDF can load through ``Font()``/``insert_text()`` --
+there is no file or buffer to hand it. Reusing the font's own procedures
+for a character they already define (SPEC.md section 5.5's first
+preference) would need a different drawing path entirely, emitting `Tf`/
+`Tj` against the document's own Type3 resource directly; that is not
+implemented, so a Type3 font is always routed to the fallback tier here,
+explicitly and with its own note, rather than silently (and wrongly)
+falling into the standard-font path that a font with no embedded program
+would otherwise take.
 """
 
 from __future__ import annotations
@@ -80,6 +91,21 @@ def resolve_font(
     engine.fonts.match.build_font_index() result; building it is
     expensive, so callers should build it once.
     """
+    if classification.font_type == "Type3":
+        fingerprint = infer_style_from_name(classification.base_font)
+        name = _standard_fallback_name(fingerprint.bold, fingerprint.italic, fingerprint.family_class)
+        return FontResolution(
+            tier=TIER_FALLBACK,
+            confidence=_FALLBACK_CONFIDENCE,
+            fontname=name,
+            font_bytes=None,
+            requires_approval=True,
+            note=(
+                "Type3 font (FNT-15): its glyph procedures can't be drawn through "
+                "PyMuPDF's text API, so a standard-font fallback is used instead"
+            ),
+        )
+
     if not classification.embedded:
         fingerprint = infer_style_from_name(classification.base_font)
         name = _standard_fallback_name(fingerprint.bold, fingerprint.italic, fingerprint.family_class)
