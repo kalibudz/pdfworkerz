@@ -1,15 +1,15 @@
 {
   "phase": "P4",
-  "taskId": "P3 complete (15/15). 57/161 features done. Next: independent P1-P3 review, then P4 (command bar & recipes)",
-  "step": "All branches consolidated into main (PR #1 merged locally by fast-forward). Verification moved from GitHub Actions (billed; manual-only now) to the local gate: python tools/gate.py, 14/14 steps, 551 tests, 94.25% coverage.",
+  "taskId": "Independent P1-P3 review: 16 findings fixed (7f4273e); reviewer re-check pending",
+  "step": "An independent reviewer found 16 defects in P1-P3 that the green gate missed (silent content corruption in text edits, encrypted PDFs saved decrypted, no way to save from the UI, and more). All are fixed with regression tests; gate 14/14, 603 tests, 94.3% coverage. The same reviewer is re-checking the fixes before sign-off.",
   "branch": "main",
-  "lastGreenCommit": "28fe0e278465b58ea89de2a784ac454e519e46db (local gate, Windows 11, Python 3.14.3, 14/14 steps)",
-  "nextAction": "1) Independent reviewer pass for P1-P3 (a fresh sub-agent that did not build them), signed off in PROGRESS.md. 2) Start P4 (CMD-01..08: plain-English command grammar and recipes); run tools/session_budget.py first. Every session: run python tools/gate.py before each commit; push only with the owner's approval.",
+  "lastGreenCommit": "7f4273e (local gate, Windows 11, Python 3.14.3, 14/14 steps; Python 3.11 types+tests also pass)",
+  "nextAction": "1) Read the reviewer's re-check; fix anything it reopens; record P1-P3 sign-off in PROGRESS.md. 2) Owner decisions on the feature-scope gaps below. 3) Start P4 (CMD-01..08); run tools/session_budget.py first. Every session: python tools/gate.py before each commit; push only with the owner's approval.",
   "openQuestions": [
     {
       "phase": "P1",
       "kind": "todo",
-      "text": "P1-P3 were self-reviewed by the sessions that built them; an independent reviewer pass is running (2026-09-28)."
+      "text": "Independent reviewer re-check of the 16 review fixes (commit 7f4273e) is running; sign-off for P1-P3 follows it."
     },
     {
       "phase": "P2",
@@ -55,6 +55,31 @@
       "phase": "P9",
       "kind": "todo",
       "text": "Re-verify the iLovePDF / Nitro parity tags against the vendors' current feature pages before the first release."
+    },
+    {
+      "phase": "P2",
+      "kind": "decision",
+      "text": "EDT-03 is named 'match style of' or explicit style, but only 'match style of' exists. Build explicit style (font, size, color chosen by the user), or rename EDT-03 and add a planned feature for it?"
+    },
+    {
+      "phase": "P2",
+      "kind": "decision",
+      "text": "EDT-06 is named 'change font, size, color and weight', but only size and color can change. Build font and weight changes, or rename EDT-06 and add a planned feature?"
+    },
+    {
+      "phase": "P2",
+      "kind": "decision",
+      "text": "FNT-11 promises 'preserving justification'; justified text and shifting later lines when a paragraph grows are not done. Build them, or rename FNT-11 and plan them separately?"
+    },
+    {
+      "phase": "P2",
+      "kind": "decision",
+      "text": "FNT-14 is named 'CJK, right-to-left and vertical text support', but RTL and vertical editing are unsupported (CJK works). Split into a done CJK feature and a planned RTL/vertical one?"
+    },
+    {
+      "phase": "P2",
+      "kind": "decision",
+      "text": "The CLI/API default require_tier is 'approximate', so an approximate font match is applied without approval unless the caller asks for 'exact'. SPEC 5.3 says approximate and fallback need approval. Change the default to 'exact' (callers opt in to weaker matches)?"
     }
   ],
   "updated": "2026-09-28"
