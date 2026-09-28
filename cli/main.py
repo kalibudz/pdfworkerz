@@ -9,6 +9,7 @@ stay on the exact same execution path once those exist.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -18,7 +19,7 @@ from engine import __version__
 from engine.document import Document
 from engine.edit import EditResult
 from engine.errors import PdfWorkerzError
-from engine.ops.base import InspectOp, RenderPageOp
+from engine.ops.base import InspectOp, PageSpansOp, RenderPageOp
 from engine.ops.text import DeleteTextOp, InsertTextOp, ReplaceTextOp, RestyleTextOp
 from server.app import create_app, run_server
 
@@ -106,6 +107,22 @@ def render(
     output = out or path.with_name(f"{path.stem}.p{page}.png")
     output.write_bytes(png_bytes)
     typer.echo(str(output))
+
+
+@app.command()
+def spans(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to inspect")],
+    page: Annotated[int, typer.Argument(help="0-based page index")] = 0,
+    password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
+) -> None:
+    """Print every text span on one page (FNT-01/FNT-02) as JSON -- the same
+    data UI-02's click-to-edit overlay and UI-03's inspector panel use."""
+    try:
+        with Document.open(path, password=password) as document:
+            traces = PageSpansOp(page_index=page).apply(document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(json.dumps([trace.model_dump(mode="json") for trace in traces], indent=2))
 
 
 @app.command()

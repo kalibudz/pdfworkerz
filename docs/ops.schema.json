@@ -47,6 +47,107 @@
     },
     {
       "additionalProperties": false,
+      "description": "Every text span on one page, with its style (FNT-01) and text state\n(FNT-02) -- what UI-02's click-to-edit overlay and UI-03's inspector\npanel are both built on (state/checkpoint.json's own plan for them).\nA read-only query, like InspectOp/RenderPageOp: never journaled, so a\ncaller applies it directly rather than through the undo/redo journal\n(see server/app.py's dedicated GET route for this one, matching\nrender_page's own convenience route rather than the generic Op\nendpoint).",
+      "properties": {
+        "op": {
+          "const": "page_spans",
+          "default": "page_spans",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        }
+      },
+      "title": "PageSpansOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A read-only preview of the font resolution a replacement would use --\nnever draws, redacts or verifies anything, so (like PageSpansOp) it's\nnever journaled; server/app.py calls it directly. `span_index` is\npositional in a fresh `extract_page_spans` call on `page_index`, not a\ntext search (see _span_at).",
+      "properties": {
+        "op": {
+          "const": "preview_text",
+          "default": "preview_text",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "span_index": {
+          "title": "Span Index",
+          "type": "integer"
+        },
+        "needed_text": {
+          "title": "Needed Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page_index",
+        "span_index",
+        "needed_text"
+      ],
+      "title": "PreviewTextOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "EDT-02, index-precise: replace exactly the span at `span_index`\n(found the same way PreviewTextOp finds it), never any other span that\nhappens to contain the same text elsewhere on the page -- what UI-02's\nclick-to-edit commit step needs and ReplaceTextOp's text search can't\nguarantee. Journaled normally through the generic ops endpoint, unlike\nits read-only sibling above: this one really does edit the document.",
+      "properties": {
+        "op": {
+          "const": "replace_span_text",
+          "default": "replace_span_text",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "span_index": {
+          "title": "Span Index",
+          "type": "integer"
+        },
+        "new_text": {
+          "title": "New Text",
+          "type": "string"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "fit": {
+          "default": false,
+          "title": "Fit",
+          "type": "boolean"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_index",
+        "span_index",
+        "new_text"
+      ],
+      "title": "ReplaceSpanTextOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "EDT-02: find text (literal or regex) and replace it, matching the original style.",
       "properties": {
         "match": {

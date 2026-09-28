@@ -179,6 +179,74 @@ def test_render_page_returns_png_bytes(client: TestClient, simple_path: Path) ->
 
 
 @pytest.mark.feature("COR-11")
+def test_page_spans_route_returns_every_span(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.get(f"/documents/{document_id}/pages/0/spans", headers=AUTH)
+    assert response.status_code == 200
+    spans = response.json()
+    assert len(spans) == 1
+    assert spans[0]["style"]["text"] == "Hello, PDFWorkerz."
+    assert spans[0]["style"]["span_index"] == 0
+
+
+@pytest.mark.feature("COR-11")
+def test_preview_route_reports_an_exact_match(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.get(
+        f"/documents/{document_id}/pages/0/preview",
+        params={"span_index": 0, "needed_text": "Editor"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tier"] == "exact"
+    assert body["requires_approval"] is False
+
+
+@pytest.mark.feature("COR-11")
+def test_preview_route_with_an_out_of_range_span_index_returns_400(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.get(
+        f"/documents/{document_id}/pages/0/preview",
+        params={"span_index": 99, "needed_text": "x"},
+        headers=AUTH,
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.feature("COR-11")
+def test_preview_route_never_appears_in_history(client: TestClient, simple_path: Path) -> None:
+    """PreviewTextOp is read-only and must never be journaled -- confirms
+    it's actually wired to a direct apply() call, not the generic (and
+    journaled) POST .../ops endpoint."""
+    document_id = _open(client, simple_path)
+    client.get(
+        f"/documents/{document_id}/pages/0/preview",
+        params={"span_index": 0, "needed_text": "Editor"},
+        headers=AUTH,
+    )
+    history = client.get(f"/documents/{document_id}/history", headers=AUTH).json()
+    assert history["ops"] == []
+    assert history["can_undo"] is False
+
+
+@pytest.mark.feature("COR-11")
+def test_replace_span_text_op_via_the_generic_ops_endpoint(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "replace_span_text", "page_index": 0, "span_index": 0, "new_text": "Hello, Editor."},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert response.json()["tier"] == "exact"
+
+    history = client.get(f"/documents/{document_id}/history", headers=AUTH).json()
+    assert len(history["ops"]) == 1
+    assert history["can_undo"] is True
+
+
+@pytest.mark.feature("COR-11")
 def test_document_file_route_returns_the_current_pdf_bytes(client: TestClient, simple_path: Path) -> None:
     document_id = _open(client, simple_path)
     response = client.get(f"/documents/{document_id}/file", headers=AUTH)

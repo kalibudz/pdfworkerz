@@ -56,8 +56,9 @@ from engine.errors import (
     RepairFailedError,
     WrongPasswordError,
 )
-from engine.ops.base import RenderPageOp, parse_op
+from engine.ops.base import PageSpansOp, RenderPageOp, parse_op
 from engine.ops.journal import UndoRedoJournal
+from engine.ops.text import PreviewTextOp
 
 _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
     DocumentNotFoundError: 404,
@@ -185,6 +186,22 @@ def apply_op(document_id: str, body: dict[str, Any], journal: JournalDep) -> Any
 def render_page(document_id: str, page_index: int, journal: JournalDep, dpi: int = 150) -> Response:
     png_bytes = RenderPageOp(page_index=page_index, dpi=dpi).apply(journal.document)
     return Response(content=png_bytes, media_type="image/png")
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/spans")
+def page_spans(document_id: str, page_index: int, journal: JournalDep) -> Any:
+    """UI-02's click-to-edit overlay and UI-03's inspector panel both read
+    this. Read-only (PageSpansOp), so -- like render_page above -- it's
+    applied directly rather than through the undo/redo journal."""
+    return _jsonable(PageSpansOp(page_index=page_index).apply(journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/preview")
+def preview_text(document_id: str, page_index: int, span_index: int, needed_text: str, journal: JournalDep) -> Any:
+    """UI-02's live "Match" preview as the user types, before anything is
+    committed. Read-only (PreviewTextOp), applied directly like page_spans."""
+    op = PreviewTextOp(page_index=page_index, span_index=span_index, needed_text=needed_text)
+    return _jsonable(op.apply(journal.document))
 
 
 @router.get("/documents/{document_id}/file")

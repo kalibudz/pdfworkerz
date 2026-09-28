@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from engine.errors import OpValidationError
+from engine.fonts.style import SpanTrace, extract_page_spans
 
 if TYPE_CHECKING:
     from engine.document import Document
@@ -117,3 +118,21 @@ class RenderPageOp(Op):
 
     def apply(self, document: Document) -> bytes:
         return document.render_page(self.page_index, dpi=self.dpi)
+
+
+@register_op
+class PageSpansOp(Op):
+    """Every text span on one page, with its style (FNT-01) and text state
+    (FNT-02) -- what UI-02's click-to-edit overlay and UI-03's inspector
+    panel are both built on (state/checkpoint.json's own plan for them).
+    A read-only query, like InspectOp/RenderPageOp: never journaled, so a
+    caller applies it directly rather than through the undo/redo journal
+    (see server/app.py's dedicated GET route for this one, matching
+    render_page's own convenience route rather than the generic Op
+    endpoint)."""
+
+    op: Literal["page_spans"] = "page_spans"
+    page_index: int = 0
+
+    def apply(self, document: Document) -> list[SpanTrace]:
+        return extract_page_spans(document.raw, self.page_index)

@@ -14,8 +14,10 @@ from __future__ import annotations
 import re
 from typing import Literal
 
+from pydantic import BaseModel, ConfigDict
+
 from engine.document import Document
-from engine.edit import EditResult, insert_text_near, reflow_block, replace_span_text
+from engine.edit import EditResult, insert_text_near, reflow_block, replace_span_text, resolve_font_for_span
 from engine.errors import OpValidationError
 from engine.fonts.blocks import detect_blocks, find_block_containing
 from engine.fonts.match import FontCandidate, build_font_index
@@ -63,6 +65,93 @@ def _find_first_match(
         if found:
             return span, found
     return None
+
+
+def _span_at(document: Document, page_index: int, span_index: int) -> SpanTrace:
+    """The span UI-02's click-to-edit overlay is targeting, found by its
+    position in a fresh extraction rather than by searching for its text --
+    unlike ReplaceTextOp, this never risks editing a different span that
+    happens to contain the same text elsewhere on the page. Both callers
+    below need a fresh extraction anyway (span indices are only meaningful
+    against the page's *current* state), and neither can afford to just let
+    a bad index raise IndexError -- that would be a 500, not a clear
+    "never guess silently" validation error."""
+    spans = extract_page_spans(document.raw, page_index)
+    if not 0 <= span_index < len(spans):
+        raise OpValidationError(f"page {page_index} has {len(spans)} span(s); span_index {span_index} is out of range")
+    return spans[span_index]
+
+
+class PreviewResult(BaseModel):
+    """What committing a text edit *would* do, without doing it -- the same
+    font-resolution decision replace_span_text makes, reported for UI-02's
+    live preview and UI-03's inspector "Match" field (SPEC.md section 8.1)
+    as the user types, before they've committed to anything."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tier: str
+    """"exact" | "approximate" | "fallback" -- a plain str, matching FontResolution.tier
+    and EditResult.tier's own type, since both are constructed from the same values."""
+    confidence: float
+    requires_approval: bool
+    note: str
+
+
+@register_op
+class PreviewTextOp(Op):
+    """A read-only preview of the font resolution a replacement would use --
+    never draws, redacts or verifies anything, so (like PageSpansOp) it's
+    never journaled; server/app.py calls it directly. `span_index` is
+    positional in a fresh `extract_page_spans` call on `page_index`, not a
+    text search (see _span_at)."""
+
+    op: Literal["preview_text"] = "preview_text"
+    page_index: int
+    span_index: int
+    needed_text: str
+
+    def apply(self, document: Document) -> PreviewResult:
+        span = _span_at(document, self.page_index, self.span_index)
+        resolution = resolve_font_for_span(document, self.page_index, span, self.needed_text, font_index=_font_index())
+        return PreviewResult(
+            tier=resolution.tier,
+            confidence=resolution.confidence,
+            requires_approval=resolution.requires_approval,
+            note=resolution.note,
+        )
+
+
+@register_op
+class ReplaceSpanTextOp(Op):
+    """EDT-02, index-precise: replace exactly the span at `span_index`
+    (found the same way PreviewTextOp finds it), never any other span that
+    happens to contain the same text elsewhere on the page -- what UI-02's
+    click-to-edit commit step needs and ReplaceTextOp's text search can't
+    guarantee. Journaled normally through the generic ops endpoint, unlike
+    its read-only sibling above: this one really does edit the document."""
+
+    op: Literal["replace_span_text"] = "replace_span_text"
+    page_index: int
+    span_index: int
+    new_text: str
+    require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
+    """Matches every other text-editing Op's default (SPEC.md section 5.3:
+    only a fallback match is rejected outright). The click-to-edit overlay
+    that drives this Op gets to see PreviewTextOp's result and ask the user
+    to confirm *before* committing, so it passes "fallback" explicitly once
+    that confirmation happens -- this default is what a caller with no such
+    UI-side gate gets instead."""
+    fit: bool = False
+    verify: bool = True
+
+    def apply(self, document: Document) -> EditResult:
+        span = _span_at(document, self.page_index, self.span_index)
+        result = replace_span_text(
+            document, self.page_index, span, self.new_text, font_index=_font_index(), fit=self.fit, verify=self.verify
+        )
+        _check_tier(result, self.require_tier, where=type(self).__name__)
+        return result
 
 
 class _FindReplaceOp(Op):

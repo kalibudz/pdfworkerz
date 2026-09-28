@@ -11,8 +11,17 @@ import pytest
 
 from engine.document import Document
 from engine.errors import OpValidationError
+from engine.fonts.style import extract_page_spans
 from engine.ops.base import parse_op
-from engine.ops.text import DeleteTextOp, InsertTextOp, ReflowTextOp, ReplaceTextOp, RestyleTextOp
+from engine.ops.text import (
+    DeleteTextOp,
+    InsertTextOp,
+    PreviewTextOp,
+    ReflowTextOp,
+    ReplaceSpanTextOp,
+    ReplaceTextOp,
+    RestyleTextOp,
+)
 from tests.corpus.build_corpus import Corpus
 
 
@@ -256,5 +265,113 @@ def test_reflow_text_op_require_tier_rejects_a_weak_match(corpus: Corpus, work_d
 @pytest.mark.feature("FNT-11")
 def test_reflow_text_op_round_trips_through_json() -> None:
     op = ReflowTextOp(match="line one", new_text="new", page_index=0, allow_overflow=True, case_sensitive=False)
+    restored = parse_op(op.model_dump())
+    assert restored == op
+
+
+# -- PreviewTextOp and ReplaceSpanTextOp (UI-02/UI-03 support: a live, non-
+# mutating preview of a text edit's font resolution, and an index-precise
+# commit that can't accidentally edit a different span with the same text) --
+
+
+@pytest.mark.feature("FNT-07")
+def test_preview_text_op_reports_an_exact_match_without_changing_anything(simple_doc: Document) -> None:
+    """ "Without changing anything" means the page's own content, not literal
+    byte-for-byte serialization -- confirmed separately that even a plain
+    PyMuPDF read (Document.extract_font) already perturbs tobytes()'s exact
+    output with zero drawing or redaction involved, so that's not a
+    meaningful signal of mutation here."""
+    op = PreviewTextOp(page_index=0, span_index=0, needed_text="Editor")
+    result = op.apply(simple_doc)
+    assert result.tier == "exact"
+    assert result.confidence == 1.0
+    assert result.requires_approval is False
+    assert simple_doc.page_count == 1
+    assert simple_doc.raw[0].get_text().strip() == "Hello, PDFWorkerz."  # its own text is still there, unedited
+
+
+@pytest.mark.feature("FNT-15")
+def test_preview_text_op_reports_fallback_for_a_type3_font(corpus: Corpus, work_dir: Path) -> None:
+    source = work_dir / "type3.pdf"
+    shutil.copy(corpus.type3, source)
+    doc = Document.open(source)
+    op = PreviewTextOp(page_index=0, span_index=0, needed_text="anything")
+    result = op.apply(doc)
+    assert result.tier == "fallback"
+    assert result.requires_approval is True
+    assert "Type3" in result.note
+    doc.close()
+
+
+@pytest.mark.feature("FNT-01")
+def test_preview_text_op_rejects_an_out_of_range_span_index(simple_doc: Document) -> None:
+    op = PreviewTextOp(page_index=0, span_index=99, needed_text="x")
+    with pytest.raises(OpValidationError, match="out of range"):
+        op.apply(simple_doc)
+
+
+@pytest.mark.feature("FNT-07")
+def test_preview_text_op_round_trips_through_json() -> None:
+    op = PreviewTextOp(page_index=0, span_index=1, needed_text="new text")
+    restored = parse_op(op.model_dump())
+    assert restored == op
+
+
+@pytest.mark.feature("EDT-02")
+def test_replace_span_text_op_edits_only_the_targeted_span(work_dir: Path) -> None:
+    """The same text appearing twice on a page (ReplaceTextOp's own test above
+    edits every occurrence by design) -- span_index must pick exactly one,
+    the whole point of adding this Op rather than reusing ReplaceTextOp for
+    click-to-edit, where the user picked one specific instance on screen."""
+    path = work_dir / "repeated.pdf"
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page()
+    font = pdf.make_indirect(
+        pikepdf.Dictionary(Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1, BaseFont=pikepdf.Name("/Helvetica"))
+    )
+    page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
+    page.Contents = pdf.make_stream(
+        b"BT\n/F1 12 Tf\n1 0 0 1 72 700 Tm\n(cat) Tj\nET\nBT\n/F1 12 Tf\n1 0 0 1 72 650 Tm\n(cat) Tj\nET\n"
+    )
+    pdf.save(path)
+    pdf.close()
+
+    doc = Document.open(path)
+    op = ReplaceSpanTextOp(page_index=0, span_index=1, new_text="dog", require_tier="exact")
+    result = op.apply(doc)
+    assert result.tier == "exact"
+
+    remaining = [span.style.text for span in extract_page_spans(doc.raw, 0)]
+    assert "cat" in remaining  # the first occurrence (span 0) is untouched
+    assert "dog" in remaining  # only the second (span 1) changed
+    doc.close()
+
+
+@pytest.mark.feature("EDT-02")
+def test_replace_span_text_op_require_tier_rejects_a_weak_match(corpus: Corpus, work_dir: Path) -> None:
+    path = work_dir / "unmatchable.pdf"
+    with pikepdf.open(corpus.embedded_font_subset) as pdf:
+        font = pdf.pages[0].Resources.Font["/EmbeddedVeraBold"]
+        font["/BaseFont"] = pikepdf.Name("/XYZUNK+TotallyUnknownFontXYZ")
+        font["/DescendantFonts"][0]["/BaseFont"] = pikepdf.Name("/XYZUNK+TotallyUnknownFontXYZ")
+        pdf.save(path)
+
+    doc = Document.open(path)
+    op = ReplaceSpanTextOp(page_index=0, span_index=0, new_text="world", require_tier="exact")
+    with pytest.raises(OpValidationError, match="fell back to tier"):
+        op.apply(doc)
+    doc.close()
+
+
+@pytest.mark.feature("EDT-02")
+def test_replace_span_text_op_rejects_an_out_of_range_span_index(simple_doc: Document) -> None:
+    op = ReplaceSpanTextOp(page_index=0, span_index=99, new_text="x")
+    with pytest.raises(OpValidationError, match="out of range"):
+        op.apply(simple_doc)
+
+
+@pytest.mark.feature("EDT-02")
+def test_replace_span_text_op_round_trips_through_json() -> None:
+    op = ReplaceSpanTextOp(page_index=0, span_index=1, new_text="new text", fit=True)
     restored = parse_op(op.model_dump())
     assert restored == op
