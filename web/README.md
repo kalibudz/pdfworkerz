@@ -1,11 +1,11 @@
 # PDFWorkerz web UI
 
 The browser UI (SPEC.md section 8): a pdf.js canvas with a thumbnail rail
-(UI-01), the password prompt for encrypted files (UI-06), and -- as later
-features land -- the click-to-edit overlay, inspector, command bar and
-history panel. It talks to `server/app.py` over plain JSON HTTP; nothing
-here runs on the server, and nothing in `server/` knows this directory
-exists.
+(UI-01), the password prompt for encrypted files (UI-06), a click-to-edit
+overlay (UI-02) and an inspector panel (UI-03) -- and, as later features
+land, the command bar and history panel. It talks to `server/app.py` over
+plain JSON HTTP; nothing here runs on the server, and nothing in `server/`
+knows this directory exists.
 
 ## Running it
 
@@ -35,6 +35,30 @@ double. Build first (`npm run build`), then from the repo root:
 server, a static file server for `dist/`, and the browser are wired
 together, and the repo root's environment notes for why the browser
 executable path is resolved the way it is.
+
+## UI-02's font approximation is deliberate, not exact
+
+The click-to-edit overlay (`src/overlay.ts`) styles each editable box with
+the span's *exact* size and color, but only an *approximated*
+font-family/weight/style guessed from the font's name (serif/sans/mono,
+bold, italic). It does not load the document's actual embedded font as a
+web font in the browser -- SPEC.md's "drawn in the detected font" is an
+ideal this gets close to, not a claim that the glyphs on screen while
+editing are pixel-identical to the PDF's own typeface. The size, color,
+and (once committed) the actual drawn result all go through the same
+font-resolution pipeline the CLI and server already use (`engine.edit`),
+which *is* exact -- only the live, in-browser preview while typing is an
+approximation.
+
+`overlay.ts` also has a documented, confirmed-the-hard-way reentrancy
+fix worth reading before touching its cancel/commit logic: setting
+`contentEditable = false` on a focused element can itself fire a
+synchronous `blur`, which re-enters the cancel handler through
+`box.onblur` *before* the outer call has finished. `cancelEdit()` takes a
+local copy of the shared "currently editing" reference and clears the
+shared one immediately, before touching the box at all, specifically so
+that reentrant call becomes a harmless no-op instead of operating on a
+box the outer call has already moved past.
 
 ## The pdfjs-dist version pin and the `getOrInsertComputed` polyfill
 

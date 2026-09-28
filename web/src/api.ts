@@ -32,6 +32,49 @@ export interface HealthResponse {
   version: string;
 }
 
+/** Mirrors engine.fonts.style.SpanStyle field-for-field (FNT-01). */
+export interface SpanStyle {
+  page_index: number;
+  span_index: number;
+  text: string;
+  font: string;
+  size: number;
+  color: [number, number, number];
+  opacity: number;
+  bbox: [number, number, number, number];
+  rotation_degrees: number;
+  ascender: number;
+  descender: number;
+}
+
+/** Mirrors engine.fonts.style.TextState field-for-field (FNT-02); absent
+ * when the content stream didn't correlate 1:1 with texttrace's spans --
+ * see extract_page_spans's own docstring for exactly when that happens. */
+export interface SpanTextState {
+  char_spacing: number;
+  word_spacing: number;
+  horizontal_scale: number;
+  leading: number;
+  rise: number;
+  render_mode: number;
+  font_resource: string | null;
+  font_size: number | null;
+}
+
+export interface SpanTrace {
+  style: SpanStyle;
+  text_state: SpanTextState | null;
+}
+
+/** Mirrors engine.ops.text.PreviewResult -- what committing a text edit
+ * would do, without doing it (UI-02's live "Match" preview). */
+export interface PreviewResult {
+  tier: "exact" | "approximate" | "fallback";
+  confidence: number;
+  requires_approval: boolean;
+  note: string;
+}
+
 async function parseErrorDetail(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json();
@@ -74,6 +117,46 @@ export class Api {
   async documentFile(documentId: string): Promise<ArrayBuffer> {
     const response = await this.request(`/documents/${documentId}/file`);
     return await response.arrayBuffer();
+  }
+
+  /** UI-02/UI-03: every text span on one page, with its style and text state. */
+  async pageSpans(documentId: string, pageIndex: number): Promise<SpanTrace[]> {
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/spans`);
+    return (await response.json()) as SpanTrace[];
+  }
+
+  /** UI-02's live preview, before anything is committed: what font-resolution
+   * tier `neededText` would get if it replaced `spanIndex`'s current text. */
+  async previewText(
+    documentId: string,
+    pageIndex: number,
+    spanIndex: number,
+    neededText: string,
+  ): Promise<PreviewResult> {
+    const params = new URLSearchParams({ span_index: String(spanIndex), needed_text: neededText });
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/preview?${params}`);
+    return (await response.json()) as PreviewResult;
+  }
+
+  /** UI-02's commit step: replace exactly `spanIndex`'s text, journaled
+   * normally (unlike the two read-only calls above) so it's undoable. */
+  async replaceSpanText(
+    documentId: string,
+    pageIndex: number,
+    spanIndex: number,
+    newText: string,
+    requireTier: "exact" | "approximate" | "fallback",
+  ): Promise<void> {
+    await this.request(`/documents/${documentId}/ops`, {
+      method: "POST",
+      body: JSON.stringify({
+        op: "replace_span_text",
+        page_index: pageIndex,
+        span_index: spanIndex,
+        new_text: newText,
+        require_tier: requireTier,
+      }),
+    });
   }
 
   private async request(path: string, init: RequestInit = {}): Promise<Response> {

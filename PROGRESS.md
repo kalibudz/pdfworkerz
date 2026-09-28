@@ -9,7 +9,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | First green GitHub Actions run: [run #17](https://github.com/kalibudz/pdfworkerz/actions/runs/36356246278), all 11 jobs, 2026-09-27 |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P3 | Web UI with click-to-edit | 🔶 In progress: 3/15 features proven by tests | |
+| P3 | Web UI with click-to-edit | 🔶 In progress: 5/15 features proven by tests | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,106 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-28 — UI-02 and UI-03: click-to-edit and the inspector panel
+
+- Continuing straight from the checkpoint's own plan: UI-03 (inspector
+  panel) and UI-02 (click-to-edit overlay) together, since they share the
+  same per-span style data that nothing server-side exposed yet.
+- **Backend, in its own commit before any frontend work** (three new
+  pieces, all thin wrappers over existing engine internals -- nothing here
+  duplicates logic that already existed):
+  - `PageSpansOp` (`engine/ops/base.py`): every span's style and text
+    state on a page, read-only, exposed at `GET .../pages/{n}/spans`.
+  - `PreviewTextOp` (`engine/ops/text.py`): what committing a text edit
+    *would* do -- the exact font-resolution decision
+    `engine.edit.resolve_font_for_span` already makes, already
+    side-effect-free -- without drawing, redacting or touching the
+    document at all. `GET .../pages/{n}/preview`. This is what lets the
+    overlay show a live "Match" tier as the user types, before they've
+    committed to anything, and is also where tracker/features.json's
+    "confidence" field for UI-03 actually comes from (not buildable from
+    `PageSpansOp`'s static data alone).
+  - `ReplaceSpanTextOp` (`engine/ops/text.py`): a real bug headed off
+    before it shipped. `ReplaceTextOp` finds its target by *searching*
+    page text, so if the overlay's commit step had reused it, clicking one
+    specific span and committing would have silently edited *every* span
+    with the same text on that page instead -- confirmed with a
+    two-identical-spans test fixture. This Op targets a span by its
+    position in a fresh extraction instead (shared `_span_at` helper with
+    `PreviewTextOp`, raising a clear `OpValidationError` rather than a raw
+    `IndexError` on a bad index) -- exactly one span changes, guaranteed.
+    Journaled normally, unlike its two read-only siblings above.
+  - Also added `pdfworkerz spans` (mirrors `inspect`/`render`) and 15 new
+    engine/server/CLI tests for all three.
+- **Frontend**: `src/inspector.ts` (UI-03) is a small, focused side panel
+  -- font (subset tag parsed out for readability), size, color (swatch +
+  hex), Tc/Tz spacing, rotation, and a live "Match" row (a colored dot --
+  green/amber/red for exact/approximate/fallback -- plus the confidence
+  percentage and the resolver's own note as a tooltip). `src/overlay.ts`
+  (UI-02) draws one absolutely-positioned box per span over the canvas
+  (positioned via pdf.js's own `convertToViewportPoint` on the span's
+  bbox corners -- confirmed against the installed pdfjs-dist's own `.d.ts`
+  that no `convertToViewportRectangle` exists on this version's
+  `PageViewport`, so both corners are converted and normalized by hand
+  instead of assuming a method that isn't there). Clicking turns a box
+  `contenteditable`; typing debounces into `PreviewTextOp` calls that
+  drive the inspector's Match row live; Enter commits through
+  `ReplaceSpanTextOp` (asking for confirmation first via `window.confirm`
+  when the preview's own `requires_approval` says so -- SPEC.md section
+  5.3's tiers 3/4, not a tier-name string comparison reinvented in TS);
+  Escape discards. `viewer.ts` now owns fetching this page's spans
+  alongside every render and reloading everything (bytes, spans, this
+  page's render, the *whole* thumbnail rail -- simplest correct choice
+  over tracking one stale thumbnail) after a commit, since span indices
+  aren't assumed stable across one.
+- **The font shown while editing is a deliberate approximation, not the
+  document's real embedded typeface**: `overlay.ts` styles each box with
+  the span's exact size and color, but only a serif/sans/mono +
+  bold/italic guess from the font's *name* for family/weight/style --
+  loading the actual embedded font as a browser `@font-face` is a
+  documented gap (web/README.md), not a silent one. The size, color and
+  (once committed) the real drawn result all still go through the exact
+  same `engine.edit` pipeline the CLI and server already use.
+- **Two more real bugs found by actually driving this in a browser** (on
+  top of a caught-before-shipping design gap, the `ReplaceTextOp`-would
+  edit-every-occurrence issue above):
+  1. A UI-03 layout bug: `.pw-inspector-value`'s color swatch and match
+     dot were `<span>`s I `prepend()`-ed into the value cell, then set
+     text via `.lastChild.textContent` -- but after prepending, the swatch
+     *is* `lastChild`, so that line was setting text *inside* the little
+     colored box, not next to it. Fixed by giving each row its own
+     dedicated text node up front, never reusing the icon element as a
+     text target.
+  2. A real reentrancy bug in `overlay.ts`, caught by an automated
+     click-away test, not by inspection: setting `contentEditable = false`
+     on a focused element can itself fire a synchronous `blur`, which
+     re-enters `cancelEdit()` through `box.onblur` *before* the outer call
+     finishes -- the reentrant call nulls out the shared "active box"
+     reference first, so the outer call's next line crashed setting
+     `.textContent` on what was now `null`. Root-caused by rebuilding the
+     failure against `vite dev`'s unminified source to get a real stack
+     trace, then fixed by having `cancelEdit()` take a local copy of the
+     box and clear the shared reference *before* touching it at all, so a
+     reentrant call becomes a harmless no-op.
+- `tests/web/test_ui.py` gained 9 real, end-to-end Playwright tests (click
+  opens an editable box; the inspector shows exact known values for a
+  fixture with a known font/size/color; the Match dot populates as soon as
+  a span is selected, before any typing; typing keeps it exact for
+  ordinary text; Escape and clicking away both discard without saving --
+  the second one is exactly what caught bug 2 above; Enter commits an
+  exact match with no dialog; a Type3 fixture's fallback match asks for
+  confirmation first; declining that confirmation leaves the edit
+  uncommitted). 20/20 pass, stable across repeated runs.
+- 364 tests total (93.2% coverage); ruff, mypy --strict, bandit, pip-audit
+  and `npm audit` (0 vulnerabilities) all clean. UI-02 and UI-03 moved to
+  "done" by the evidence gate (47/161 total, 5/15 in P3).
+- Still open in P3: UI-04/05/08/09 (history panel, before/after split
+  view, keyboard shortcuts, themes) and EDT-05/07/08/09/10/11 (block
+  move/resize, format painter, images, shapes, hyperlinks, spell-check).
+  UI-04 (history panel) is a natural next step -- `GET .../history` and
+  `POST .../undo` / `.../redo` already exist and are tested (COR-11); it's
+  mostly frontend wiring onto what's already there, unlike UI-02 was.
 
 ### 2026-09-27 (cont. 11) — UI-01 and UI-06: the first real browser UI
 

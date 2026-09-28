@@ -201,7 +201,7 @@ button {
 
 .pw-body {
   display: grid;
-  grid-template-columns: 148px 1fr;
+  grid-template-columns: 148px 1fr 220px;
   min-height: 0;
 }
 
@@ -252,4 +252,110 @@ button {
   background: #fff;
   box-shadow: var(--shadow);
   height: fit-content;
+}
+
+/* -- UI-02: click-to-edit overlay -- */
+
+.pw-canvas-wrap {
+  position: relative;
+  height: fit-content;
+}
+
+.pw-edit-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.pw-span-box {
+  position: absolute;
+  pointer-events: auto;
+  cursor: text;
+  white-space: pre;
+  line-height: 1;
+  outline: 1px solid transparent;
+  border-radius: 2px;
+}
+
+.pw-span-box:hover {
+  outline-color: var(--accent);
+  background: rgba(47, 111, 235, 0.08);
+}
+
+.pw-span-box.pw-span-editing {
+  outline: 2px solid var(--accent);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  cursor: text;
+}
+
+/* -- UI-03: inspector panel -- */
+
+.pw-inspector {
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  padding: 14px;
+}
+
+.pw-inspector h2 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+}
+
+.pw-inspector-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.pw-inspector-label {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.pw-inspector-value {
+  text-align: right;
+  overflow-wrap: anywhere;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.pw-color-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.pw-match-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.pw-match-dot.pw-match-exact {
+  background: #2e9e4f;
+}
+
+.pw-match-dot.pw-match-approximate {
+  background: #d99a1b;
+}
+
+.pw-match-dot.pw-match-fallback {
+  background: var(--danger);
 }

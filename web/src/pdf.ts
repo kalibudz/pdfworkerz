@@ -29,11 +29,19 @@ export async function loadPdf(data: ArrayBuffer): Promise<PdfDocument> {
 /** Renders one page at `scale` (1.0 == 72 DPI, pdf.js's native unit) into
  * `canvas`, sized to match. Cancels cleanly if called again on the same
  * canvas before a previous render finishes (page navigation faster than
- * rendering), rather than letting two renders race onto one canvas. */
+ * rendering), rather than letting two renders race onto one canvas.
+ * Returns the viewport actually drawn (null if cancelled) -- UI-02's
+ * overlay needs it to convert a span's PDF-space bbox to this exact
+ * canvas's CSS pixel space via `viewport.convertToViewportRectangle`. */
 export class PageRenderer {
   private currentRender: ReturnType<pdfjsLib.PDFPageProxy["render"]> | null = null;
 
-  async render(pdf: PdfDocument, pageNumber: number, canvas: HTMLCanvasElement, scale: number): Promise<void> {
+  async render(
+    pdf: PdfDocument,
+    pageNumber: number,
+    canvas: HTMLCanvasElement,
+    scale: number,
+  ): Promise<pdfjsLib.PageViewport | null> {
     if (this.currentRender) {
       this.currentRender.cancel();
     }
@@ -49,9 +57,10 @@ export class PageRenderer {
     this.currentRender = renderTask;
     try {
       await renderTask.promise;
+      return viewport;
     } catch (error) {
       if (error instanceof Error && error.name === "RenderingCancelledException") {
-        return;
+        return null;
       }
       throw error;
     } finally {

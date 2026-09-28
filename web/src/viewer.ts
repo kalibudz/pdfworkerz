@@ -1,5 +1,8 @@
 /**
- * UI-01: page canvas with thumbnail rail.
+ * UI-01: page canvas with thumbnail rail. Also owns the layout UI-02 (the
+ * click-to-edit overlay) and UI-03 (the inspector panel) hang off of --
+ * this is the one place that knows the current page, its render scale and
+ * its viewport, which both of those need.
  *
  * Loads the open document's current bytes once (GET .../file) and does all
  * rendering client-side through pdf.js (pdf.ts) -- the main canvas and every
@@ -11,6 +14,8 @@
  */
 
 import type { Api } from "./api";
+import { createInspector } from "./inspector";
+import { createOverlay } from "./overlay";
 import { loadPdf, PageRenderer, thumbnailViewport, type PdfDocument } from "./pdf";
 
 export interface ViewerOptions {
@@ -90,9 +95,16 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
 
   const pageArea = document.createElement("div");
   pageArea.className = "pw-page-area";
+  const canvasWrap = document.createElement("div");
+  canvasWrap.className = "pw-canvas-wrap";
   const mainCanvas = document.createElement("canvas");
+  const editLayer = document.createElement("div");
+  editLayer.className = "pw-edit-layer";
+  canvasWrap.append(mainCanvas, editLayer);
 
-  body.append(thumbRail, pageArea);
+  const inspectorPanel = document.createElement("div");
+
+  body.append(thumbRail, pageArea, inspectorPanel);
   root.append(toolbar, body);
   container.appendChild(root);
 
@@ -101,6 +113,14 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   loadingNotice.style.padding = "24px";
   loadingNotice.textContent = "Loading document…";
   pageArea.replaceChildren(loadingNotice);
+
+  const inspector = createInspector(inspectorPanel);
+  const overlay = createOverlay(editLayer, {
+    api: options.api,
+    documentId: options.documentId,
+    inspector,
+    onCommitted: () => void reloadAfterCommit(),
+  });
 
   const renderer = new PageRenderer();
   let pdf: PdfDocument | null = null;
@@ -127,9 +147,28 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     if (!pdf) {
       return;
     }
-    await renderer.render(pdf, currentPage, mainCanvas, scale);
+    const viewport = await renderer.render(pdf, currentPage, mainCanvas, scale);
     updateToolbar();
     updateActiveThumbnail();
+    if (viewport) {
+      const pageIndex = currentPage - 1; // pdf.js pages are 1-based; the API's page_index is 0-based
+      const spans = await options.api.pageSpans(options.documentId, pageIndex);
+      editLayer.style.width = `${mainCanvas.width}px`;
+      editLayer.style.height = `${mainCanvas.height}px`;
+      overlay.update(pageIndex, spans, viewport);
+    }
+  }
+
+  /** UI-02's commit step changed the document server-side; span indices and
+   * this page's rendered content are both stale now, so everything that
+   * depends on either is reloaded from scratch rather than guessed at. */
+  async function reloadAfterCommit(): Promise<void> {
+    const bytes = await options.api.documentFile(options.documentId);
+    pdf = await loadPdf(bytes);
+    thumbRail.innerHTML = "";
+    thumbButtons.length = 0;
+    buildThumbnailRail(thumbRail, pdf, options.pageCount, thumbButtons, (pageNumber) => void goToPage(pageNumber));
+    await renderCurrentPage();
   }
 
   async function goToPage(pageNumber: number): Promise<void> {
@@ -173,7 +212,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
 
   const bytes = await options.api.documentFile(options.documentId);
   pdf = await loadPdf(bytes);
-  pageArea.replaceChildren(mainCanvas);
+  pageArea.replaceChildren(canvasWrap);
   scale = await fitWidthScale(pdf, pageArea.clientWidth);
   zoomOutButton.disabled = false;
   zoomInButton.disabled = false;
