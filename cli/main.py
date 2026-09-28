@@ -83,6 +83,25 @@ def _parse_rect(value: str) -> tuple[float, float, float, float]:
     return (x0, y0, x1, y1)
 
 
+def _one_of(positional: str | None, option: str | None, name: str) -> str:
+    """A value given either positionally or as --<name>, but not both.
+
+    The option form exists for text that starts with "-" (e.g. "- End of
+    Statement -"), which Click would otherwise parse as an option; the
+    positional form keeps working for everything else."""
+    if positional is not None and option is not None:
+        raise typer.BadParameter(f"give the {name} either positionally or as --{name}, not both")
+    value = option if option is not None else positional
+    if value is None:
+        raise typer.BadParameter(f"missing the {name} (positionally, or as --{name})")
+    return value
+
+
+MatchOption = Annotated[
+    str | None, typer.Option("--match", help='Text to find, as an option -- for text starting with "-"')
+]
+
+
 def _report(results: list[EditResult]) -> None:
     if not results:
         typer.echo("no matches found; nothing changed")
@@ -153,8 +172,12 @@ def spans(
 @app.command()
 def replace(
     path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
-    match: Annotated[str, typer.Argument(help="Text to find (literal, unless --regex)")],
-    replacement: Annotated[str, typer.Argument(help="Text to put in its place")],
+    match: Annotated[str | None, typer.Argument(help="Text to find (literal, unless --regex)")] = None,
+    replacement: Annotated[str | None, typer.Argument(help="Text to put in its place")] = None,
+    match_option: MatchOption = None,
+    replacement_option: Annotated[
+        str | None, typer.Option("--replacement", help='Replacement text, as an option -- for text starting with "-"')
+    ] = None,
     regex: Annotated[bool, typer.Option(help="Treat match as a regular expression")] = False,
     case_insensitive: Annotated[bool, typer.Option(help="Match regardless of case")] = False,
     page: Annotated[int | None, typer.Option(help="Only this 0-based page; default is every page")] = None,
@@ -167,11 +190,18 @@ def replace(
     password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
 ) -> None:
     """Find text (EDT-02) and replace it, matching the original style."""
+    if match_option is not None and replacement is None and replacement_option is None:
+        match, replacement = (
+            None,
+            match,
+        )  # `replace doc.pdf --match "- x -" "new"`: the lone positional is the replacement
+    find = _one_of(match, match_option, "match")
+    replace_with = _one_of(replacement, replacement_option, "replacement")
     try:
         with Document.open(path, password=password) as document:
             op = ReplaceTextOp(
-                match=match,
-                replacement=replacement,
+                match=find,
+                replacement=replace_with,
                 mode="regex" if regex else "literal",
                 case_sensitive=not case_insensitive,
                 page_index=page,
@@ -189,7 +219,8 @@ def replace(
 @app.command()
 def delete(
     path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
-    match: Annotated[str, typer.Argument(help="Text to find and remove (literal, unless --regex)")],
+    match: Annotated[str | None, typer.Argument(help="Text to find and remove (literal, unless --regex)")] = None,
+    match_option: MatchOption = None,
     regex: Annotated[bool, typer.Option(help="Treat match as a regular expression")] = False,
     case_insensitive: Annotated[bool, typer.Option(help="Match regardless of case")] = False,
     page: Annotated[int | None, typer.Option(help="Only this 0-based page; default is every page")] = None,
@@ -199,10 +230,11 @@ def delete(
     password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
 ) -> None:
     """Find and remove text (EDT-04), closing the gap in its style-matched span."""
+    find = _one_of(match, match_option, "match")
     try:
         with Document.open(path, password=password) as document:
             op = DeleteTextOp(
-                match=match,
+                match=find,
                 mode="regex" if regex else "literal",
                 case_sensitive=not case_insensitive,
                 page_index=page,
@@ -219,7 +251,8 @@ def delete(
 @app.command()
 def restyle(
     path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
-    match: Annotated[str, typer.Argument(help="Text to find (literal, unless --regex)")],
+    match: Annotated[str | None, typer.Argument(help="Text to find (literal, unless --regex)")] = None,
+    match_option: MatchOption = None,
     size: Annotated[float | None, typer.Option(help="New font size in points")] = None,
     color: Annotated[str | None, typer.Option(help='New color as "r,g,b", each 0-1, e.g. "1,0,0" for red')] = None,
     regex: Annotated[bool, typer.Option(help="Treat match as a regular expression")] = False,
@@ -231,11 +264,12 @@ def restyle(
     password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
 ) -> None:
     """Change the size and/or color of matching text (EDT-06), leaving its wording unchanged."""
+    find = _one_of(match, match_option, "match")
     parsed_color = _parse_color(color) if color is not None else None
     try:
         with Document.open(path, password=password) as document:
             op = RestyleTextOp(
-                match=match,
+                match=find,
                 size=size,
                 color=parsed_color,
                 mode="regex" if regex else "literal",

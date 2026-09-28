@@ -464,3 +464,65 @@ def test_spellcheck_command(work_dir: Path) -> None:
     assert "page 0: recieve -> receive" in result.output
     assert "teh" not in result.output
     assert "1 possible misspelling(s)" in result.output
+
+
+@pytest.fixture
+def dashed_pdf(work_dir: Path) -> Path:
+    import pymupdf
+
+    raw = pymupdf.open()
+    raw.new_page().insert_text((72, 100), "- End of Statement -", fontsize=12, fontname="helv")
+    path = work_dir / "dashed.pdf"
+    raw.save(path)
+    return path
+
+
+def _page_text(path: Path) -> str:
+    with Document.open(path) as document:
+        return "".join(span.style.text for span in extract_page_spans(document.raw, 0))
+
+
+@pytest.mark.feature("COR-10")
+def test_replace_accepts_match_text_starting_with_a_dash_via_the_match_option(dashed_pdf: Path, work_dir: Path) -> None:
+    out = work_dir / "out.pdf"
+    result = runner.invoke(
+        app, ["replace", str(dashed_pdf), "--match", "- End of Statement -", "Fin", "--out", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    assert _page_text(out) == "Fin"
+
+
+@pytest.mark.feature("COR-10")
+def test_replace_accepts_a_dash_replacement_via_the_replacement_option(dashed_pdf: Path, work_dir: Path) -> None:
+    out = work_dir / "out.pdf"
+    result = runner.invoke(
+        app,
+        ["replace", str(dashed_pdf), "--match", "End", "--replacement", "-- Close", "--out", str(out)],
+    )
+    assert result.exit_code == 0, result.output
+    assert _page_text(out) == "- -- Close of Statement -"
+
+
+@pytest.mark.feature("COR-10")
+def test_delete_and_restyle_accept_the_match_option(dashed_pdf: Path, work_dir: Path) -> None:
+    restyled = work_dir / "restyled.pdf"
+    result = runner.invoke(
+        app, ["restyle", str(dashed_pdf), "--match", "- End", "--size", "16", "--out", str(restyled)]
+    )
+    assert result.exit_code == 0, result.output
+    deleted = work_dir / "deleted.pdf"
+    result = runner.invoke(app, ["delete", str(restyled), "--match", "- End of ", "--out", str(deleted)])
+    assert result.exit_code == 0, result.output
+    assert _page_text(deleted) == "Statement -"
+
+
+@pytest.mark.feature("COR-10")
+def test_match_given_both_ways_or_neither_is_an_error(dashed_pdf: Path) -> None:
+    def flat(output: str) -> str:
+        """Rich wraps error panels to the terminal width, which is narrower on CI."""
+        return " ".join(output.replace("\u2502", " ").split())
+
+    both = runner.invoke(app, ["delete", str(dashed_pdf), "End", "--match", "End"])
+    assert both.exit_code != 0 and "not both" in flat(both.output)
+    neither = runner.invoke(app, ["delete", str(dashed_pdf)])
+    assert neither.exit_code != 0 and "missing the match" in flat(neither.output)
