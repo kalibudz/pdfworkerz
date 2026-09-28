@@ -106,6 +106,16 @@ export interface ShapeInfo {
   line_width: number | null;
 }
 
+/** Mirrors engine.spellcheck.Misspelling (EDT-11). */
+export interface Misspelling {
+  span_index: number;
+  start: number;
+  end: number;
+  word: string;
+  bbox: [number, number, number, number];
+  suggestions: string[];
+}
+
 /** One applied edit, exactly as it was requested -- an Op's own fields
  * (op.model_dump()), not the result of applying it. Which fields exist
  * beyond `op` depends on which Op it is; see history.ts's describeOp. */
@@ -187,6 +197,13 @@ export class Api {
   async pageShapes(documentId: string, pageIndex: number): Promise<ShapeInfo[]> {
     const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/shapes`);
     return (await response.json()) as ShapeInfo[];
+  }
+
+  /** EDT-11: misspelled words on one page, minus `ignore`d ones. */
+  async pageSpelling(documentId: string, pageIndex: number, ignore: string[] = []): Promise<Misspelling[]> {
+    const params = new URLSearchParams(ignore.length ? { ignore: ignore.join(",") } : {});
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/spelling?${params}`);
+    return (await response.json()) as Misspelling[];
   }
 
   /** UI-02's live preview, before anything is committed: what font-resolution

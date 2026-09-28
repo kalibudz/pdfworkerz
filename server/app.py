@@ -62,6 +62,7 @@ from engine.ops.images import PageImagesOp
 from engine.ops.journal import UndoRedoJournal
 from engine.ops.links import PageLinksOp
 from engine.ops.shapes import PageShapesOp
+from engine.ops.spellcheck import SpellCheckOp
 from engine.ops.text import PreviewTextOp
 
 _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
@@ -235,6 +236,18 @@ def page_shapes(document_id: str, page_index: int, journal: JournalDep) -> Any:
     """EDT-09: every vector path on one page. Read-only (PageShapesOp), applied
     directly like page_images; drawing and editing go through the ops endpoint."""
     return _jsonable(PageShapesOp(page_index=page_index).apply(journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/spelling")
+def page_spelling(
+    document_id: str, page_index: int, journal: JournalDep, language: str = "en_US", ignore: str = ""
+) -> Any:
+    """EDT-11: misspelled words on one page. Read-only (SpellCheckOp), applied
+    directly like page_spans. `ignore` is a comma-separated list of words to
+    accept anyway; a correction goes through the ops endpoint (correct_word)."""
+    words = [word for word in ignore.split(",") if word]
+    op = SpellCheckOp(page_index=page_index, language=language, ignore=words)
+    return _jsonable(op.apply(journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/preview")

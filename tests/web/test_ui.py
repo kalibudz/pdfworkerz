@@ -1038,3 +1038,69 @@ def test_dragging_a_shape_moves_it(page: Page, app_url: str, shape_pdf: Path) ->
         arg=before["y"] + 200,
         timeout=5000,
     )
+
+
+@pytest.fixture
+def typo_pdf(tmp_path: Path) -> Path:
+    import pymupdf
+
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "We recieve teh report.", fontsize=14, fontname="helv")
+    path = tmp_path / "typos.pdf"
+    doc.save(path)
+    return path
+
+
+@pytest.mark.feature("EDT-11")
+def test_spelling_toggle_underlines_misspelled_words(page: Page, app_url: str, typo_pdf: Path) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(typo_pdf))
+    _wait_overlay_ready(page)
+    assert page.query_selector(".pw-misspelling") is None  # off by default
+
+    page.click(".pw-spell-toggle")
+    page.wait_for_selector(".pw-misspelling", timeout=10000)
+    words = page.eval_on_selector_all(".pw-misspelling", "els => els.map(el => el.dataset.word)")
+    assert words == ["recieve", "teh"]
+    assert "(2)" in (page.text_content(".pw-spell-toggle") or "")
+
+    page.click(".pw-spell-toggle")
+    page.wait_for_selector(".pw-misspelling", state="detached", timeout=3000)
+
+
+@pytest.mark.feature("EDT-11")
+def test_choosing_a_suggestion_corrects_the_word(page: Page, app_url: str, typo_pdf: Path) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(typo_pdf))
+    _wait_overlay_ready(page)
+    page.click(".pw-spell-toggle")
+    page.wait_for_selector(".pw-misspelling[data-word='recieve']", timeout=10000)
+
+    page.click(".pw-misspelling[data-word='recieve']")
+    page.click(".pw-spell-suggestion:has-text('receive')")
+    page.wait_for_selector(".pw-history-entry:has-text('Correct')", timeout=10000)
+    page.wait_for_selector(".pw-span-box:has-text('We receive teh report.')", timeout=5000)
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.pw-misspelling')].map(e => e.dataset.word).join() === 'teh'",
+        timeout=10000,
+    )
+
+
+@pytest.mark.feature("EDT-11")
+def test_ignore_hides_a_word_for_the_session(page: Page, app_url: str, typo_pdf: Path) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(typo_pdf))
+    _wait_overlay_ready(page)
+    page.click(".pw-spell-toggle")
+    page.wait_for_selector(".pw-misspelling[data-word='teh']", timeout=10000)
+    page.click(".pw-misspelling[data-word='teh']")
+    page.click(".pw-spell-ignore")
+    # Refreshing clears every mark first, so wait for the redrawn state, not just for "teh" to go.
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.pw-misspelling')].map(e => e.dataset.word).join() === 'recieve'",
+        timeout=10000,
+    )
+    assert page.query_selector(".pw-history-entry") is None  # ignoring changes nothing in the document

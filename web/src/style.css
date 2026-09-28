@@ -756,3 +756,45 @@ button {
 .pw-shape-width {
   width: 5em;
 }
+
+/* -- EDT-11: spell-check -- */
+
+.pw-misspelling {
+  position: absolute;
+  z-index: 2; /* above the span boxes: while Spelling is on, a flagged word opens its menu */
+  pointer-events: auto;
+  cursor: pointer;
+  text-decoration: underline wavy var(--danger);
+  border-bottom: 2px dotted var(--danger);
+}
+
+.pw-spell-menu {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+
+.pw-spell-menu button {
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 4px 8px;
+}
+
+.pw-spell-menu button:hover,
+.pw-spell-menu button:focus {
+  background: var(--bg);
+}
+
+.pw-spell-ignore {
+  border-top: 1px solid var(--border) !important;
+  color: var(--text-muted);
+}

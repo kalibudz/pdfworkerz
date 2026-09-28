@@ -25,6 +25,7 @@ from engine.ops.base import InspectOp, Op, PageSpansOp, RenderPageOp
 from engine.ops.images import CropImageOp, DeleteImageOp, InsertImageOp, MoveImageOp, PageImagesOp, ReplaceImageOp
 from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp
 from engine.ops.shapes import DeleteShapeOp, DrawShapeOp, EditShapeOp, PageShapesOp
+from engine.ops.spellcheck import SpellCheckOp
 from engine.ops.text import (
     CopyStyleOp,
     DeleteTextOp,
@@ -609,6 +610,30 @@ def delete_shape_command(
     """Remove one vector path (EDT-09); text, images and other shapes stay."""
     op = DeleteShapeOp(page_index=page, index=index)
     typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
+
+
+@app.command()
+def spellcheck(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to check")],
+    page: Annotated[int | None, typer.Option(help="Only this 0-based page; default is every page")] = None,
+    language: Annotated[str, typer.Option(help="Dictionary to check against (assets/dictionaries)")] = "en_US",
+    ignore: Annotated[list[str] | None, typer.Option(help="A word to accept anyway (repeatable)")] = None,
+    password: PasswordOption = None,
+) -> None:
+    """List misspelled words (EDT-11), offline, with suggestions. Fix one with `replace`."""
+    try:
+        with Document.open(path, password=password) as document:
+            pages = range(document.page_count) if page is None else [page]
+            total = 0
+            for page_index in pages:
+                found = SpellCheckOp(page_index=page_index, language=language, ignore=ignore or []).apply(document)
+                for miss in found:
+                    hint = f" -> {', '.join(miss.suggestions)}" if miss.suggestions else ""
+                    typer.echo(f"page {page_index}: {miss.word}{hint}")
+                total += len(found)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"{total} possible misspelling(s)")
 
 
 @app.command()

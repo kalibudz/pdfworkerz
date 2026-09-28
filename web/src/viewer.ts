@@ -20,6 +20,7 @@ import { createImageTool } from "./images";
 import { createInspector } from "./inspector";
 import { createOverlay } from "./overlay";
 import { createShapeTool, type DrawKind } from "./shapes";
+import { createSpellTool } from "./spelling";
 import { loadPdf, PageRenderer, thumbnailViewport, type PdfDocument } from "./pdf";
 
 export interface ViewerOptions {
@@ -94,6 +95,12 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   insertImageButton.className = "pw-insert-image";
   insertImageButton.textContent = "Image…";
   insertImageButton.title = "Insert an image on this page";
+  const spellButton = document.createElement("button");
+  spellButton.type = "button";
+  spellButton.className = "pw-spell-toggle";
+  spellButton.textContent = "Spelling";
+  spellButton.title = "Underline misspelled words on this page";
+  spellButton.setAttribute("aria-pressed", "false");
   const drawSelect = document.createElement("select");
   drawSelect.className = "pw-draw-select";
   drawSelect.title = "Draw a shape: pick one, then drag on the page";
@@ -119,6 +126,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     zoomInButton,
     insertImageButton,
     drawSelect,
+    spellButton,
     compareButton,
   );
 
@@ -137,6 +145,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   compareButton.disabled = true;
   insertImageButton.disabled = true;
   drawSelect.disabled = true;
+  spellButton.disabled = true;
 
   const body = document.createElement("div");
   body.className = "pw-body";
@@ -181,6 +190,14 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     documentId: options.documentId,
     inspector,
     onCommitted: () => void reloadDocument(),
+  });
+  const spellTool = createSpellTool(editLayer, {
+    api: options.api,
+    documentId: options.documentId,
+    onCommitted: () => void reloadDocument(),
+    onCount: (count) => {
+      spellButton.textContent = count === null ? "Spelling" : `Spelling (${count})`;
+    },
   });
   const shapeTool = createShapeTool(editLayer, {
     api: options.api,
@@ -245,6 +262,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
       // images stack above shapes, and both stay under the text (style.css).
       shapeTool.update(pageIndex, shapes, viewport);
       imageTool.update(pageIndex, images, viewport);
+      await spellTool.update(pageIndex, viewport);
     }
   }
 
@@ -314,6 +332,12 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomInButton.addEventListener("click", () => void setScale(scale * ZOOM_STEP));
   compareButton.addEventListener("click", () => void setComparing(!comparing));
   insertImageButton.addEventListener("click", () => imageTool.insert());
+  spellButton.addEventListener("click", () => {
+    const next = spellButton.getAttribute("aria-pressed") !== "true";
+    spellButton.setAttribute("aria-pressed", String(next));
+    spellButton.classList.toggle("pw-active", next);
+    void spellTool.setEnabled(next);
+  });
   drawSelect.addEventListener("change", () => shapeTool.setDrawMode((drawSelect.value || null) as DrawKind | null));
 
   // UI-08: every shortcut below is a keyboard path to an action the toolbar
@@ -378,6 +402,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   compareButton.disabled = false;
   insertImageButton.disabled = false;
   drawSelect.disabled = false;
+  spellButton.disabled = false;
 
   buildThumbnailRail(thumbRail, pdf, options.pageCount, thumbButtons, (pageNumber) => void goToPage(pageNumber));
 

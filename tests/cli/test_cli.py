@@ -448,3 +448,19 @@ def test_draw_shape_command_rejects_bad_points(corpus: Corpus) -> None:
     result = runner.invoke(app, ["draw-shape", str(corpus.simple), "line", "--points", "72,200"])
     assert result.exit_code != 0
     assert "exactly 2" in result.output
+
+
+@pytest.mark.feature("EDT-11")
+def test_spellcheck_command(work_dir: Path) -> None:
+    import pymupdf
+
+    raw = pymupdf.open()
+    raw.new_page().insert_text((72, 100), "We recieve teh report.", fontsize=12, fontname="helv")
+    path = work_dir / "typos.pdf"
+    raw.save(path)
+
+    result = runner.invoke(app, ["spellcheck", str(path), "--ignore", "teh"])
+    assert result.exit_code == 0, result.output
+    assert "page 0: recieve -> receive" in result.output
+    assert "teh" not in result.output
+    assert "1 possible misspelling(s)" in result.output

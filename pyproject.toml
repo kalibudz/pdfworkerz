@@ -22,6 +22,7 @@ dependencies = [
   "fastapi==0.141.1",
   "uvicorn==0.54.0",
   "pillow==12.3.0",
+  "spylls==0.1.7",
 ]
 
 [project.scripts]
@@ -73,7 +74,7 @@ mypy_path = "tools"
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["fitz.*", "pymupdf.*", "pikepdf.*", "fontTools.*", "reportlab.*"]
+module = ["fitz.*", "pymupdf.*", "pikepdf.*", "fontTools.*", "reportlab.*", "spylls.*"]
 ignore_missing_imports = true
 
 # pymupdf and pikepdf ship partial, inconsistent type stubs (some methods carry

@@ -1311,6 +1311,98 @@
       ],
       "title": "ReflowTextOp",
       "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Every misspelled word on one page, with suggestions. Read-only, so --\nlike PageSpansOp -- never journaled; server/app.py serves it from a GET route.",
+      "properties": {
+        "op": {
+          "const": "spell_check",
+          "default": "spell_check",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "language": {
+          "default": "en_US",
+          "title": "Language",
+          "type": "string"
+        },
+        "ignore": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ignore",
+          "type": "array"
+        }
+      },
+      "title": "SpellCheckOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Replace one word -- characters `start`..`end` of the span at\n`span_index` -- with `replacement`, keeping the rest of the span and its\nstyle (the ReplaceSpanTextOp path). `word` must still be what's there:\na stale correction (the page changed since it was checked) is refused\nrather than overwriting the wrong characters.",
+      "properties": {
+        "op": {
+          "const": "correct_word",
+          "default": "correct_word",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "span_index": {
+          "title": "Span Index",
+          "type": "integer"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "word": {
+          "title": "Word",
+          "type": "string"
+        },
+        "replacement": {
+          "title": "Replacement",
+          "type": "string"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_index",
+        "span_index",
+        "start",
+        "end",
+        "word",
+        "replacement"
+      ],
+      "title": "CorrectWordOp",
+      "type": "object"
     }
   ]
 }

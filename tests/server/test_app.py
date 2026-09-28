@@ -394,6 +394,32 @@ def test_shapes_route_reflects_a_drawn_shape_and_undo(client: TestClient, simple
     assert client.get(shapes_url, headers=AUTH).json() == []
 
 
+@pytest.mark.feature("EDT-11")
+def test_spelling_route_and_correct_word_op(client: TestClient, work_dir: Path) -> None:
+    import pymupdf
+
+    raw = pymupdf.open()
+    raw.new_page().insert_text((72, 100), "Plese read teh notes.", fontsize=12, fontname="helv")
+    path = work_dir / "typos.pdf"
+    raw.save(path)
+    document_id = _open(client, path)
+    spelling_url = f"/documents/{document_id}/pages/0/spelling"
+
+    found = client.get(spelling_url, headers=AUTH).json()
+    assert [m["word"] for m in found] == ["Plese", "teh"]
+    assert [m["word"] for m in client.get(f"{spelling_url}?ignore=teh", headers=AUTH).json()] == ["Plese"]
+
+    teh = found[1]
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "correct_word", "page_index": 0, **{k: teh[k] for k in ("span_index", "start", "end", "word")}}
+        | {"replacement": "the"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+    assert [m["word"] for m in client.get(spelling_url, headers=AUTH).json()] == ["Plese"]
+
+
 @pytest.mark.feature("UI-04")
 def test_replace_span_text_op_round_trips_through_history_and_undo(client: TestClient, simple_path: Path) -> None:
     """UI-04's history panel describes each entry from the Op's own fields
