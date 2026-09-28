@@ -304,3 +304,48 @@ def test_copy_style_command_reports_a_missing_source(corpus: Corpus, work_dir: P
     )
     assert result.exit_code != 0
     assert "no span on page 0 contains 'nope'" in result.output
+
+
+@pytest.mark.feature("EDT-10")
+def test_add_list_and_remove_link_commands(corpus: Corpus, work_dir: Path) -> None:
+    linked = work_dir / "linked.pdf"
+    result = runner.invoke(
+        app,
+        ["add-link", str(corpus.simple), "--over", "PDFWorkerz", "--uri", "https://example.com", "--out", str(linked)],
+    )
+    assert result.exit_code == 0, result.output
+
+    listed = runner.invoke(app, ["links", str(linked)])
+    assert listed.exit_code == 0
+    assert json.loads(listed.output)[0]["uri"] == "https://example.com"
+
+    unlinked = work_dir / "unlinked.pdf"
+    result = runner.invoke(app, ["remove-link", str(linked), "0", "--out", str(unlinked)])
+    assert result.exit_code == 0, result.output
+    assert json.loads(runner.invoke(app, ["links", str(unlinked)]).output) == []
+
+
+@pytest.mark.feature("EDT-10")
+def test_add_link_command_needs_exactly_one_area(corpus: Corpus) -> None:
+    result = runner.invoke(app, ["add-link", str(corpus.simple), "--uri", "https://example.com"])
+    assert result.exit_code != 0
+    assert "--over or --rect" in result.output
+
+
+@pytest.mark.feature("EDT-10")
+def test_add_link_command_refuses_an_unsafe_uri(corpus: Corpus, work_dir: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "add-link",
+            str(corpus.simple),
+            "--rect",
+            "72,72,200,90",
+            "--uri",
+            "javascript:x",
+            "--out",
+            str(work_dir / "o.pdf"),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "scheme" in result.output

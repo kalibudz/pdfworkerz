@@ -141,7 +141,12 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   loadingNotice.textContent = "Loading document…";
   pageArea.replaceChildren(loadingNotice);
 
-  const inspector = createInspector(inspectorPanel, { onCopyStyle: () => overlay.armPainter() });
+  const inspector = createInspector(inspectorPanel, {
+    onCopyStyle: () => overlay.armPainter(),
+    onAddLink: () => overlay.addLink(),
+    onEditLink: (link) => overlay.editLink(link),
+    onRemoveLink: (link) => overlay.removeLink(link),
+  });
   const overlay = createOverlay(editLayer, {
     api: options.api,
     documentId: options.documentId,
@@ -186,10 +191,13 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     updateActiveThumbnail();
     if (viewport) {
       const pageIndex = currentPage - 1; // pdf.js pages are 1-based; the API's page_index is 0-based
-      const spans = await options.api.pageSpans(options.documentId, pageIndex);
+      const [spans, links] = await Promise.all([
+        options.api.pageSpans(options.documentId, pageIndex),
+        options.api.pageLinks(options.documentId, pageIndex),
+      ]);
       editLayer.style.width = `${mainCanvas.width}px`;
       editLayer.style.height = `${mainCanvas.height}px`;
-      overlay.update(pageIndex, spans, viewport);
+      overlay.update(pageIndex, spans, viewport, links);
     }
   }
 

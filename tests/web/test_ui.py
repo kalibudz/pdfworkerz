@@ -649,3 +649,59 @@ def test_escape_cancels_an_armed_format_painter(page: Page, app_url: str, corpus
     page.click(".pw-span-box:has-text('Regular text')")
     page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
     assert page.query_selector(".pw-history-entry") is None
+
+
+def _select_first_span_on(page: Page, app_url: str, path: str) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, path)
+    _wait_overlay_ready(page)
+    page.click(".pw-span-box")
+    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+
+
+@pytest.mark.feature("EDT-10")
+def test_add_edit_and_remove_a_link_from_the_inspector(page: Page, app_url: str, corpus: Corpus) -> None:
+    _select_first_span_on(page, app_url, str(corpus.multi_page))  # several pages, so "2" is a valid target
+    assert page.query_selector(".pw-link-item") is None
+
+    page.once("dialog", lambda dialog: dialog.accept("https://example.com/docs"))
+    page.click(".pw-add-link")
+    page.wait_for_selector(".pw-link-box", timeout=10000)  # drawn on the page after the reload
+    page.wait_for_selector(".pw-history-entry:has-text('Add link')", timeout=5000)
+
+    page.click(".pw-span-box")
+    page.wait_for_selector(".pw-link-item:has-text('https://example.com/docs')", timeout=3000)
+    page.once("dialog", lambda dialog: dialog.accept("2"))
+    page.click(".pw-link-edit")
+    page.wait_for_selector(".pw-history-entry:has-text('Edit link')", timeout=10000)
+
+    page.click(".pw-span-box")
+    page.wait_for_selector(".pw-link-item:has-text('page 2')", timeout=3000)
+    page.click(".pw-link-remove")
+    page.wait_for_selector(".pw-history-entry:has-text('Remove link')", timeout=10000)
+    page.wait_for_selector(".pw-link-box", state="detached", timeout=5000)
+
+
+@pytest.mark.feature("EDT-10")
+def test_an_unsafe_link_is_refused_with_the_engines_message(page: Page, app_url: str, corpus: Corpus) -> None:
+    _select_first_span_on(page, app_url, str(corpus.simple))
+    messages: list[str] = []
+
+    def handle(dialog: object) -> None:
+        # the prompt, then the alert carrying the engine's refusal
+        if dialog.type == "prompt":  # type: ignore[attr-defined]
+            dialog.accept("javascript:alert(1)")  # type: ignore[attr-defined]
+        else:
+            messages.append(dialog.message)  # type: ignore[attr-defined]
+            dialog.dismiss()  # type: ignore[attr-defined]
+
+    page.on("dialog", handle)
+    page.click(".pw-add-link")
+    page.wait_for_function("() => true")  # let the dialog round trip settle
+    for _ in range(50):
+        if messages:
+            break
+        page.wait_for_timeout(100)
+    assert messages and "scheme" in messages[0]
+    assert page.query_selector(".pw-link-box") is None

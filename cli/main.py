@@ -19,7 +19,9 @@ from engine import __version__
 from engine.document import Document
 from engine.edit import EditResult
 from engine.errors import PdfWorkerzError
+from engine.fonts.style import extract_page_spans
 from engine.ops.base import InspectOp, PageSpansOp, RenderPageOp
+from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp
 from engine.ops.text import (
     CopyStyleOp,
     DeleteTextOp,
@@ -63,6 +65,17 @@ def _parse_point(value: str) -> tuple[float, float]:
     except ValueError as exc:
         raise typer.BadParameter('position must be "x,y" with each a number') from exc
     return (x, y)
+
+
+def _parse_rect(value: str) -> tuple[float, float, float, float]:
+    parts = value.split(",")
+    if len(parts) != 4:
+        raise typer.BadParameter('rect must be "x0,y0,x1,y1", e.g. "72,700,200,715"')
+    try:
+        x0, y0, x1, y1 = (float(p) for p in parts)
+    except ValueError as exc:
+        raise typer.BadParameter('rect must be "x0,y0,x1,y1" with each a number') from exc
+    return (x0, y0, x1, y1)
 
 
 def _report(results: list[EditResult]) -> None:
@@ -292,6 +305,71 @@ def copy_style(
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
     _report([result])
+    typer.echo(f"saved -> {saved_to}")
+
+
+@app.command()
+def links(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to inspect")],
+    page: Annotated[int, typer.Argument(help="0-based page index")] = 0,
+    password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
+) -> None:
+    """Print every link on one page (EDT-10) as JSON; `index` is what remove-link takes."""
+    try:
+        with Document.open(path, password=password) as document:
+            found = PageLinksOp(page_index=page).apply(document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(json.dumps([link.model_dump(mode="json") for link in found], indent=2))
+
+
+@app.command("add-link")
+def add_link(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    uri: Annotated[str | None, typer.Option(help="Link target: an http(s) or mailto URI")] = None,
+    to_page: Annotated[int | None, typer.Option(help="Link target: a 0-based page of this document")] = None,
+    over: Annotated[str | None, typer.Option(help="Make the text span containing this literal text clickable")] = None,
+    rect: Annotated[str | None, typer.Option(help='Or an explicit clickable area, "x0,y0,x1,y1" in points')] = None,
+    page: Annotated[int, typer.Option(help="0-based page index")] = 0,
+    out: Annotated[Path | None, typer.Option(help="Output path; defaults to a new <name>.edited.pdf")] = None,
+    overwrite: Annotated[bool, typer.Option(help="Write back to the original file instead")] = False,
+    password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
+) -> None:
+    """Add a hyperlink (EDT-10) over existing text (--over) or an explicit area (--rect)."""
+    if (over is None) == (rect is None):
+        raise typer.BadParameter("give exactly one of --over or --rect")
+    try:
+        with Document.open(path, password=password) as document:
+            if rect is not None:
+                area = _parse_rect(rect)
+            else:
+                span_index = find_span_index(document, page, str(over))
+                area = extract_page_spans(document.raw, page)[span_index].style.bbox
+            added = AddLinkOp(page_index=page, rect=area, uri=uri, target_page=to_page).apply(document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"added link {added.index} on page {page}")
+    typer.echo(f"saved -> {saved_to}")
+
+
+@app.command("remove-link")
+def remove_link(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    index: Annotated[int, typer.Argument(help="The link's index, as `pdfworkerz links` prints it")],
+    page: Annotated[int, typer.Option(help="0-based page index")] = 0,
+    out: Annotated[Path | None, typer.Option(help="Output path; defaults to a new <name>.edited.pdf")] = None,
+    overwrite: Annotated[bool, typer.Option(help="Write back to the original file instead")] = False,
+    password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
+) -> None:
+    """Remove one hyperlink (EDT-10); the text under it is untouched."""
+    try:
+        with Document.open(path, password=password) as document:
+            RemoveLinkOp(page_index=page, index=index).apply(document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"removed link {index} on page {page}")
     typer.echo(f"saved -> {saved_to}")
 
 

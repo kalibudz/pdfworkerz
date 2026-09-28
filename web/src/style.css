@@ -584,3 +584,46 @@ button {
 .pw-edit-layer.pw-painting .pw-span-box {
   cursor: copy;
 }
+
+/* -- EDT-10: hyperlinks -- */
+
+.pw-link-box {
+  position: absolute;
+  pointer-events: none;
+  border-bottom: 2px dashed var(--accent);
+  opacity: 0.7;
+}
+
+.pw-inspector-subheading {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 16px 0 6px;
+}
+
+.pw-link-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.pw-link-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 0.8rem;
+}
+
+.pw-link-target {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pw-add-link {
+  width: 100%;
+}

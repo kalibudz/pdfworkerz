@@ -59,6 +59,7 @@ from engine.errors import (
 )
 from engine.ops.base import PageSpansOp, RenderPageOp, parse_op
 from engine.ops.journal import UndoRedoJournal
+from engine.ops.links import PageLinksOp
 from engine.ops.text import PreviewTextOp
 
 _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
@@ -210,6 +211,14 @@ def page_spans(document_id: str, page_index: int, journal: JournalDep) -> Any:
     this. Read-only (PageSpansOp), so -- like render_page above -- it's
     applied directly rather than through the undo/redo journal."""
     return _jsonable(PageSpansOp(page_index=page_index).apply(journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/links")
+def page_links(document_id: str, page_index: int, journal: JournalDep) -> Any:
+    """EDT-10: every link on one page. Read-only (PageLinksOp), applied
+    directly like page_spans; adding/editing/removing goes through the
+    generic, journaled ops endpoint."""
+    return _jsonable(PageLinksOp(page_index=page_index).apply(journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/preview")

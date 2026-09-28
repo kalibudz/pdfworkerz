@@ -75,6 +75,16 @@ export interface PreviewResult {
   note: string;
 }
 
+/** Mirrors engine.links.LinkInfo (EDT-10). `index` is the link's position
+ * in the page's current link list -- only valid until the next edit. */
+export interface LinkInfo {
+  index: number;
+  rect: [number, number, number, number];
+  kind: "uri" | "goto" | "other";
+  uri: string | null;
+  target_page: number | null;
+}
+
 /** One applied edit, exactly as it was requested -- an Op's own fields
  * (op.model_dump()), not the result of applying it. Which fields exist
  * beyond `op` depends on which Op it is; see history.ts's describeOp. */
@@ -138,6 +148,12 @@ export class Api {
   async pageSpans(documentId: string, pageIndex: number): Promise<SpanTrace[]> {
     const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/spans`);
     return (await response.json()) as SpanTrace[];
+  }
+
+  /** EDT-10: every link on one page. */
+  async pageLinks(documentId: string, pageIndex: number): Promise<LinkInfo[]> {
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/links`);
+    return (await response.json()) as LinkInfo[];
   }
 
   /** UI-02's live preview, before anything is committed: what font-resolution

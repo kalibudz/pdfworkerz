@@ -66,6 +66,195 @@
     },
     {
       "additionalProperties": false,
+      "description": "Every link on one page. Read-only, so -- like PageSpansOp -- it's\nnever journaled; server/app.py serves it from a dedicated GET route.",
+      "properties": {
+        "op": {
+          "const": "page_links",
+          "default": "page_links",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        }
+      },
+      "title": "PageLinksOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Add a clickable area at `rect` (PDF points) linking to `uri` or to\n`target_page` -- exactly one of the two.",
+      "properties": {
+        "op": {
+          "const": "add_link",
+          "default": "add_link",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "rect": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Rect",
+          "type": "array"
+        },
+        "uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uri"
+        },
+        "target_page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Page"
+        }
+      },
+      "required": [
+        "page_index",
+        "rect"
+      ],
+      "title": "AddLinkOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Move and/or retarget the link at `index` (its position in PageLinksOp's list).",
+      "properties": {
+        "op": {
+          "const": "update_link",
+          "default": "update_link",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "rect": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rect"
+        },
+        "uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uri"
+        },
+        "target_page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Page"
+        }
+      },
+      "required": [
+        "page_index",
+        "index"
+      ],
+      "title": "UpdateLinkOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Delete the link at `index`; the text or artwork under it is untouched.",
+      "properties": {
+        "op": {
+          "const": "remove_link",
+          "default": "remove_link",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_index",
+        "index"
+      ],
+      "title": "RemoveLinkOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "A read-only preview of the font resolution a replacement would use --\nnever draws, redacts or verifies anything, so (like PageSpansOp) it's\nnever journaled; server/app.py calls it directly. `span_index` is\npositional in a fresh `extract_page_spans` call on `page_index`, not a\ntext search (see _span_at).",
       "properties": {
         "op": {

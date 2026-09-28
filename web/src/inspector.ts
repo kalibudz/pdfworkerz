@@ -6,13 +6,14 @@
  * only ever renders whatever it's told to.
  */
 
-import type { PreviewResult, SpanTrace } from "./api";
+import type { LinkInfo, PreviewResult, SpanTrace } from "./api";
 
 export interface InspectorHandle {
   /** Nothing selected -- the panel's resting state. */
   showEmpty(): void;
-  /** A span was just selected, before any preview has come back for it yet. */
-  showSpan(span: SpanTrace): void;
+  /** A span was just selected, before any preview has come back for it yet.
+   * `links` are the page's links overlapping it (EDT-10). */
+  showSpan(span: SpanTrace, links?: LinkInfo[]): void;
   /** The latest preview result for the currently-shown span, or null while
    * one is in flight (SPEC.md never guesses at a match tier it hasn't
    * actually computed). */
@@ -25,6 +26,33 @@ export interface InspectorHandle {
 export interface InspectorOptions {
   /** EDT-07: the "Copy style" button was pressed for the shown span. */
   onCopyStyle?: () => void;
+  /** EDT-10: add a link over the shown span. */
+  onAddLink?: () => void;
+  /** EDT-10: retarget, or remove, one of the shown span's links. */
+  onEditLink?: (link: LinkInfo) => void;
+  onRemoveLink?: (link: LinkInfo) => void;
+}
+
+function describeLink(link: LinkInfo): string {
+  if (link.kind === "uri") {
+    return `→ ${link.uri ?? ""}`;
+  }
+  if (link.kind === "goto" && link.target_page !== null) {
+    return `→ page ${link.target_page + 1}`;
+  }
+  return "→ (other link type)";
+}
+
+/** A button that doesn't steal focus from the span being edited -- see the
+ * "Copy style" button below for why that matters. */
+function panelButton(label: string, className: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener("mousedown", (event) => event.preventDefault());
+  button.addEventListener("click", onClick);
+  return button;
 }
 
 const TIER_LABELS: Record<string, string> = {
@@ -101,23 +129,46 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   matchRow.value.prepend(matchDot);
   fields.append(fontRow.row, sizeRow.row, colorRow.row, spacingRow.row, rotationRow.row, matchRow.row);
 
-  const copyStyleButton = document.createElement("button");
-  copyStyleButton.type = "button";
-  copyStyleButton.className = "pw-copy-style";
-  copyStyleButton.textContent = "Copy style";
+  // panelButton keeps focus (and so the edit in progress) on the span box:
+  // otherwise pressing it blurs the box first, which cancels the edit and
+  // hides this block -- button included -- before the click lands.
+  const copyStyleButton = panelButton("Copy style", "pw-copy-style", () => options.onCopyStyle?.());
   copyStyleButton.title = "Format painter: copy this text's font, size and color onto other text";
-  // Keeps focus (and so the edit in progress) on the span box: without
-  // this, pressing the button blurs the box first, which cancels the edit
-  // and hides these fields -- button included -- before the click lands.
-  copyStyleButton.addEventListener("mousedown", (event) => event.preventDefault());
-  copyStyleButton.addEventListener("click", () => options.onCopyStyle?.());
   // Its own block after `fields`, not inside it: the rows stay the only
   // children there, so the Match row remains the last row.
   const actions = document.createElement("div");
   actions.className = "pw-inspector-actions";
   actions.hidden = true;
   actions.appendChild(copyStyleButton);
+
+  // EDT-10: links over the selected span.
+  const linksHeading = document.createElement("h3");
+  linksHeading.className = "pw-inspector-subheading";
+  linksHeading.textContent = "Links";
+  const linkList = document.createElement("ul");
+  linkList.className = "pw-link-list";
+  const addLinkButton = panelButton("Add link…", "pw-add-link", () => options.onAddLink?.());
+  actions.append(linksHeading, linkList, addLinkButton);
   container.appendChild(actions);
+
+  function showLinks(links: LinkInfo[]): void {
+    linkList.replaceChildren(
+      ...links.map((link) => {
+        const item = document.createElement("li");
+        item.className = "pw-link-item";
+        const label = document.createElement("span");
+        label.className = "pw-link-target";
+        label.textContent = describeLink(link);
+        label.title = label.textContent;
+        item.append(
+          label,
+          panelButton("Edit", "pw-link-edit", () => options.onEditLink?.(link)),
+          panelButton("Remove", "pw-link-remove", () => options.onRemoveLink?.(link)),
+        );
+        return item;
+      }),
+    );
+  }
 
   // Outside `fields` and `empty`: the painter stays armed while no span is
   // selected (that's the point -- the next click picks the target).
@@ -133,7 +184,8 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     actions.hidden = true;
   }
 
-  function showSpan(span: SpanTrace): void {
+  function showSpan(span: SpanTrace, links: LinkInfo[] = []): void {
+    showLinks(links);
     empty.hidden = true;
     fields.hidden = false;
     actions.hidden = false;

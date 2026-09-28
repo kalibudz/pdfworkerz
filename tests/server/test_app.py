@@ -301,6 +301,36 @@ def test_copy_style_op_via_the_generic_ops_endpoint_is_undoable(
     assert client.post(f"/documents/{document_id}/undo", headers=AUTH).status_code == 200
 
 
+@pytest.mark.feature("EDT-10")
+def test_links_route_reflects_journaled_link_ops_and_undo(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    links_url = f"/documents/{document_id}/pages/0/links"
+    assert client.get(links_url, headers=AUTH).json() == []
+
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "add_link", "page_index": 0, "rect": [72, 72, 200, 90], "uri": "https://example.com"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+    assert [link["uri"] for link in client.get(links_url, headers=AUTH).json()] == ["https://example.com"]
+
+    client.post(f"/documents/{document_id}/undo", headers=AUTH)
+    assert client.get(links_url, headers=AUTH).json() == []
+
+
+@pytest.mark.feature("EDT-10")
+def test_an_unsafe_link_is_a_400_validation_error(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "add_link", "page_index": 0, "rect": [72, 72, 200, 90], "uri": "javascript:alert(1)"},
+        headers=AUTH,
+    )
+    assert response.status_code == 400
+    assert "scheme" in response.json()["detail"]
+
+
 @pytest.mark.feature("UI-04")
 def test_replace_span_text_op_round_trips_through_history_and_undo(client: TestClient, simple_path: Path) -> None:
     """UI-04's history panel describes each entry from the Op's own fields

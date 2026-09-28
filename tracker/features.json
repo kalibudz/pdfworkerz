@@ -102,7 +102,7 @@
     {"id": "EDT-07", "category": "EDT", "name": "Format painter (copy style from one span to another)", "parity": ["Beyond"], "libs": ["PyMuPDF"], "phase": "P3", "estTokens": "S", "status": "done"},
     {"id": "EDT-08", "category": "EDT", "name": "Insert, replace, resize, crop and delete images", "parity": ["iLovePDF", "Nitro"], "libs": ["PyMuPDF", "Pillow"], "phase": "P3", "estTokens": "M", "status": "planned"},
     {"id": "EDT-09", "category": "EDT", "name": "Draw and edit vector shapes and lines", "parity": ["iLovePDF", "Nitro"], "libs": ["PyMuPDF"], "phase": "P3", "estTokens": "M", "status": "planned"},
-    {"id": "EDT-10", "category": "EDT", "name": "Add, edit and remove hyperlinks", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P3", "estTokens": "S", "status": "planned"},
+    {"id": "EDT-10", "category": "EDT", "name": "Add, edit and remove hyperlinks", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P3", "estTokens": "S", "status": "done"},
     {"id": "EDT-11", "category": "EDT", "name": "Offline spell-check with Hunspell dictionaries", "parity": ["Nitro"], "libs": ["spylls"], "phase": "P3", "estTokens": "M", "status": "planned"},
     {"id": "EDT-12", "category": "EDT", "name": "Edit text on scanned pages (OCR + background patch reconstruction)", "parity": ["Beyond"], "libs": ["Tesseract", "OpenCV", "PyMuPDF"], "phase": "P7", "estTokens": "L", "status": "planned"},
     {"id": "UI-01", "category": "UI", "name": "Page canvas with thumbnail rail", "parity": ["iLovePDF", "Nitro"], "libs": ["pdf.js"], "phase": "P3", "estTokens": "M", "status": "done"},

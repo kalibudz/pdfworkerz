@@ -22,7 +22,7 @@
 
 import type * as pdfjsLib from "pdfjs-dist";
 
-import type { Api, SpanTrace } from "./api";
+import type { Api, HistoryOp, LinkInfo, SpanTrace } from "./api";
 import type { InspectorHandle } from "./inspector";
 import { toHexColor } from "./inspector";
 
@@ -41,19 +41,46 @@ export interface OverlayHandle {
    * Discards any edit in progress -- its span index belongs to the page
    * state before this render, which by the time a caller has a new
    * viewport to hand over is already gone. */
-  update(pageIndex: number, spans: SpanTrace[], viewport: pdfjsLib.PageViewport): void;
+  update(pageIndex: number, spans: SpanTrace[], viewport: pdfjsLib.PageViewport, links?: LinkInfo[]): void;
   /** EDT-07: arm the format painter with the span currently being edited
    * as its source; the next span clicked (on any page) gets its style.
    * A no-op when nothing is selected. */
   armPainter(): void;
   /** EDT-07: drop an armed painter -- the document changed underneath it. */
   cancelPainter(): void;
+  /** EDT-10: prompt for a target and link the selected span to it. */
+  addLink(): void;
+  /** EDT-10: prompt for a new target for `link`. */
+  editLink(link: LinkInfo): void;
+  removeLink(link: LinkInfo): void;
 }
 
 interface SpanRef {
   pageIndex: number;
   spanIndex: number;
   text: string;
+  bbox: [number, number, number, number];
+}
+
+type LinkTarget = { uri: string } | { target_page: number };
+
+/** "https://…" / "mailto:…" -> a URI link; a bare number -> that (1-based)
+ * page of this document. Anything else is passed through as a URI and
+ * left to the engine's scheme allowlist to accept or refuse. */
+export function parseLinkTarget(value: string): LinkTarget | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const pageMatch = /^(?:page\s*)?(\d+)$/i.exec(trimmed);
+  if (pageMatch) {
+    return { target_page: Number(pageMatch[1]) - 1 };
+  }
+  return { uri: trimmed };
+}
+
+function overlaps(a: readonly number[], b: readonly number[]): boolean {
+  return a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
 }
 
 const PREVIEW_DEBOUNCE_MS = 300;
@@ -118,6 +145,41 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
    * update() (cross-page painting is supported); cleared once applied or
    * cancelled, and on any document change, which makes its index stale. */
   let painterSource: SpanRef | null = null;
+  let pageLinks: LinkInfo[] = [];
+  let currentPageIndex = 0;
+
+  async function applyLinkOp(op: HistoryOp): Promise<void> {
+    try {
+      await options.api.applyOp(options.documentId, op);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The link could not be saved.");
+      return;
+    }
+    options.onCommitted();
+  }
+
+  function addLink(): void {
+    const span = selected; // captured first: the prompt blurs the box, which clears `selected`
+    if (!span) {
+      return;
+    }
+    const target = parseLinkTarget(window.prompt("Link to a URL (https://…, mailto:…) or a page number:") ?? "");
+    if (target) {
+      void applyLinkOp({ op: "add_link", page_index: span.pageIndex, rect: span.bbox, ...target });
+    }
+  }
+
+  function editLink(link: LinkInfo): void {
+    const current = link.kind === "uri" ? (link.uri ?? "") : String((link.target_page ?? 0) + 1);
+    const target = parseLinkTarget(window.prompt("New link target (URL or page number):", current) ?? "");
+    if (target) {
+      void applyLinkOp({ op: "update_link", page_index: currentPageIndex, index: link.index, ...target });
+    }
+  }
+
+  function removeLink(link: LinkInfo): void {
+    void applyLinkOp({ op: "remove_link", page_index: currentPageIndex, index: link.index });
+  }
 
   function disarmPainter(): void {
     painterSource = null;
@@ -260,14 +322,17 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }
     activeBox = box;
     originalText = text;
-    selected = { pageIndex, spanIndex, text };
+    selected = { pageIndex, spanIndex, text, bbox: span.style.bbox };
 
     box.contentEditable = "true";
     box.classList.add("pw-span-editing");
     box.focus();
     selectAllContents(box);
 
-    options.inspector.showSpan(span);
+    options.inspector.showSpan(
+      span,
+      pageLinks.filter((link) => overlaps(link.rect, span.style.bbox)),
+    );
     queuePreview(pageIndex, spanIndex, text);
 
     box.oninput = () => queuePreview(pageIndex, spanIndex, box.textContent ?? "");
@@ -291,9 +356,30 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     };
   }
 
-  function update(pageIndex: number, spans: SpanTrace[], viewport: pdfjsLib.PageViewport): void {
+  function update(
+    pageIndex: number,
+    spans: SpanTrace[],
+    viewport: pdfjsLib.PageViewport,
+    links: LinkInfo[] = [],
+  ): void {
     cancelEdit();
     layer.innerHTML = "";
+    currentPageIndex = pageIndex;
+    pageLinks = links;
+
+    // EDT-10: link areas, drawn under the span boxes and never clickable
+    // themselves -- editing a link goes through the span it covers.
+    for (const link of links) {
+      const rect = bboxToRect(viewport, link.rect);
+      const outline = document.createElement("div");
+      outline.className = "pw-link-box";
+      outline.style.left = `${rect.left}px`;
+      outline.style.top = `${rect.top}px`;
+      outline.style.width = `${rect.width}px`;
+      outline.style.height = `${rect.height}px`;
+      outline.title = link.kind === "uri" ? (link.uri ?? "") : `page ${(link.target_page ?? 0) + 1}`;
+      layer.appendChild(outline);
+    }
 
     for (const [spanIndex, span] of spans.entries()) {
       const rect = bboxToRect(viewport, span.style.bbox);
@@ -311,7 +397,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       box.textContent = span.style.text;
       box.addEventListener("click", () => {
         if (painterSource) {
-          void applyPainter({ pageIndex, spanIndex, text: span.style.text });
+          void applyPainter({ pageIndex, spanIndex, text: span.style.text, bbox: span.style.bbox });
         } else {
           startEdit(box, pageIndex, spanIndex, span.style.text, span);
         }
@@ -320,5 +406,5 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }
   }
 
-  return { update, armPainter, cancelPainter: disarmPainter };
+  return { update, armPainter, cancelPainter: disarmPainter, addLink, editLink, removeLink };
 }
