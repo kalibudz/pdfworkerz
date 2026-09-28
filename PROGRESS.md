@@ -119,6 +119,20 @@ A phase is complete when all of its features are **done** through the evidence g
 - 364 tests total (93.2% coverage); ruff, mypy --strict, bandit, pip-audit
   and `npm audit` (0 vulnerabilities) all clean. UI-02 and UI-03 moved to
   "done" by the evidence gate (47/161 total, 5/15 in P3).
+- **A third real bug, caught by CI itself rather than locally**: pushed
+  this and found the macOS shards (only macOS, both Python versions) failed
+  two of the new tests -- typed text was inserted at the start of the
+  original text instead of replacing it. Root cause: `Control+A` is the
+  Cocoa/Emacs "move to start of line" binding on macOS, not select-all
+  (`Cmd+A` is); six of the new tests pressed it before typing, on the
+  mistaken assumption it was needed. It never was -- `overlay.ts`'s
+  `startEdit()` already calls `selectAllContents()` the instant a box
+  becomes editable, so every platform already has the text selected by
+  the time a test types into it. Deleted the keypress rather than
+  branching per platform; Linux and Windows had been passing only because
+  both treat Ctrl+A as select-all too, silently masking that it did
+  nothing. Confirmed green on all three OSes afterward
+  ([run #25](https://github.com/kalibudz/pdfworkerz/actions/runs/36365316425)).
 - Still open in P3: UI-04/05/08/09 (history panel, before/after split
   view, keyboard shortcuts, themes) and EDT-05/07/08/09/10/11 (block
   move/resize, format painter, images, shapes, hyperlinks, spell-check).
