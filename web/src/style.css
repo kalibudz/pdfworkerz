@@ -838,3 +838,12 @@ button {
 .pw-shortcuts form {
   text-align: right;
 }
+
+.pw-toolbar .pw-save-status {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  max-width: 22em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

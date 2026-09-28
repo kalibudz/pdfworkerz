@@ -100,6 +100,9 @@ def _one_of(positional: str | None, option: str | None, name: str) -> str:
 MatchOption = Annotated[
     str | None, typer.Option("--match", help='Text to find, as an option -- for text starting with "-"')
 ]
+WholeWordOption = Annotated[
+    bool, typer.Option(help='Only match whole words ("cat" matches in "a cat" but not in "category")')
+]
 
 
 def _report(results: list[EditResult]) -> None:
@@ -180,6 +183,7 @@ def replace(
     ] = None,
     regex: Annotated[bool, typer.Option(help="Treat match as a regular expression")] = False,
     case_insensitive: Annotated[bool, typer.Option(help="Match regardless of case")] = False,
+    whole_word: WholeWordOption = False,
     page: Annotated[int | None, typer.Option(help="Only this 0-based page; default is every page")] = None,
     require_tier: TierOption = "approximate",
     fit: Annotated[
@@ -204,6 +208,7 @@ def replace(
                 replacement=replace_with,
                 mode="regex" if regex else "literal",
                 case_sensitive=not case_insensitive,
+                whole_word=whole_word,
                 page_index=page,
                 require_tier=require_tier,
                 fit=fit,
@@ -223,6 +228,7 @@ def delete(
     match_option: MatchOption = None,
     regex: Annotated[bool, typer.Option(help="Treat match as a regular expression")] = False,
     case_insensitive: Annotated[bool, typer.Option(help="Match regardless of case")] = False,
+    whole_word: WholeWordOption = False,
     page: Annotated[int | None, typer.Option(help="Only this 0-based page; default is every page")] = None,
     require_tier: TierOption = "approximate",
     out: Annotated[Path | None, typer.Option(help="Output path; defaults to a new <name>.edited.pdf")] = None,
@@ -237,6 +243,7 @@ def delete(
                 match=find,
                 mode="regex" if regex else "literal",
                 case_sensitive=not case_insensitive,
+                whole_word=whole_word,
                 page_index=page,
                 require_tier=require_tier,
             )

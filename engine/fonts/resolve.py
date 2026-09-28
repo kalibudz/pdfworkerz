@@ -32,8 +32,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from engine.fonts.classify import FontClassification, fingerprint_style, infer_style_from_name
-from engine.fonts.match import FontCandidate, extract_metrics, find_by_name, rank_by_metrics, same_family
+from engine.fonts.classify import FontClassification, fingerprint_style, infer_style_from_name, split_subset_tag
+from engine.fonts.match import (
+    FontCandidate,
+    extract_metrics,
+    find_by_name,
+    normalize_font_name,
+    rank_by_metrics,
+    same_family,
+)
 from engine.fonts.merge import build_merged_subset
 
 TIER_EXACT = "exact"
@@ -41,6 +48,51 @@ TIER_APPROXIMATE = "approximate"
 TIER_FALLBACK = "fallback"
 
 _FALLBACK_CONFIDENCE = 0.2
+_METRIC_COMPATIBLE_CONFIDENCE = 0.8
+
+# normalize_font_name() forms of the 14 standard PDF fonts (ISO 32000-1 9.6.2.2).
+_STANDARD_14 = frozenset(
+    {
+        "helvetica",
+        "helveticabold",
+        "helveticaoblique",
+        "helveticaboldoblique",
+        "timesroman",
+        "timesbold",
+        "timesitalic",
+        "timesbolditalic",
+        "courier",
+        "courierbold",
+        "courieroblique",
+        "courierboldoblique",
+    }
+)
+_SYMBOLIC_BUILTINS = {"symbol": "symb", "zapfdingbats": "zadb"}
+# Widely used fonts whose widths match a standard-14 font (Arial/Helvetica and so on).
+_METRIC_COMPATIBLE = frozenset(
+    {
+        "arial",
+        "arialmt",
+        "arialbold",
+        "arialboldmt",
+        "arialitalic",
+        "arialitalicmt",
+        "arialbolditalic",
+        "arialbolditalicmt",
+        "timesnewroman",
+        "timesnewromanpsmt",
+        "timesnewromanbold",
+        "timesnewromanpsboldmt",
+        "timesnewromanitalic",
+        "timesnewromanpsitalicmt",
+        "timesnewromanbolditalic",
+        "timesnewromanpsbolditalicmt",
+        "couriernew",
+        "couriernewpsmt",
+        "couriernewbold",
+        "couriernewpsboldmt",
+    }
+)
 
 # (bold, italic) -> PyMuPDF standard-14 short name, per family class.
 _SANS_FALLBACK = {(False, False): "helv", (True, False): "hebo", (False, True): "heit", (True, True): "hebi"}
@@ -68,6 +120,60 @@ class FontResolution:
 def _standard_fallback_name(bold: bool, italic: bool, family_class: str) -> str:
     table = {"serif": _SERIF_FALLBACK, "monospace": _MONO_FALLBACK}.get(family_class, _SANS_FALLBACK)
     return table[(bold, italic)]
+
+
+def _resolve_non_embedded(
+    classification: FontClassification, already_rendered_text: str, needed_text: str, font_index: list[FontCandidate]
+) -> FontResolution:
+    """A font the PDF only names. Only the standard 14 are drawn "exactly" by PyMuPDF's
+    built-ins (Symbol and ZapfDingbats as themselves, never as Helvetica); any other
+    name is exact only if that same font is installed, and otherwise a substitute that
+    needs approval -- it used to be reported as exact and drawn in Helvetica regardless."""
+    base = split_subset_tag(classification.base_font)[1]
+    key = normalize_font_name(base)
+    fingerprint = infer_style_from_name(classification.base_font)
+    standard = _standard_fallback_name(fingerprint.bold, fingerprint.italic, fingerprint.family_class)
+
+    builtin = _SYMBOLIC_BUILTINS.get(key) or (standard if key in _STANDARD_14 else None)
+    if builtin is not None:
+        return FontResolution(
+            tier=TIER_EXACT,
+            confidence=1.0,
+            fontname=builtin,
+            font_bytes=None,
+            requires_approval=False,
+            note="standard-14 font (not embedded), drawn with PyMuPDF's built-in copy",
+        )
+
+    installed = find_by_name(font_index, classification.base_font)
+    if installed is not None:
+        characters = "".join(set(already_rendered_text) | set(needed_text))
+        return FontResolution(
+            tier=TIER_EXACT,
+            confidence=1.0,
+            fontname=None,
+            font_bytes=build_merged_subset(installed.path, characters),
+            requires_approval=False,
+            note=f"font not embedded in the PDF; the same font was found at {installed.path} and embedded",
+        )
+
+    if key in _METRIC_COMPATIBLE:
+        return FontResolution(
+            tier=TIER_APPROXIMATE,
+            confidence=_METRIC_COMPATIBLE_CONFIDENCE,
+            fontname=standard,
+            font_bytes=None,
+            requires_approval=True,
+            note=f"{base} is not embedded or installed; drawn with its metric-compatible standard font",
+        )
+    return FontResolution(
+        tier=TIER_FALLBACK,
+        confidence=_FALLBACK_CONFIDENCE,
+        fontname=standard,
+        font_bytes=None,
+        requires_approval=True,
+        note=f"{base} is not embedded or installed; using a standard-font fallback",
+    )
 
 
 def resolve_font(
@@ -107,16 +213,7 @@ def resolve_font(
         )
 
     if not classification.embedded:
-        fingerprint = infer_style_from_name(classification.base_font)
-        name = _standard_fallback_name(fingerprint.bold, fingerprint.italic, fingerprint.family_class)
-        return FontResolution(
-            tier=TIER_EXACT,
-            confidence=1.0,
-            fontname=name,
-            font_bytes=None,
-            requires_approval=False,
-            note="standard (non-embedded) font, drawn with PyMuPDF's own encoding",
-        )
+        return _resolve_non_embedded(classification, already_rendered_text, needed_text, font_index)
 
     exact_match = find_by_name(font_index, classification.base_font)
     if exact_match is not None:

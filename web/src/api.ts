@@ -119,6 +119,14 @@ export interface Misspelling {
 /** One applied edit, exactly as it was requested -- an Op's own fields
  * (op.model_dump()), not the result of applying it. Which fields exist
  * beyond `op` depends on which Op it is; see history.ts's describeOp. */
+export interface SaveResponse {
+  path: string;
+  mode: string;
+  bytes_written: number;
+  /** e.g. that a signed file's signatures no longer cover it; empty when there's nothing to add. */
+  note: string;
+}
+
 export interface HistoryOp {
   op: string;
   [field: string]: unknown;
@@ -227,8 +235,8 @@ export class Api {
     spanIndex: number,
     newText: string,
     requireTier: "exact" | "approximate" | "fallback",
-  ): Promise<void> {
-    await this.request(`/documents/${documentId}/ops`, {
+  ): Promise<unknown> {
+    const response = await this.request(`/documents/${documentId}/ops`, {
       method: "POST",
       body: JSON.stringify({
         op: "replace_span_text",
@@ -238,6 +246,7 @@ export class Api {
         require_tier: requireTier,
       }),
     });
+    return await response.json();
   }
 
   /** Any registered Op through the generic, journaled ops endpoint (so it
@@ -281,6 +290,16 @@ export class Api {
   /** UI-04: re-apply the most recently undone op. */
   async redo(documentId: string): Promise<void> {
     await this.request(`/documents/${documentId}/redo`, { method: "POST" });
+  }
+
+  /** Save the edited document on the server's disk. With no options it writes a
+   * new versioned file next to the original (`name.edited.pdf`), never over it. */
+  async save(documentId: string, options: { path?: string; overwrite?: boolean } = {}): Promise<SaveResponse> {
+    const response = await this.request(`/documents/${documentId}/save`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+    return (await response.json()) as SaveResponse;
   }
 
   private async request(path: string, init: RequestInit = {}): Promise<Response> {

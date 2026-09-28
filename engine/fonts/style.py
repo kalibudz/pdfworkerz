@@ -40,6 +40,8 @@ import pikepdf
 import pymupdf
 from pydantic import BaseModel, ConfigDict
 
+from engine.pdfbytes import plain_bytes
+
 RENDER_MODE_NAMES = {
     0: "fill",
     1: "stroke",
@@ -136,7 +138,7 @@ class SpanTrace(BaseModel):
     1:1 with texttrace's spans; ``style`` is always populated regardless."""
 
 
-def _dedupe_texttrace(spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def dedupe_texttrace(spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Collapse fill+stroke pairs (identical geometry, different paint `type`) to one entry."""
     seen: set[tuple[Any, ...]] = set()
     deduped = []
@@ -314,10 +316,10 @@ def walk_raw_glyph_codes(pdf_page: pikepdf.Page) -> list[int]:
 def extract_page_spans(doc: pymupdf.Document, page_index: int) -> list[SpanTrace]:
     """FNT-01 + FNT-02: every text span on a page, with its style and (when the
     content stream correlates cleanly) its text state, as of its first glyph."""
-    raw_spans = _dedupe_texttrace(doc[page_index].get_texttrace())
+    raw_spans = dedupe_texttrace(doc[page_index].get_texttrace())
     styles = [_span_style_from_texttrace(page_index, i, span) for i, span in enumerate(raw_spans)]
 
-    with pikepdf.open(io.BytesIO(doc.tobytes())) as pikepdf_doc:
+    with pikepdf.open(io.BytesIO(plain_bytes(doc))) as pikepdf_doc:
         glyph_states = _walk_glyph_states(pikepdf_doc.pages[page_index])
 
     total_chars = sum(len(span.chars) for span in styles)

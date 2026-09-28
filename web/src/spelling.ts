@@ -11,6 +11,7 @@
 import type * as pdfjsLib from "pdfjs-dist";
 
 import type { Api, Misspelling } from "./api";
+import { applyWithApproval, confirmVerified } from "./approval";
 import { bboxToRect } from "./overlay";
 
 export interface SpellToolOptions {
@@ -68,7 +69,7 @@ export function createSpellTool(layer: HTMLElement, options: SpellToolOptions): 
   async function correct(miss: Misspelling, replacement: string): Promise<void> {
     closeMenu();
     try {
-      await options.api.applyOp(options.documentId, {
+      const applied = await applyWithApproval(options.api, options.documentId, {
         op: "correct_word",
         page_index: pageIndex,
         span_index: miss.span_index,
@@ -76,8 +77,11 @@ export function createSpellTool(layer: HTMLElement, options: SpellToolOptions): 
         end: miss.end,
         word: miss.word,
         replacement,
-        require_tier: "fallback",
       });
+      if (!applied) {
+        return;
+      }
+      await confirmVerified(options.api, options.documentId, applied.result);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The correction could not be saved.");
       return;

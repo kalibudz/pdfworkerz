@@ -68,6 +68,19 @@ def pixel_diff(before: NDArray[np.uint8], after: NDArray[np.uint8]) -> DiffResul
     )
 
 
+def changed_outside(
+    before: NDArray[np.uint8], after: NDArray[np.uint8], allowed: list[tuple[int, int, int, int]]
+) -> float:
+    """Fraction of all pixels that changed outside the `allowed` (x0, y0, x1, y1) pixel boxes --
+    FNT-12's "flag anything outside the edit mask that changed"."""
+    if before.shape != after.shape:
+        raise ValueError(f"cannot diff renders of different shapes: {before.shape} vs {after.shape}")
+    changed = np.any(before != after, axis=-1)
+    for x0, y0, x1, y1 in allowed:
+        changed[max(y0, 0) : max(y1, 0), max(x0, 0) : max(x1, 0)] = False
+    return float(changed.sum()) / changed.size
+
+
 def assert_pixel_similar(
     before: NDArray[np.uint8], after: NDArray[np.uint8], *, tolerance: float = DEFAULT_TOLERANCE
 ) -> DiffResult:

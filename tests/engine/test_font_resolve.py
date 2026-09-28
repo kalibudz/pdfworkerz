@@ -138,3 +138,53 @@ def test_exact_tier_merged_subset_covers_characters_never_seen_before(corpus: Co
         characters="completely new text!",
     )
     assert coverage.fully_covered
+
+
+def _non_embedded(base_font: str) -> object:
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page()
+    font = pdf.make_indirect(
+        pikepdf.Dictionary(Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1, BaseFont=pikepdf.Name("/" + base_font))
+    )
+    page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
+    return classify_font(pdf, 0, "F1")
+
+
+def _resolve_non_embedded(base_font: str, font_index: list) -> object:
+    return resolve_font(
+        _non_embedded(base_font),  # type: ignore[arg-type]
+        original_font_bytes=None,
+        already_rendered_text="",
+        needed_text="abc",
+        font_index=font_index,
+    )
+
+
+@pytest.mark.feature("FNT-06")
+@pytest.mark.parametrize(
+    "base_font, fontname",
+    [("Helvetica-Bold", "hebo"), ("Times-Roman", "tiro"), ("Symbol", "symb"), ("ZapfDingbats", "zadb")],
+)
+def test_standard_14_names_resolve_exact_to_their_own_builtin(font_index: list, base_font: str, fontname: str) -> None:
+    result = _resolve_non_embedded(base_font, font_index)
+    assert (result.tier, result.fontname, result.requires_approval) == (TIER_EXACT, fontname, False)  # type: ignore[attr-defined]
+
+
+@pytest.mark.feature("FNT-07")
+def test_a_non_embedded_metric_compatible_font_is_approximate_and_needs_approval(font_index: list) -> None:
+    # font_index has no system fonts here, so Arial can't be found installed.
+    result = _resolve_non_embedded("ArialMT", font_index)
+    assert (result.tier, result.fontname, result.requires_approval) == (TIER_APPROXIMATE, "helv", True)  # type: ignore[attr-defined]
+
+
+@pytest.mark.feature("FNT-07")
+@pytest.mark.parametrize("base_font", ["Verdana", "Wingdings", "MS-Mincho", "TotallyUnknownFont"])
+def test_any_other_non_embedded_font_is_never_silently_exact(font_index: list, base_font: str) -> None:
+    result = _resolve_non_embedded(base_font, font_index)
+    assert result.tier == TIER_FALLBACK and result.requires_approval  # type: ignore[attr-defined]
+
+
+@pytest.mark.feature("FNT-06")
+def test_a_non_embedded_font_that_is_installed_is_embedded_exactly(font_index: list) -> None:
+    result = _resolve_non_embedded("BitstreamVeraSans-Roman", font_index)  # bundled, so always "installed"
+    assert result.tier == TIER_EXACT and result.font_bytes is not None  # type: ignore[attr-defined]

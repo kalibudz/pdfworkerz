@@ -526,3 +526,18 @@ def test_match_given_both_ways_or_neither_is_an_error(dashed_pdf: Path) -> None:
     assert both.exit_code != 0 and "not both" in flat(both.output)
     neither = runner.invoke(app, ["delete", str(dashed_pdf)])
     assert neither.exit_code != 0 and "missing the match" in flat(neither.output)
+
+
+@pytest.mark.feature("EDT-02")
+def test_replace_whole_word_leaves_longer_words_alone(work_dir: Path) -> None:
+    import pymupdf
+
+    source = work_dir / "cats.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "cat category cat.", fontsize=12, fontname="helv")
+    doc.save(source)
+    out = work_dir / "dogs.pdf"
+    result = runner.invoke(app, ["replace", str(source), "cat", "dog", "--whole-word", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    with pymupdf.open(out) as saved:
+        assert saved[0].get_text().strip() == "dog category dog."

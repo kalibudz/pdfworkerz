@@ -11,6 +11,7 @@ instead of drawing with it.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Literal
 
@@ -29,10 +30,11 @@ from engine.edit import (
 from engine.errors import OpValidationError
 from engine.fonts.blocks import TextBlock, detect_blocks, find_block_containing
 from engine.fonts.match import FontCandidate, build_font_index
-from engine.fonts.style import SpanTrace, extract_page_spans
+from engine.fonts.style import SpanTrace, dedupe_texttrace, extract_page_spans
 from engine.ops.base import Op, register_op
 
 _TIER_ORDER = {"exact": 0, "approximate": 1, "fallback": 2}
+_SAME_ORIGIN_TOLERANCE = 0.05  # pt
 
 _font_index_cache: list[FontCandidate] | None = None
 
@@ -62,10 +64,20 @@ def _check_tier(result: EditResult, require_tier: str, *, where: str) -> None:
         raise OpValidationError(f"{where}: {problem}")
 
 
-def _compile_pattern(match: str, mode: str, case_sensitive: bool) -> re.Pattern[str]:
+def _compile_pattern(match: str, mode: str, case_sensitive: bool, whole_word: bool = False) -> re.Pattern[str]:
     flags = 0 if case_sensitive else re.IGNORECASE
     pattern = match if mode == "regex" else re.escape(match)
+    if whole_word:
+        # Lookarounds rather than a word boundary, so a match that starts or ends with punctuation still works.
+        pattern = rf"(?<!\w)(?:{pattern})(?!\w)"
     return re.compile(pattern, flags)
+
+
+def _page_might_match(document: Document, page_index: int, pattern: re.Pattern[str]) -> bool:
+    """A cheap texttrace-only check, so pages without a match skip extract_page_spans (which
+    serializes and re-parses the whole document): a no-match search of 1000 pages took ~100s."""
+    spans = dedupe_texttrace(document.raw[page_index].get_texttrace())
+    return any(pattern.search("".join(chr(char[0]) for char in span["chars"])) for span in spans)
 
 
 def _pages_to_search(document: Document, page_index: int | None) -> range:
@@ -271,6 +283,18 @@ class MoveTextBlockOp(Op):
         return results
 
 
+def _span_by_origin(document: Document, page_index: int, origin: tuple[float, float], text: str) -> SpanTrace:
+    """Re-find a span listed before earlier redraws on the same page (which renumber spans)."""
+    for span in extract_page_spans(document.raw, page_index):
+        if (
+            span.style.text == text
+            and span.style.chars
+            and math.dist(span.style.chars[0].origin, origin) < _SAME_ORIGIN_TOLERANCE
+        ):
+            return span
+    raise OpValidationError(f"the text {text!r} changed while earlier matches on page {page_index} were replaced")
+
+
 class _FindReplaceOp(Op):
     """Shared fields for ReplaceTextOp and DeleteTextOp."""
 
@@ -285,26 +309,33 @@ class _FindReplaceOp(Op):
     engine.edit.replace_span_text's docstring for the chainability trade-off."""
     verify: bool = True
     """FNT-12: render before/after and confirm the text landed (engine.edit)."""
+    whole_word: bool = False
+    """EDT-02: only match where the text isn't part of a longer word ("cat" but not "category")."""
 
     def _replacement_for(self, matched_text: str) -> str:
         raise NotImplementedError
 
     def apply(self, document: Document) -> list[EditResult]:
         font_index = _font_index()
-        pattern = _compile_pattern(self.match, self.mode, self.case_sensitive)
+        pattern = _compile_pattern(self.match, self.mode, self.case_sensitive, self.whole_word)
         results: list[EditResult] = []
 
         for page_index in _pages_to_search(document, self.page_index):
-            while True:
-                found = _find_first_match(document, page_index, pattern)
-                if found is None:
-                    break
-                span, match_obj = found
-                text = span.style.text
-                replacement = self._replacement_for(match_obj.group())
-                new_text = text[: match_obj.start()] + replacement + text[match_obj.end() :]
+            if not _page_might_match(document, page_index, pattern):
+                continue
+            # Which spans to change is decided once, up front, and each is redrawn once with all of
+            # its matches replaced. Searching again after every redraw looped forever whenever the
+            # replacement itself contained the match ("Hello" -> "Hello there").
+            targets = [
+                (span.style.chars[0].origin, span.style.text)
+                for span in extract_page_spans(document.raw, page_index)
+                if span.style.chars and pattern.search(span.style.text)
+            ]
+            for origin, text in targets:
+                span = _span_by_origin(document, page_index, origin, text)
+                new_text = pattern.sub(lambda m: self._replacement_for(m.group()), text)
                 if new_text == text:
-                    break  # a zero-width regex match on an already-handled span: stop, don't loop forever
+                    continue
                 result = replace_span_text(
                     document, page_index, span, new_text, font_index=font_index, fit=self.fit, verify=self.verify
                 )
@@ -357,6 +388,8 @@ class RestyleTextOp(Op):
         results: list[EditResult] = []
 
         for page_index in _pages_to_search(document, self.page_index):
+            if not _page_might_match(document, page_index, pattern):
+                continue
             spans = extract_page_spans(document.raw, page_index)
             targets = [span for span in spans if pattern.search(span.style.text)]
             for span in targets:

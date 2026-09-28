@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict
 
 from engine.document import Document
 from engine.errors import OpValidationError
+from engine.geometry import page_bounds
 
 Color = tuple[float, float, float]
 Point = tuple[float, float]
@@ -247,7 +248,7 @@ def draw_shape(
             f"a {kind} needs {'exactly' if kind in ('line', 'rect', 'ellipse') else 'at least'} {needed} points"
         )
     corners = [pymupdf.Point(p) for p in points]
-    if not any(p in page.rect for p in corners):
+    if not any(p in page_bounds(page) for p in corners):
         raise OpValidationError("the shape lies entirely outside the page")
 
     shape = page.new_shape()
@@ -310,7 +311,7 @@ def edit_shape(
         new = pymupdf.Rect(rect)
         if new.is_empty and not (new.width > 0 or new.height > 0):
             raise OpValidationError(f"shape rectangle {rect} is empty")
-        if not new.intersects(page.rect) and not page.rect.contains(new.tl):
+        if not new.intersects(page_bounds(page)) and not page_bounds(page).contains(new.tl):
             raise OpValidationError(f"shape rectangle {rect} lies entirely outside the page")
         sx = new.width / old.width if old.width else 1.0
         sy = new.height / old.height if old.height else 1.0

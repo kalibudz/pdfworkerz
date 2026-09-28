@@ -28,6 +28,7 @@ control otherwise.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import io
 import math
 from dataclasses import dataclass
@@ -46,13 +47,17 @@ from engine.fonts.kerning import build_kern_pairs
 from engine.fonts.match import FontCandidate, normalize_font_name
 from engine.fonts.reflow import wrap_text
 from engine.fonts.resolve import FontResolution, resolve_font
-from engine.fonts.style import SpanTrace, TextState, advance_for_char, extract_page_spans
-from engine.verify import DiffResult, pixel_diff, render_to_array
+from engine.fonts.style import SpanTrace, TextState, advance_for_char, dedupe_texttrace, extract_page_spans
+from engine.geometry import page_bounds
+from engine.verify import DiffResult, changed_outside, pixel_diff, render_to_array
 
 VERIFY_DPI = 150
 
 _EDIT_FONT_RESOURCE = "PDFWorkerzEdit"
 _MIN_CONTAINMENT_MATCH_LENGTH = 6  # see _find_font_entry's fallback pass
+_REDACT_HALF = 0.2  # half-size (pt) of the per-glyph redaction square, see _redact_spans
+_AA_MARGIN_PX = 2  # anti-aliasing spill around an edited box, at VERIFY_DPI
+_OUTSIDE_TOLERANCE = 1e-5  # fraction of page pixels; a few stray pixels at most
 # Verified at runtime (pymupdf 1.28.2); missing from pymupdf's stub like PDF_ENCRYPT_KEEP
 # (see engine/document.py's note on the same class of gap).
 _REDACT_KWARGS: dict[str, int] = {
@@ -71,10 +76,37 @@ class VerificationResult:
     ``get_text()`` (its word-break heuristics can be fooled by wide Tc/Tw)."""
     diff: DiffResult
     """The before/after pixel comparison of the whole page (engine.verify)."""
+    outside_changed_fraction: float = 0.0
+    """Fraction of the page's pixels that changed *outside* the edited area (the removed
+    text's boxes plus the newly drawn text's): SPEC.md 5.6's collateral-damage check."""
+    looks_right: bool = dataclasses.field(init=False)
+    """All three checks passed. A real field, not a property, so it reaches the JSON the UI reads."""
 
-    @property
-    def looks_right(self) -> bool:
-        return self.text_matches and self.diff.changed_fraction > 0.0
+    def __post_init__(self) -> None:
+        ok = self.text_matches and self.diff.changed_fraction > 0.0
+        object.__setattr__(self, "looks_right", ok and self.outside_changed_fraction <= _OUTSIDE_TOLERANCE)
+
+
+@dataclass(frozen=True)
+class _BeforeEdit:
+    render: NDArray[np.uint8]
+    span_keys: frozenset[tuple[str, tuple[float, ...]]]
+
+
+def _span_keys(page: pymupdf.Page) -> frozenset[tuple[str, tuple[float, ...]]]:
+    return frozenset(
+        ("".join(chr(c[0]) for c in span["chars"]), tuple(round(v, 2) for v in span["bbox"]))
+        for span in dedupe_texttrace(page.get_texttrace())
+    )
+
+
+def _capture(document: Document, page_index: int, verify: bool) -> _BeforeEdit | None:
+    if not verify:
+        return None
+    return _BeforeEdit(
+        render=render_to_array(document.raw, page_index, dpi=VERIFY_DPI),
+        span_keys=_span_keys(document.raw[page_index]),
+    )
 
 
 @dataclass(frozen=True)
@@ -97,26 +129,125 @@ def _collect_font_usage(spans: list[SpanTrace], font_name: str) -> str:
 
 
 def _verify_edit(
-    document: Document, page_index: int, before: NDArray[np.uint8], expected_text: str
+    document: Document,
+    page_index: int,
+    before: _BeforeEdit,
+    expected_text: str,
+    removed: list[SpanTrace],
 ) -> VerificationResult:
-    """FNT-12: confirm `expected_text` is now really on the page, and measure how
-    much of the page changed. `before` is a render_to_array() result from
-    just before the edit."""
+    """FNT-12: confirm `expected_text` is now really on the page, measure how much
+    of the page changed, and how much changed outside the edit itself (the
+    `removed` spans' boxes plus every span that is new since `before`)."""
+    page = document.raw[page_index]
     after = render_to_array(document.raw, page_index, dpi=VERIFY_DPI)
-    diff = pixel_diff(before, after)
+    diff = pixel_diff(before.render, after)
     flat_text = "".join(span.style.text for span in extract_page_spans(document.raw, page_index))
     text_matches = expected_text in flat_text if expected_text else True
-    return VerificationResult(text_matches=text_matches, diff=diff)
+
+    boxes: list[tuple[float, ...]] = [span.style.bbox for span in removed]
+    boxes += [key[1] for key in _span_keys(page) if key not in before.span_keys]
+    scale = VERIFY_DPI / 72
+    allowed = []
+    for box in boxes:
+        shown = pymupdf.Rect(box) * page.rotation_matrix  # the render is of the rotated page
+        allowed.append(
+            (
+                math.floor(shown.x0 * scale) - _AA_MARGIN_PX,
+                math.floor(shown.y0 * scale) - _AA_MARGIN_PX,
+                math.ceil(shown.x1 * scale) + _AA_MARGIN_PX,
+                math.ceil(shown.y1 * scale) + _AA_MARGIN_PX,
+            )
+        )
+    return VerificationResult(
+        text_matches=text_matches, diff=diff, outside_changed_fraction=changed_outside(before.render, after, allowed)
+    )
 
 
 def _resolve_font_resource(page: pymupdf.Page, resolution: FontResolution) -> str:
-    """Register the resolved font on the page (if needed) and return its Tf resource name."""
+    """Register the resolved font on the page (if needed) and return its Tf resource name.
+
+    The name is derived from the font program's bytes: ``insert_font`` reuses
+    whatever is already registered under a name, so one shared name drew a
+    second, different font (or a re-merged subset with new glyphs) in the first."""
     if resolution.fontname is not None:
         return resolution.fontname
     if resolution.font_bytes is None:
         raise ValueError("FontResolution has neither fontname nor font_bytes set")
-    page.insert_font(fontname=_EDIT_FONT_RESOURCE, fontbuffer=resolution.font_bytes)
-    return _EDIT_FONT_RESOURCE
+    name = f"{_EDIT_FONT_RESOURCE}{hashlib.sha256(resolution.font_bytes).hexdigest()[:12]}"
+    page.insert_font(fontname=name, fontbuffer=resolution.font_bytes)
+    return name
+
+
+def _drawing_metrics(span: SpanTrace) -> tuple[float, TextState]:
+    """The size to draw `span` at, and its text state in the same units.
+
+    Tf alone is not the rendered size: ``Tf 1`` under a ``12 0 0 12`` text matrix
+    (or ``Tf 120`` under a ``0.1`` CTM) renders at 12pt. texttrace's size is Tf
+    times the matrix's horizontal scale including Tz (measured, pymupdf 1.28.2),
+    so dividing Tz back out gives the text-space-to-page scale `k`. Tc, Tw, rise
+    and leading are in text-space units and scale by `k` too. A non-uniform
+    matrix can't be reproduced by insert_text, so its horizontal scale is used."""
+    text_state = span.text_state or TextState()
+    tf = text_state.font_size
+    if not tf:
+        return span.style.size, text_state
+    k = span.style.size / (tf * text_state.horizontal_scale / 100.0)
+    if math.isclose(k, 1.0, rel_tol=1e-6):
+        return tf, text_state
+    scaled = text_state.model_copy(
+        update={
+            "char_spacing": text_state.char_spacing * k,
+            "word_spacing": text_state.word_spacing * k,
+            "rise": text_state.rise * k,
+            "leading": text_state.leading * k,
+            "font_size": tf * k,
+        }
+    )
+    return tf * k, scaled
+
+
+def _text_state_note(span: SpanTrace) -> str:
+    """Say so when the span's spacing/scaling/rise couldn't be read (engine.fonts.style falls
+    back to none when the content stream and the rendered glyphs don't line up), rather than
+    silently drawing with default spacing."""
+    if span.text_state is not None:
+        return ""
+    return "; the original character spacing and scaling could not be read, so default spacing was used"
+
+
+def _glyph_count(page: pymupdf.Page) -> int:
+    return sum(len(span["chars"]) for span in dedupe_texttrace(page.get_texttrace()))
+
+
+def _redact_spans(page: pymupdf.Page, spans: list[SpanTrace]) -> None:
+    """Remove exactly the glyphs of `spans`, and nothing else.
+
+    A redaction rectangle removes every glyph whose box touches it, and a span's
+    bbox runs from ascender to descender -- so with ordinary leading it reached
+    into the lines above and below and deleted them too. A tiny rectangle at
+    each glyph's own centre touches only that glyph (rotated text included).
+    The glyph count is then checked: if anything besides these spans vanished,
+    or some of their glyphs survived, the edit is refused rather than kept."""
+    targets = [char for span in spans for char in span.style.chars]
+    if not targets:
+        return
+    before = _glyph_count(page)
+    for char in targets:
+        x0, y0, x1, y1 = char.bbox
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        page.add_redact_annot(pymupdf.Rect(cx - _REDACT_HALF, cy - _REDACT_HALF, cx + _REDACT_HALF, cy + _REDACT_HALF))
+    page.apply_redactions(**_REDACT_KWARGS)
+    removed = before - _glyph_count(page)
+    if removed > len(targets):
+        raise OpValidationError(
+            f"this edit would also remove {removed - len(targets)} character(s) of neighbouring text "
+            "that overlaps it; nothing was changed"
+        )
+    if removed < len(targets):
+        raise OpValidationError(
+            f"{len(targets) - removed} of the {len(targets)} character(s) being replaced could not be removed; "
+            "nothing was changed"
+        )
 
 
 def _load_font(resolution: FontResolution) -> pymupdf.Font:
@@ -294,7 +425,7 @@ def _aligned_origin(
     line keeps its right edge or center, not its left edge (detect_alignment)."""
     origin = span.style.chars[0].origin
     page = document.raw[page_index]
-    alignment = detect_alignment(span, extract_page_spans(document.raw, page_index), page.rect.width)
+    alignment = detect_alignment(span, extract_page_spans(document.raw, page_index), page_bounds(page).width)
     right = span.style.bbox[2]
     if alignment == "right":
         return (right - new_width, origin[1]), alignment
@@ -332,12 +463,12 @@ def replace_span_text(
     """
     page = document.raw[page_index]
     style = span.style
-    text_state = span.text_state or TextState()
+    natural_size, text_state = _drawing_metrics(span)
 
     resolution = resolve_font_for_span(document, page_index, span, new_text, font_index=font_index)
-    before = render_to_array(document.raw, page_index, dpi=VERIFY_DPI) if verify else None
+    before = _capture(document, page_index, verify)
 
-    font_size = override_size if override_size is not None else (text_state.font_size or style.size)
+    font_size = override_size if override_size is not None else natural_size
     color = override_color if override_color is not None else style.color
 
     fit_result = None
@@ -351,8 +482,7 @@ def replace_span_text(
         new_width = _drawn_width(resolution, new_text, font_size, text_state)
         origin, alignment = _aligned_origin(document, page_index, span, new_width)
 
-    page.add_redact_annot(pymupdf.Rect(style.bbox))
-    page.apply_redactions(**_REDACT_KWARGS)
+    _redact_spans(page, [span])
 
     end_point = draw_styled_text(
         page,
@@ -365,8 +495,8 @@ def replace_span_text(
         resolution=resolution,
     )
 
-    verification = _verify_edit(document, page_index, before, new_text) if before is not None else None
-    note = resolution.note
+    verification = _verify_edit(document, page_index, before, new_text, [span]) if before is not None else None
+    note = resolution.note + _text_state_note(span)
     if alignment != "left":
         note += f"; kept the line's {alignment} alignment"
     if fit_result is not None and not fit_result.fits:
@@ -407,31 +537,30 @@ def copy_span_style(
     """
     target_page = document.raw[target_page_index]
     text = target.style.text
-    text_state = source.text_state or TextState()
+    font_size, text_state = _drawing_metrics(source)
 
     resolution = resolve_font_for_span(document, source_page_index, source, text, font_index=font_index)
-    before = render_to_array(document.raw, target_page_index, dpi=VERIFY_DPI) if verify else None
+    before = _capture(document, target_page_index, verify)
 
-    target_page.add_redact_annot(pymupdf.Rect(target.style.bbox))
-    target_page.apply_redactions(**_REDACT_KWARGS)
+    _redact_spans(target_page, [target])
 
     end_point = draw_styled_text(
         target_page,
         text=text,
         origin=target.style.chars[0].origin,
-        font_size=text_state.font_size or source.style.size,
+        font_size=font_size,
         color=source.style.color,
         text_state=text_state,
         rotation_degrees=target.style.rotation_degrees,
         resolution=resolution,
     )
 
-    verification = _verify_edit(document, target_page_index, before, text) if before is not None else None
+    verification = _verify_edit(document, target_page_index, before, text, [target]) if before is not None else None
     return EditResult(
         tier=resolution.tier,
         confidence=resolution.confidence,
         requires_approval=resolution.requires_approval,
-        note=resolution.note,
+        note=resolution.note + _text_state_note(source),
         end_point=end_point,
         verification=verification,
     )
@@ -454,28 +583,28 @@ def insert_text_near(
     """
     page = document.raw[page_index]
     style = reference_span.style
-    text_state = reference_span.text_state or TextState()
+    font_size, text_state = _drawing_metrics(reference_span)
 
     resolution = resolve_font_for_span(document, page_index, reference_span, text, font_index=font_index)
-    before = render_to_array(document.raw, page_index, dpi=VERIFY_DPI) if verify else None
+    before = _capture(document, page_index, verify)
 
     end_point = draw_styled_text(
         page,
         text=text,
         origin=origin,
-        font_size=text_state.font_size or style.size,
+        font_size=font_size,
         color=style.color,
         text_state=text_state,
         rotation_degrees=style.rotation_degrees,
         resolution=resolution,
     )
 
-    verification = _verify_edit(document, page_index, before, text) if before is not None else None
+    verification = _verify_edit(document, page_index, before, text, []) if before is not None else None
     return EditResult(
         tier=resolution.tier,
         confidence=resolution.confidence,
         requires_approval=resolution.requires_approval,
-        note=resolution.note,
+        note=resolution.note + _text_state_note(reference_span),
         end_point=end_point,
         verification=verification,
     )
@@ -486,7 +615,7 @@ def _line_pitch(block: TextBlock, font_size: float) -> float:
     spacing when it has two or more lines, else the TL leading, else 1.2x."""
     if len(block.lines) >= 2:
         return block.lines[1].style.chars[0].origin[1] - block.lines[0].style.chars[0].origin[1]
-    leading = (block.lines[0].text_state or TextState()).leading
+    leading = _drawing_metrics(block.lines[0])[1].leading
     return leading if leading > 0 else font_size * 1.2
 
 
@@ -515,8 +644,7 @@ def move_resize_block(
         return []
     page = document.raw[page_index]
     reference = block.lines[0]
-    text_state = reference.text_state or TextState()
-    font_size = text_state.font_size or reference.style.size
+    font_size, text_state = _drawing_metrics(reference)
     resolution = resolve_font_for_span(document, page_index, reference, block.text, font_index=font_index)
 
     first_x, first_y = reference.style.chars[0].origin
@@ -535,15 +663,13 @@ def move_resize_block(
             for i, text in enumerate(wrapped)
         ]
 
-    page_rect = page.rect
+    page_rect = page_bounds(page)
     for _text, (x, y), _line in placed:
         if not (page_rect.x0 <= x < page_rect.x1 and page_rect.y0 < y <= page_rect.y1):
             raise OpValidationError(f"the block would be moved off the page (a line would start at {x:.0f}, {y:.0f})")
 
-    before = render_to_array(document.raw, page_index, dpi=VERIFY_DPI) if verify else None
-    for line in block.lines:
-        page.add_redact_annot(pymupdf.Rect(line.style.bbox))
-    page.apply_redactions(**_REDACT_KWARGS)
+    before = _capture(document, page_index, verify)
+    _redact_spans(page, list(block.lines))
 
     results: list[EditResult] = []
     for text, origin, line in placed:
@@ -553,7 +679,7 @@ def move_resize_block(
             origin=origin,
             font_size=font_size,
             color=line.style.color,
-            text_state=line.text_state or text_state,
+            text_state=_drawing_metrics(line)[1] if line.text_state else text_state,
             rotation_degrees=line.style.rotation_degrees,
             resolution=resolution,
         )
@@ -562,12 +688,12 @@ def move_resize_block(
                 tier=resolution.tier,
                 confidence=resolution.confidence,
                 requires_approval=resolution.requires_approval,
-                note=resolution.note,
+                note=resolution.note + _text_state_note(reference),
                 end_point=end_point,
             )
         )
     if before is not None:
-        verification = _verify_edit(document, page_index, before, placed[0][0])
+        verification = _verify_edit(document, page_index, before, placed[0][0], list(block.lines))
         results[-1] = dataclasses.replace(results[-1], verification=verification)
     return results
 
@@ -592,8 +718,7 @@ def reflow_block(
         return []
 
     reference = block.lines[0]
-    text_state = reference.text_state or TextState()
-    font_size = text_state.font_size or reference.style.size
+    font_size, _text_state = _drawing_metrics(reference)
     resolution = resolve_font_for_span(document, page_index, reference, new_text, font_index=font_index)
     font = _load_font(resolution)
 

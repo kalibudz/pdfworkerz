@@ -9,6 +9,7 @@ import pymupdf
 import pytest
 
 from engine.document import Document
+from engine.errors import SaveNotPossibleError
 from tests.corpus.build_corpus import Corpus
 
 
@@ -43,7 +44,7 @@ def test_incremental_save_only_targets_the_original_path(corpus: Corpus, work_di
     source = work_dir / "input.pdf"
     other = work_dir / "other.pdf"
     shutil.copy(corpus.simple, source)
-    with Document.open(source) as doc, pytest.raises(ValueError, match="incremental"):
+    with Document.open(source) as doc, pytest.raises(SaveNotPossibleError, match="incremental"):
         doc.save(other, mode="incremental")
 
 

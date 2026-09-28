@@ -534,3 +534,56 @@ def test_save_with_overwrite_writes_back_to_the_source(client: TestClient, simpl
     response = client.post(f"/documents/{document_id}/save", json={"overwrite": True}, headers=AUTH)
     assert response.status_code == 200
     assert Path(response.json()["path"]) == simple_path
+
+
+@pytest.mark.feature("COR-11")
+def test_an_out_of_range_page_is_a_clear_400_not_a_server_error(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.get(f"/documents/{document_id}/pages/99/spans", headers=AUTH)
+    assert response.status_code == 400
+    assert "out of range" in response.json()["detail"]
+    op = {"op": "replace_span_text", "page_index": 99, "span_index": 0, "new_text": "x"}
+    assert client.post(f"/documents/{document_id}/ops", json=op, headers=AUTH).status_code == 400
+
+
+@pytest.mark.feature("COR-11")
+@pytest.mark.parametrize("dpi", [0, 5000])
+def test_render_dpi_is_bounded(client: TestClient, simple_path: Path, dpi: int) -> None:
+    document_id = _open(client, simple_path)
+    assert client.get(f"/documents/{document_id}/pages/0/render?dpi={dpi}", headers=AUTH).status_code == 422
+
+
+@pytest.mark.feature("COR-11")
+def test_an_unknown_save_mode_is_refused(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.post(f"/documents/{document_id}/save", json={"mode": "fastest"}, headers=AUTH)
+    assert response.status_code == 422
+
+
+@pytest.mark.feature("COR-11")
+def test_saving_a_signed_document_reports_that_its_signature_no_longer_applies(
+    client: TestClient, corpus: Corpus, work_dir: Path
+) -> None:
+    signed = work_dir / "signed.pdf"
+    shutil.copy(corpus.form_and_signature, signed)
+    document_id = _open(client, signed)
+    body = client.post(f"/documents/{document_id}/save", json={}, headers=AUTH).json()
+    assert body["mode"] == "full" and "signature" in body["note"]
+
+
+@pytest.mark.feature("COR-11")
+def test_history_does_not_resend_inserted_image_data(client: TestClient, simple_path: Path) -> None:
+    import base64
+    import io
+
+    from PIL import Image
+
+    png = io.BytesIO()
+    Image.new("RGB", (8, 8), (0, 0, 255)).save(png, format="PNG")
+    encoded = base64.b64encode(png.getvalue()).decode()
+    document_id = _open(client, simple_path)
+    op = {"op": "insert_image", "page_index": 0, "rect": [72, 200, 172, 300], "image_base64": encoded}
+    assert client.post(f"/documents/{document_id}/ops", json=op, headers=AUTH).status_code == 200
+    (entry,) = client.get(f"/documents/{document_id}/history", headers=AUTH).json()["ops"]
+    assert entry["op"] == "insert_image"
+    assert entry["image_base64"] == f"<{len(encoded) * 3 // 4} bytes>"

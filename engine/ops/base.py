@@ -24,7 +24,7 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from engine.errors import OpValidationError
 from engine.fonts.style import SpanTrace, extract_page_spans
@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from engine.inspect import InspectionReport
 
 _REGISTRY: dict[str, type[Op]] = {}
+MIN_RENDER_DPI = 18
+MAX_RENDER_DPI = 600  # a US-letter page at 600 dpi is already ~34 megapixels
 
 
 class Op(BaseModel):
@@ -49,6 +51,16 @@ class Op(BaseModel):
     def apply(self, document: Document) -> Any:
         """Run this operation against an open document and return its result."""
         raise NotImplementedError(f"{type(self).__name__} does not implement apply()")
+
+    def check_pages(self, document: Document) -> None:
+        """Refuse any ``*page_index`` field outside the document, before anything runs:
+        an out-of-range page otherwise surfaced as pymupdf's raw IndexError."""
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if name.endswith("page_index") and isinstance(value, int) and not 0 <= value < document.page_count:
+                raise OpValidationError(
+                    f"{name} {value} is out of range: the document has {document.page_count} page(s) (0-based)"
+                )
 
 
 def register_op(cls: type[Op]) -> type[Op]:
@@ -114,7 +126,7 @@ class RenderPageOp(Op):
 
     op: Literal["render_page"] = "render_page"
     page_index: int = 0
-    dpi: int = 150
+    dpi: int = Field(default=150, ge=MIN_RENDER_DPI, le=MAX_RENDER_DPI)
 
     def apply(self, document: Document) -> bytes:
         return document.render_page(self.page_index, dpi=self.dpi)

@@ -22,6 +22,7 @@ import pikepdf
 import pymupdf
 
 OUT_DIR = Path(__file__).resolve().parent / "generated"
+CORPUS_VERSION = "2"  # bump whenever a generator below changes
 
 USER_PASSWORD = "user-pw"
 OWNER_PASSWORD = "owner-pw"
@@ -75,10 +76,21 @@ def _multi_page(path: Path, count: int) -> None:
     doc.close()
 
 
+ENCRYPTED_TEXT = "Confidential: quarterly figures"
+
+
+def _page_with_text(pdf: pikepdf.Pdf, text: str) -> None:
+    """Real, non-empty content: an encrypted file with a blank page can't show whether a
+    save or an undo kept the content intact (and MuPDF can't even read back an empty
+    AES-encrypted content stream, which once hid a journal bug)."""
+    page = pdf.add_blank_page(page_size=(612, 792))
+    page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=_type1_font(pdf, "Helvetica")))
+    page.Contents = pdf.make_stream(f"BT /F1 14 Tf 72 700 Td ({text}) Tj ET".encode())
+
+
 def _encrypted(path: Path, *, r: int, aes: bool, metadata: bool = True) -> None:
     pdf = pikepdf.new()
-    page = pdf.add_blank_page()
-    del page  # unused; add_blank_page() both adds and returns the page
+    _page_with_text(pdf, ENCRYPTED_TEXT)
     pdf.save(
         path,
         encryption=pikepdf.Encryption(owner=OWNER_PASSWORD, user=USER_PASSWORD, R=r, aes=aes, metadata=metadata),
@@ -89,7 +101,7 @@ def _encrypted(path: Path, *, r: int, aes: bool, metadata: bool = True) -> None:
 def _owner_only(path: Path) -> None:
     """A file with no user password but a restrictive owner password (SEC-02)."""
     pdf = pikepdf.new()
-    pdf.add_blank_page()
+    _page_with_text(pdf, ENCRYPTED_TEXT)
     pdf.save(
         path,
         encryption=pikepdf.Encryption(
@@ -369,6 +381,10 @@ def _layered(path: Path) -> None:
 def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
     """Build (or reuse) every fixture and return their paths and ground truth."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Cached files are reused, so a change to any generator must bump CORPUS_VERSION.
+    stamp = out_dir / "CORPUS_VERSION"
+    if not stamp.exists() or stamp.read_text(encoding="utf-8").strip() != CORPUS_VERSION:
+        force = True
     multi_page_count = 5
     large_page_count = 1000
 
@@ -437,6 +453,7 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
     if force or not paths["shared_form_xobject"].exists():
         _shared_form_xobject(paths["shared_form_xobject"])
 
+    stamp.write_text(CORPUS_VERSION, encoding="utf-8")
     return Corpus(
         simple=paths["simple"],
         multi_page=paths["multi_page"],

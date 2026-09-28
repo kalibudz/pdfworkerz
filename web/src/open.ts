@@ -119,7 +119,12 @@ export function renderOpenScreen(container: HTMLElement, api: Api, handlers: Ope
       const response = await api.openDocument(path, password);
       handlers.onOpened(response, path);
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
+      if (error instanceof ApiError && error.status === 401 && error.detail.includes("X-Session-Token")) {
+        // The server rejected the session itself (usually: it was restarted, so the
+        // token this tab still holds is stale), not the document's password.
+        errorLine.textContent =
+          "This session is no longer valid (the server may have restarted). Open the new link it printed.";
+      } else if (error instanceof ApiError && error.status === 401) {
         passwordField.hidden = false;
         // A 401 means either "this needs a password" or "that password was
         // wrong" -- and whether *this* request sent one is exactly what

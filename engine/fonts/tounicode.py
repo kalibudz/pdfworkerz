@@ -24,6 +24,7 @@ from fontTools.ttLib import TTFont
 
 from engine.fonts.match import normalize_font_name
 from engine.fonts.style import CharBox, SpanTrace, walk_raw_glyph_codes
+from engine.pdfbytes import plain_bytes
 
 REPLACEMENT_CHAR = "�"
 
@@ -92,7 +93,7 @@ def recover_broken_spans(doc: pymupdf.Document, page_index: int, spans: list[Spa
             gid_maps[key] = build_gid_to_unicode(font_bytes) if font_bytes else None
         return gid_maps[key]
 
-    with pikepdf.open(io.BytesIO(doc.tobytes())) as pikepdf_doc:
+    with pikepdf.open(io.BytesIO(plain_bytes(doc))) as pikepdf_doc:
         raw_codes = walk_raw_glyph_codes(pikepdf_doc.pages[page_index])
 
     total_chars = sum(len(trace.style.chars) for trace in spans)

@@ -90,7 +90,7 @@ def test_replace_text_op_multiple_occurrences_on_one_page(work_dir: Path) -> Non
     doc = Document.open(path)
     op = ReplaceTextOp(match="cat", replacement="dog")
     results = op.apply(doc)
-    assert len(results) == 3
+    assert len(results) == 1  # one span: all three matches are replaced in a single redraw
     assert doc.raw[0].get_text().strip() == "dog and dog and dog"
     doc.close()
 

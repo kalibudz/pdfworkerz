@@ -20,23 +20,22 @@ import pymupdf
 from engine.errors import (
     CertificateEncryptedError,
     DocumentNotFoundError,
+    EncryptionLostError,
     NotAPdfError,
+    OpValidationError,
     OverwriteRefusedError,
     PasswordRequiredError,
     RepairFailedError,
+    SaveNotPossibleError,
     WrongPasswordError,
 )
 from engine.inspect import InspectionReport, inspect_document
+from engine.pdfbytes import PDF_ENCRYPT_KEEP, encrypted_snapshot, encryption_of, plain_bytes, remember_password
 from engine.security import detect_certificate_encryption
 
 DEFAULT_RENDER_DPI = 150
 _EDITED_SUFFIX = "edited"
 _PDF_HEADER = b"%PDF-"
-# Verified at runtime (pymupdf 1.28.2): PDF_ENCRYPT_KEEP == 0, telling save() to
-# reuse the document's existing encryption. It's missing from pymupdf's stub, so
-# mypy sees no such attribute even though it's real -- see pyproject.toml's
-# mypy override note for engine.*/cli.*.
-_PDF_ENCRYPT_KEEP: int = pymupdf.PDF_ENCRYPT_KEEP  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True)
@@ -46,6 +45,8 @@ class SaveResult:
     path: Path
     mode: str  # "incremental" | "full"
     bytes_written: int
+    note: str = ""
+    """Anything the caller should tell the user, e.g. that a signed file's signatures no longer apply."""
 
 
 def _default_output_path(source: Path) -> Path:
@@ -64,10 +65,21 @@ def _default_output_path(source: Path) -> Path:
 class Document:
     """A single open PDF. Construct with :meth:`Document.open`, not directly."""
 
-    def __init__(self, fitz_doc: pymupdf.Document, *, source_path: Path | None, password_used: str | None) -> None:
+    def __init__(
+        self,
+        fitz_doc: pymupdf.Document,
+        *,
+        source_path: Path | None,
+        password_used: str | None,
+        file_backed: bool = False,
+    ) -> None:
         self._doc = fitz_doc
         self.source_path = source_path
         self._password_used = password_used
+        remember_password(fitz_doc, password_used)
+        self._file_backed = file_backed
+        """Whether `_doc` was read from `source_path` itself (not from a memory snapshot):
+        only then can an incremental save append to that file."""
 
     # -- lifecycle -----------------------------------------------------
 
@@ -113,12 +125,29 @@ class Document:
                 raise WrongPasswordError(f"the supplied password did not unlock {path}")
             password_used = password
 
-        return cls(fitz_doc, source_path=path, password_used=password_used)
+        return cls(fitz_doc, source_path=path, password_used=password_used, file_backed=True)
 
     @classmethod
     def from_bytes(cls, data: bytes, *, source_path: Path | None = None) -> Self:
-        """Reopen a document from an in-memory snapshot (used by the undo/redo journal)."""
+        """Open unencrypted bytes (e.g. a render-only copy). Use :meth:`restore` for journal snapshots."""
         return cls(pymupdf.open(stream=data, filetype="pdf"), source_path=source_path, password_used=None)
+
+    def snapshot(self) -> bytes:
+        """The current state as bytes that keep the original encryption (SEC-03), for the undo journal."""
+        return encrypted_snapshot(self._doc)
+
+    def restore(self, data: bytes) -> Document:
+        """A new Document over `data` (a :meth:`snapshot`), logged in with this one's password."""
+        fitz_doc = pymupdf.open(stream=data, filetype="pdf")
+        if fitz_doc.needs_pass and not fitz_doc.authenticate(self._password_used or ""):
+            fitz_doc.close()
+            raise WrongPasswordError("could not reopen an encrypted snapshot with the document's password")
+        # MuPDF repairs a snapshot it can't fully read back, and a repair drops /Encrypt:
+        # never hand back a silently decrypted copy of an encrypted document.
+        if encryption_of(self._doc) and not encryption_of(fitz_doc):
+            fitz_doc.close()
+            raise EncryptionLostError("restoring this encrypted document would have dropped its encryption")
+        return type(self)(fitz_doc, source_path=self.source_path, password_used=self._password_used)
 
     def close(self) -> None:
         self._doc.close()
@@ -178,9 +207,10 @@ class Document:
             password=password,
         )
 
-    def to_bytes(self, **save_kwargs: object) -> bytes:
-        """Serialize the current document state to bytes without touching disk."""
-        return self._doc.tobytes(**save_kwargs)
+    def to_bytes(self) -> bytes:
+        """The current state as decrypted bytes (for parsing or display), without touching disk
+        or this document's own encryption (engine.pdfbytes explains why that matters)."""
+        return plain_bytes(self._doc)
 
     # -- write -------------------------------------------------------------
 
@@ -207,19 +237,33 @@ class Document:
         document already carries a signature field, and full rewrite
         otherwise (SPEC.md section 4.2 rule 4).
         """
+        if mode not in ("auto", "incremental", "full"):
+            raise OpValidationError(f"unknown save mode {mode!r}: use 'auto', 'incremental' or 'full'")
         target = self._resolve_target(path, overwrite=overwrite)
-        chosen_mode = mode if mode != "auto" else self._auto_save_mode()
+        writes_original = self._is_original(target)
+        signed = self._has_signature()
+        # Incremental appends to the file this document was read from, so it's only possible
+        # when writing back to that file and the document wasn't reloaded from memory since.
+        can_append = writes_original and self._file_backed
+        if mode == "incremental" and not can_append:
+            raise SaveNotPossibleError(
+                "an incremental save can only append to the original file, read from disk"
+                + ("" if writes_original else "; pass overwrite=True to write back to it")
+                + ("" if self._file_backed else "; undo/redo reloaded this document from memory")
+            )
+        chosen_mode = mode if mode != "auto" else ("incremental" if signed and can_append else "full")
+        note = ""
+        if signed and chosen_mode == "full":
+            note = "this document is signed; a full save invalidates its signatures"
 
-        save_kwargs: dict[str, object] = {"encryption": _PDF_ENCRYPT_KEEP}
+        save_kwargs: dict[str, object] = {"encryption": PDF_ENCRYPT_KEEP}
         if owner_password is not None or user_password is not None:
             save_kwargs["owner_pw"] = owner_password or ""
             save_kwargs["user_pw"] = user_password or ""
 
         if chosen_mode == "incremental":
-            if target != self.source_path:
-                raise ValueError("incremental save requires writing back to the original path")
             self._doc.save(str(target), incremental=True, **save_kwargs)
-        elif target == self.source_path:
+        elif writes_original and self._file_backed:
             # PyMuPDF refuses a full (non-incremental) save back to the file it read from
             # -- the writer can't rewrite a file it's still reading. Write to a sibling
             # temp file and atomically replace the original (SPEC.md section 10: "atomic
@@ -228,11 +272,30 @@ class Document:
             self._doc.save(str(tmp), garbage=4, deflate=True, **save_kwargs)
             self._doc.close()  # release the read handle on `target` before replacing it (required on Windows)
             Path(tmp).replace(target)
-            self._doc = pymupdf.open(str(target), filetype="pdf")  # keep this Document usable after an overwrite
+            self._reopen(target, user_password)
         else:
-            self._doc.save(str(target), garbage=4, deflate=True, **save_kwargs)
+            tmp = target.with_name(f".{target.name}.pdfworkerz-tmp")
+            self._doc.save(str(tmp), garbage=4, deflate=True, **save_kwargs)
+            Path(tmp).replace(target)
+            if writes_original:
+                self._reopen(target, user_password)
 
-        return SaveResult(path=target, mode=chosen_mode, bytes_written=target.stat().st_size)
+        return SaveResult(path=target, mode=chosen_mode, bytes_written=target.stat().st_size, note=note)
+
+    def _reopen(self, target: Path, new_user_password: str | None) -> None:
+        """Keep this Document usable after replacing its file: read it back, logged in again."""
+        if not self._doc.is_closed:
+            self._doc.close()
+        self._doc = pymupdf.open(str(target), filetype="pdf")
+        password = new_user_password if new_user_password is not None else self._password_used
+        if self._doc.needs_pass and not self._doc.authenticate(password or ""):
+            raise WrongPasswordError(f"saved {target}, but could not reopen it with the document's password")
+        self._password_used = password if self._doc.needs_pass else self._password_used
+        remember_password(self._doc, self._password_used)
+        self._file_backed = True
+
+    def _is_original(self, target: Path) -> bool:
+        return self.source_path is not None and target.resolve() == self.source_path.resolve()
 
     def _resolve_target(self, path: str | Path | None, *, overwrite: bool) -> Path:
         if path is None:
@@ -240,15 +303,15 @@ class Document:
                 raise ValueError("no path given and this document has no source path")
             return self.source_path if overwrite else _default_output_path(self.source_path)
         target = Path(path)
-        if target == self.source_path and not overwrite:
+        if self._is_original(target) and not overwrite:
             raise OverwriteRefusedError(
                 f"saving to {target} would overwrite the original; pass overwrite=True to allow this"
             )
         return target
 
-    def _auto_save_mode(self) -> str:
-        for page_index in range(self.page_count):
-            for widget in self._doc[page_index].widgets():
-                if widget.field_type_string == "Signature":
-                    return "incremental"
-        return "full"
+    def _has_signature(self) -> bool:
+        return any(
+            widget.field_type_string == "Signature"
+            for page_index in range(self.page_count)
+            for widget in self._doc[page_index].widgets()
+        )

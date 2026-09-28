@@ -1179,3 +1179,105 @@ def test_ignored_words_persist_across_a_reload_until_forgotten(page: Page, app_u
     page.click(".pw-misspelling[data-word='recieve']")
     page.click(".pw-spell-forget:has-text('(1)')")
     page.wait_for_function(_MARKED_WORDS.format("recieve,teh"), timeout=10000)
+
+
+# -- Saving from the browser (independent review #8) --
+
+
+@pytest.fixture
+def simple_copy(corpus: Corpus, tmp_path: Path) -> Path:
+    import shutil
+
+    path = tmp_path / "simple.pdf"
+    shutil.copy(corpus.simple, path)
+    return path
+
+
+@pytest.mark.feature("UI-01")
+def test_save_writes_the_edits_to_a_new_file_next_to_the_original(page: Page, app_url: str, simple_copy: Path) -> None:
+    import pymupdf
+
+    _commit_edit(page, app_url, str(simple_copy), "Hello, Editor.")
+    page.click(".pw-save")
+    page.wait_for_function(
+        "() => document.querySelector('.pw-save-status')?.textContent?.startsWith('Saved to')", timeout=10000
+    )
+    saved = simple_copy.with_name("simple.edited.pdf")
+    assert saved.exists()
+    with pymupdf.open(saved) as doc:
+        assert "Hello, Editor." in doc[0].get_text()
+    with pymupdf.open(simple_copy) as original:
+        assert "Hello, PDFWorkerz." in original[0].get_text()  # never overwritten
+
+
+@pytest.mark.feature("UI-01")
+def test_download_hands_the_browser_the_edited_pdf(page: Page, app_url: str, simple_copy: Path) -> None:
+    _commit_edit(page, app_url, str(simple_copy), "Hello, Editor.")
+    with page.expect_download() as info:
+        page.click(".pw-download")
+    download = info.value
+    assert download.suggested_filename.endswith(".edited.pdf")
+    assert Path(download.path()).read_bytes().startswith(b"%PDF-")
+
+
+@pytest.mark.feature("UI-01")
+def test_a_stale_session_token_is_not_reported_as_a_password_prompt(
+    page: Page, app_url: str, simple_copy: Path
+) -> None:
+    page.goto(app_url.replace("token=", "token=stale-", 1))
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(simple_copy))
+    page.wait_for_selector(".pw-error:not(:empty)", timeout=5000)
+    assert "no longer valid" in (page.text_content(".pw-error") or "")
+
+
+# -- Approval before a non-exact edit (independent review #9) --
+
+
+@pytest.fixture
+def unknown_font_typo_pdf(tmp_path: Path) -> Path:
+    import pikepdf
+
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    font = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1, BaseFont=pikepdf.Name("/TotallyUnknownFont")
+        )
+    )
+    page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
+    page.Contents = pdf.make_stream(b"BT /F1 14 Tf 72 700 Td (We recieve teh report.) Tj ET")
+    path = tmp_path / "unknown_font.pdf"
+    pdf.save(path)
+    return path
+
+
+@pytest.mark.feature("EDT-11")
+def test_a_correction_that_cannot_use_the_exact_font_asks_first(
+    page: Page, app_url: str, unknown_font_typo_pdf: Path
+) -> None:
+    messages: list[str] = []
+    answers = iter([False, True])  # decline once, then accept
+
+    def on_dialog(dialog: object) -> None:
+        messages.append(dialog.message)  # type: ignore[attr-defined]
+        if next(answers, True):
+            dialog.accept()  # type: ignore[attr-defined]
+        else:
+            dialog.dismiss()  # type: ignore[attr-defined]
+
+    page.on("dialog", on_dialog)
+    _open_typos_with_spelling_on(page, app_url, unknown_font_typo_pdf, "recieve")
+
+    page.click(".pw-misspelling[data-word='recieve']")
+    page.click(".pw-spell-suggestion:has-text('receive')")
+    for _ in range(100):  # the question comes after the refused "exact" attempt returns
+        if messages:
+            break
+        page.wait_for_timeout(50)
+    assert messages and "fallback" in messages[0]
+    assert page.query_selector(".pw-history-entry") is None  # declined: nothing changed
+
+    page.click(".pw-misspelling[data-word='recieve']")
+    page.click(".pw-spell-suggestion:has-text('receive')")
+    page.wait_for_selector(".pw-history-entry:has-text('Correct')", timeout=10000)

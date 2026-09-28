@@ -78,13 +78,14 @@ class UndoRedoJournal:
         before the call: an Op that fails partway (say, after removing an
         image but before redrawing it) never leaves a half-applied change
         behind for the next Op, or a save, to pick up."""
-        before = self._document.to_bytes()
+        op.check_pages(self._document)
+        before = self._document.snapshot()
         try:
             result = op.apply(self._document)
         except Exception:
             self._reload(before)
             raise
-        after = self._document.to_bytes()
+        after = self._document.snapshot()
 
         self._undo_stack.append(JournalEntry(op=op, before=before, after=after))
         if len(self._undo_stack) > self._max_history:
@@ -111,6 +112,8 @@ class UndoRedoJournal:
         return entry.op
 
     def _reload(self, data: bytes) -> None:
-        source_path = self._document.source_path
+        # restore(), not from_bytes(): snapshots keep the original encryption (SEC-03),
+        # and the reloaded document logs in with the same password.
+        restored = self._document.restore(data)
         self._document.close()
-        self._document = Document.from_bytes(data, source_path=source_path)
+        self._document = restored

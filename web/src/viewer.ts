@@ -102,6 +102,19 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   spellButton.title = "Underline misspelled words on this page";
   spellButton.setAttribute("aria-pressed", "false");
   const drawSelect = document.createElement("select");
+  const saveButton = document.createElement("button");
+  saveButton.type = "button";
+  saveButton.className = "pw-save";
+  saveButton.textContent = "Save";
+  saveButton.title = "Save as a new file next to the original (Ctrl+S); the original is never overwritten";
+  const downloadButton = document.createElement("button");
+  downloadButton.type = "button";
+  downloadButton.className = "pw-download";
+  downloadButton.textContent = "Download";
+  downloadButton.title = "Download the edited PDF through the browser";
+  const saveStatus = document.createElement("span");
+  saveStatus.className = "pw-save-status";
+  saveStatus.setAttribute("role", "status");
   const shortcutsButton = document.createElement("button");
   shortcutsButton.type = "button";
   shortcutsButton.className = "pw-shortcuts-toggle";
@@ -135,7 +148,10 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     drawSelect,
     spellButton,
     compareButton,
+    saveButton,
+    downloadButton,
     shortcutsButton,
+    saveStatus,
   );
 
   // Disabled until the document has actually loaded below -- otherwise
@@ -348,6 +364,37 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   drawSelect.addEventListener("change", () => shapeTool.setDrawMode((drawSelect.value || null) as DrawKind | null));
   shortcutsButton.addEventListener("click", () => shortcutsDialog.showModal());
 
+  async function save(): Promise<void> {
+    saveButton.disabled = true;
+    saveStatus.textContent = "Saving…";
+    try {
+      const result = await options.api.save(options.documentId);
+      saveStatus.textContent = `Saved to ${result.path}`;
+      saveStatus.title = result.path;
+      if (result.note) {
+        window.alert(`Saved to ${result.path}.\n\nNote: ${result.note}.`);
+      }
+    } catch (error) {
+      saveStatus.textContent = "";
+      window.alert(error instanceof Error ? error.message : "The document could not be saved.");
+    } finally {
+      saveButton.disabled = false;
+    }
+  }
+
+  async function download(): Promise<void> {
+    const bytes = await options.api.documentFile(options.documentId);
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = options.title.replace(/\.pdf$/i, "") + ".edited.pdf";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  saveButton.addEventListener("click", () => void save());
+  downloadButton.addEventListener("click", () => void download());
+
   // UI-08: every shortcut below is a keyboard path to an action the toolbar
   // or history panel already exposes by mouse -- none of them do anything
   // a button click couldn't already do, so there's nothing here for
@@ -372,7 +419,10 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
       return;
     }
     const modifier = event.ctrlKey || event.metaKey;
-    if (modifier && event.key.toLowerCase() === "z") {
+    if (modifier && event.key.toLowerCase() === "s") {
+      event.preventDefault(); // not the browser's "save page as"
+      void save();
+    } else if (modifier && event.key.toLowerCase() === "z") {
       event.preventDefault();
       if (event.shiftKey) {
         history.triggerRedo();
@@ -429,6 +479,7 @@ const SHORTCUTS: readonly [string, string][] = [
   ["← / Page Up", "Previous page"],
   ["Home / End", "First / last page"],
   ["+ / −", "Zoom in / out"],
+  ["Ctrl+S", "Save as a new file next to the original"],
   ["Ctrl+Z", "Undo"],
   ["Ctrl+Shift+Z / Ctrl+Y", "Redo"],
   ["C", "Before/after compare view"],

@@ -49,6 +49,15 @@ class OverwriteRefusedError(PdfWorkerzError):
     """
 
 
+class SaveNotPossibleError(PdfWorkerzError):
+    """The requested save mode can't be done for this document as it is now, for
+    example an incremental save of a document the undo journal reloaded from memory."""
+
+
+class EncryptionLostError(PdfWorkerzError):
+    """An operation would have left an encrypted document decrypted (SEC-03), so it was refused."""
+
+
 class NothingToUndoError(PdfWorkerzError):
     """The undo/redo journal has no earlier (or later) state to move to."""
 

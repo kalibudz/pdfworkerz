@@ -66,3 +66,17 @@ def test_assert_pixel_similar_fails_outside_tolerance() -> None:
     very_different = np.full((10, 10, 3), 255, dtype=np.uint8)
     with pytest.raises(AssertionError, match="renders differ"):
         assert_pixel_similar(base, very_different, tolerance=0.001)
+
+
+@pytest.mark.feature("FNT-12")
+def test_changed_outside_ignores_changes_inside_the_allowed_boxes() -> None:
+    import numpy as np
+
+    from engine.verify import changed_outside
+
+    before = np.zeros((10, 10, 3), dtype=np.uint8)
+    after = before.copy()
+    after[2:4, 2:4] = 255  # inside the allowed box
+    assert changed_outside(before, after, [(2, 2, 4, 4)]) == 0.0
+    after[8, 8] = 255  # outside it
+    assert changed_outside(before, after, [(2, 2, 4, 4)]) == pytest.approx(1 / 100)

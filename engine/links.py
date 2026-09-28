@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict
 
 from engine.document import Document
 from engine.errors import OpValidationError
+from engine.geometry import page_bounds
 
 Rect = tuple[float, float, float, float]
 
@@ -73,7 +74,7 @@ def _validate_rect(page: pymupdf.Page, rect: Rect) -> pymupdf.Rect:
     area = pymupdf.Rect(rect)
     if area.is_empty or area.is_infinite:
         raise OpValidationError(f"link rectangle {rect} is empty")
-    if not area.intersects(page.rect):
+    if not area.intersects(page_bounds(page)):
         raise OpValidationError(f"link rectangle {rect} lies entirely outside the page")
     return area
 

@@ -6,6 +6,12 @@ Known limitations and genuinely open work stay in the checkpoint's `openQuestion
 
 ## Engine (Python)
 
+- **Never call `tobytes()` or `save()` on a live document without `encryption=PDF_ENCRYPT_KEEP`.** Measured on pymupdf 1.28.2, a plain `tobytes()` permanently drops an encrypted document's encryption state: every later save, even with KEEP, writes the file decrypted. Use `engine.pdfbytes.plain_bytes(doc)` to get decrypted bytes for parsing (it decrypts a throwaway copy), and `Document.snapshot()` for the journal.
+- **Redact per glyph, never by span bbox.** A span's bbox runs from ascender to descender, and a text redaction removes every glyph its rectangle touches, so a bbox redaction deleted the lines above and below at ordinary leading. `_redact_spans` in `engine/edit.py` puts a tiny square at each glyph's centre, then checks the glyph count and refuses the edit if anything else vanished.
+- **Draw at the effective size, not the `Tf` operand.** `Tf 1` under a `12 0 0 12` text matrix renders at 12pt. `_drawing_metrics` derives the scale from texttrace's size (which is `Tf` times the matrix's horizontal scale, including `Tz`) and scales `Tc`, `Tw`, rise and leading with it.
+- **One font resource name per font program.** `page.insert_font` reuses whatever is already registered under a name, so the edit font's name includes a hash of its bytes.
+- **Bounds checks use `engine.geometry.page_bounds(page)`,** not `page.rect`. Edit coordinates are unrotated, and `page.rect` is the rotated view.
+- **Test encrypted behaviour on files with real content.** The corpus's encrypted files once had blank pages, so no test could see content being lost. MuPDF also can't read back an empty AES-encrypted stream.
 - **Match fonts by normalized name, never by raw string.** Font names from texttrace, `Page.get_fonts()` and pikepdf go through `engine.fonts.match.normalize_font_name`, with a containment-match fallback. See `_find_font_entry` in `engine/edit.py` and `recover_broken_spans` in `engine/fonts/tounicode.py`. Comparing raw names caused three separate bugs in P2.
 - **Target one span with `ReplaceSpanTextOp`.** `ReplaceTextOp` searches for its text and edits every match on the page. A UI action on the span the user clicked must use the index-based `ReplaceSpanTextOp`.
 - **Read-only Ops are never journaled.** `PreviewTextOp`, `PageSpansOp` and `render_original_page` are applied directly in `server/app.py`. New read-only Ops and routes should work the same way.

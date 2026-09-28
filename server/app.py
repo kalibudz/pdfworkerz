@@ -35,9 +35,9 @@ import base64
 import dataclasses
 import secrets
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
@@ -47,6 +47,7 @@ from engine.document import Document
 from engine.errors import (
     CertificateEncryptedError,
     DocumentNotFoundError,
+    EncryptionLostError,
     FontResourceNotFoundError,
     NotAPdfError,
     NothingToUndoError,
@@ -55,9 +56,10 @@ from engine.errors import (
     PasswordRequiredError,
     PdfWorkerzError,
     RepairFailedError,
+    SaveNotPossibleError,
     WrongPasswordError,
 )
-from engine.ops.base import PageSpansOp, RenderPageOp, parse_op
+from engine.ops.base import MAX_RENDER_DPI, MIN_RENDER_DPI, Op, PageSpansOp, RenderPageOp, parse_op
 from engine.ops.images import PageImagesOp
 from engine.ops.journal import UndoRedoJournal
 from engine.ops.links import PageLinksOp
@@ -73,6 +75,8 @@ _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
     CertificateEncryptedError: 422,
     RepairFailedError: 422,
     OverwriteRefusedError: 409,
+    SaveNotPossibleError: 409,
+    EncryptionLostError: 422,
     NothingToUndoError: 409,
     OpValidationError: 400,
     FontResourceNotFoundError: 422,
@@ -101,13 +105,14 @@ class OpenDocumentResponse(BaseModel):
 class SaveRequest(BaseModel):
     path: str | None = None
     overwrite: bool = False
-    mode: str = "auto"
+    mode: Literal["auto", "incremental", "full"] = "auto"
 
 
 class SaveResponse(BaseModel):
     path: str
     mode: str
     bytes_written: int
+    note: str = ""
 
 
 class HistoryResponse(BaseModel):
@@ -138,6 +143,25 @@ def _jsonable(result: Any) -> Any:
     return result
 
 
+_BULKY_FIELDS = ("image_base64",)
+
+
+def _history_entry(op: Op) -> dict[str, Any]:
+    """An Op for the history panel: image data is replaced by its size, so every
+    /history call doesn't re-send each inserted image."""
+    entry = op.model_dump()
+    for field in _BULKY_FIELDS:
+        if isinstance(entry.get(field), str):
+            entry[field] = f"<{len(entry[field]) * 3 // 4} bytes>"
+    return entry
+
+
+def _read(op: Op, document: Document) -> Any:
+    """Apply a read-only Op directly (never journaled), after the same page check the journal does."""
+    op.check_pages(document)
+    return op.apply(document)
+
+
 def verify_token(request: Request, x_session_token: Annotated[str | None, Header()] = None) -> None:
     if x_session_token != request.app.state.session_token:
         raise HTTPException(status_code=401, detail="missing or invalid X-Session-Token header")
@@ -152,6 +176,7 @@ def _get_journal(request: Request, document_id: str) -> UndoRedoJournal:
 
 
 JournalDep = Annotated[UndoRedoJournal, Depends(_get_journal)]
+DpiQuery = Annotated[int, Query(ge=MIN_RENDER_DPI, le=MAX_RENDER_DPI)]
 
 router = APIRouter(dependencies=[Depends(verify_token)])
 
@@ -189,20 +214,20 @@ def apply_op(document_id: str, body: dict[str, Any], journal: JournalDep) -> Any
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/render")
-def render_page(document_id: str, page_index: int, journal: JournalDep, dpi: int = 150) -> Response:
-    png_bytes = RenderPageOp(page_index=page_index, dpi=dpi).apply(journal.document)
+def render_page(document_id: str, page_index: int, journal: JournalDep, dpi: DpiQuery = 150) -> Response:
+    png_bytes = _read(RenderPageOp(page_index=page_index, dpi=dpi), journal.document)
     return Response(content=png_bytes, media_type="image/png")
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/render/original")
-def render_original_page(document_id: str, page_index: int, journal: JournalDep, dpi: int = 150) -> Response:
+def render_original_page(document_id: str, page_index: int, journal: JournalDep, dpi: DpiQuery = 150) -> Response:
     """UI-05's before/after split view: the page as it looked when first
     opened, regardless of how many edits (or undos) have happened since.
     Renders from a throwaway Document over journal.original_bytes -- never
     the live one -- so this never shows up in, or is affected by, undo/redo."""
     scratch = Document.from_bytes(journal.original_bytes)
     try:
-        png_bytes = RenderPageOp(page_index=page_index, dpi=dpi).apply(scratch)
+        png_bytes = _read(RenderPageOp(page_index=page_index, dpi=dpi), scratch)
     finally:
         scratch.close()
     return Response(content=png_bytes, media_type="image/png")
@@ -213,7 +238,7 @@ def page_spans(document_id: str, page_index: int, journal: JournalDep) -> Any:
     """UI-02's click-to-edit overlay and UI-03's inspector panel both read
     this. Read-only (PageSpansOp), so -- like render_page above -- it's
     applied directly rather than through the undo/redo journal."""
-    return _jsonable(PageSpansOp(page_index=page_index).apply(journal.document))
+    return _jsonable(_read(PageSpansOp(page_index=page_index), journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/links")
@@ -221,21 +246,21 @@ def page_links(document_id: str, page_index: int, journal: JournalDep) -> Any:
     """EDT-10: every link on one page. Read-only (PageLinksOp), applied
     directly like page_spans; adding/editing/removing goes through the
     generic, journaled ops endpoint."""
-    return _jsonable(PageLinksOp(page_index=page_index).apply(journal.document))
+    return _jsonable(_read(PageLinksOp(page_index=page_index), journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/images")
 def page_images(document_id: str, page_index: int, journal: JournalDep) -> Any:
     """EDT-08: every image placement on one page. Read-only (PageImagesOp),
     applied directly like page_links; every change goes through the ops endpoint."""
-    return _jsonable(PageImagesOp(page_index=page_index).apply(journal.document))
+    return _jsonable(_read(PageImagesOp(page_index=page_index), journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/shapes")
 def page_shapes(document_id: str, page_index: int, journal: JournalDep) -> Any:
     """EDT-09: every vector path on one page. Read-only (PageShapesOp), applied
     directly like page_images; drawing and editing go through the ops endpoint."""
-    return _jsonable(PageShapesOp(page_index=page_index).apply(journal.document))
+    return _jsonable(_read(PageShapesOp(page_index=page_index), journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/spelling")
@@ -247,7 +272,7 @@ def page_spelling(
     accept anyway; a correction goes through the ops endpoint (correct_word)."""
     words = [word for word in ignore.split(",") if word]
     op = SpellCheckOp(page_index=page_index, language=language, ignore=words)
-    return _jsonable(op.apply(journal.document))
+    return _jsonable(_read(op, journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/preview")
@@ -255,7 +280,7 @@ def preview_text(document_id: str, page_index: int, span_index: int, needed_text
     """UI-02's live "Match" preview as the user types, before anything is
     committed. Read-only (PreviewTextOp), applied directly like page_spans."""
     op = PreviewTextOp(page_index=page_index, span_index=span_index, needed_text=needed_text)
-    return _jsonable(op.apply(journal.document))
+    return _jsonable(_read(op, journal.document))
 
 
 @router.get("/documents/{document_id}/file")
@@ -281,7 +306,7 @@ def redo(document_id: str, journal: JournalDep) -> UndoRedoResponse:
 @router.get("/documents/{document_id}/history", response_model=HistoryResponse)
 def history(document_id: str, journal: JournalDep) -> HistoryResponse:
     return HistoryResponse(
-        ops=[op.model_dump() for op in journal.history],
+        ops=[_history_entry(op) for op in journal.history],
         can_undo=journal.can_undo,
         can_redo=journal.can_redo,
     )
@@ -290,7 +315,7 @@ def history(document_id: str, journal: JournalDep) -> HistoryResponse:
 @router.post("/documents/{document_id}/save", response_model=SaveResponse)
 def save(document_id: str, body: SaveRequest, journal: JournalDep) -> SaveResponse:
     result = journal.document.save(body.path, overwrite=body.overwrite, mode=body.mode)
-    return SaveResponse(path=str(result.path), mode=result.mode, bytes_written=result.bytes_written)
+    return SaveResponse(path=str(result.path), mode=result.mode, bytes_written=result.bytes_written, note=result.note)
 
 
 _LOOPBACK_ORIGIN = r"^https?://(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?$"

@@ -23,6 +23,7 @@
 import type * as pdfjsLib from "pdfjs-dist";
 
 import type { Api, HistoryOp, LinkInfo, SpanTrace } from "./api";
+import { applyWithApproval, confirmVerified } from "./approval";
 import { attachBlockHandles } from "./blockdrag";
 import type { InspectorHandle } from "./inspector";
 import { toHexColor } from "./inspector";
@@ -179,13 +180,16 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
   /** EDT-05: the handle drag is in layer pixels; the Op wants page points. */
   async function moveBlock(span: SpanRef, fields: { dx?: number; dy?: number; width?: number }): Promise<void> {
     try {
-      await options.api.applyOp(options.documentId, {
+      const applied = await applyWithApproval(options.api, options.documentId, {
         op: "move_text_block",
         page_index: span.pageIndex,
         span_index: span.spanIndex,
-        require_tier: "fallback",
         ...fields,
       });
+      if (!applied) {
+        return;
+      }
+      await confirmVerified(options.api, options.documentId, applied.result);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The paragraph could not be moved.");
       return;
@@ -278,14 +282,17 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }
     disarmPainter();
     try {
-      await options.api.applyOp(options.documentId, {
+      const applied = await applyWithApproval(options.api, options.documentId, {
         op: "copy_style",
         page_index: source.pageIndex,
         span_index: source.spanIndex,
         target_page_index: target.pageIndex,
         target_span_index: target.spanIndex,
-        require_tier: "fallback",
       });
+      if (!applied) {
+        return;
+      }
+      await confirmVerified(options.api, options.documentId, applied.result);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The style could not be applied.");
       return;
@@ -371,7 +378,8 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     box.contentEditable = "false";
     box.classList.remove("pw-span-editing");
     try {
-      await options.api.replaceSpanText(options.documentId, pageIndex, spanIndex, newText, "fallback");
+      const result = await options.api.replaceSpanText(options.documentId, pageIndex, spanIndex, newText, "fallback");
+      await confirmVerified(options.api, options.documentId, result);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The edit could not be saved.");
       committing = false;

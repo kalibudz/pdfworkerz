@@ -38,6 +38,8 @@
         },
         "dpi": {
           "default": 150,
+          "maximum": 600,
+          "minimum": 18,
           "title": "Dpi",
           "type": "integer"
         }
@@ -1006,6 +1008,11 @@
           "title": "Verify",
           "type": "boolean"
         },
+        "whole_word": {
+          "default": false,
+          "title": "Whole Word",
+          "type": "boolean"
+        },
         "op": {
           "const": "replace_text",
           "default": "replace_text",
@@ -1076,6 +1083,11 @@
         "verify": {
           "default": true,
           "title": "Verify",
+          "type": "boolean"
+        },
+        "whole_word": {
+          "default": false,
+          "title": "Whole Word",
           "type": "boolean"
         },
         "op": {
