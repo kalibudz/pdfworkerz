@@ -174,6 +174,18 @@ export class Api {
     });
   }
 
+  /** Any registered Op through the generic, journaled ops endpoint (so it
+   * shows up in history and is undoable), returning its JSON result. The
+   * EDT-0x/EDT-1x editing tools all go through this rather than one
+   * method per Op -- server/app.py itself has no per-Op routes for them. */
+  async applyOp<T = unknown>(documentId: string, op: HistoryOp): Promise<T> {
+    const response = await this.request(`/documents/${documentId}/ops`, {
+      method: "POST",
+      body: JSON.stringify(op),
+    });
+    return (await response.json()) as T;
+  }
+
   /** UI-05's before/after split view: one page rendered server-side to PNG
    * -- the live document (`original: false`, the default) or the document
    * exactly as it was first opened (`original: true`), regardless of any

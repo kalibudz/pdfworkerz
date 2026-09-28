@@ -10,6 +10,8 @@ import typer
 from typer.testing import CliRunner
 
 from cli.main import app
+from engine.document import Document
+from engine.fonts.style import extract_page_spans
 from tests.corpus.build_corpus import Corpus
 
 runner = CliRunner()
@@ -270,3 +272,35 @@ def test_serve_command_is_registered() -> None:
     command = typer.main.get_command(app)
     serve_command = command.commands["serve"]
     assert "port" in {param.name for param in serve_command.params}
+
+
+@pytest.mark.feature("EDT-07")
+def test_copy_style_command(corpus: Corpus, work_dir: Path) -> None:
+    out = work_dir / "out.pdf"
+    result = runner.invoke(
+        app,
+        [
+            "copy-style",
+            str(corpus.bold_italic_standard),
+            "--source",
+            "Bold text",
+            "--target",
+            "Regular text",
+            "--out",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with Document.open(out) as document:
+        fonts = {span.style.text: span.style.font for span in extract_page_spans(document.raw, 0)}
+    assert fonts["Regular text"] == "Helvetica-Bold"
+
+
+@pytest.mark.feature("EDT-07")
+def test_copy_style_command_reports_a_missing_source(corpus: Corpus, work_dir: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["copy-style", str(corpus.bold_italic_standard), "--source", "nope", "--target", "Regular text"],
+    )
+    assert result.exit_code != 0
+    assert "no span on page 0 contains 'nope'" in result.output

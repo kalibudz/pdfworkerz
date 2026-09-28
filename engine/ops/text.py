@@ -1,4 +1,4 @@
-"""EDT-01, EDT-02, EDT-03, EDT-04, EDT-06, FNT-11: typed text-editing Ops.
+"""EDT-01, EDT-02, EDT-03, EDT-04, EDT-06, EDT-07, FNT-11: typed text-editing Ops.
 
 Each Op finds its target span(s) with :func:`engine.fonts.style.extract_page_spans`
 and draws through :mod:`engine.edit`. A match is only supported when it lies
@@ -17,7 +17,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from engine.document import Document
-from engine.edit import EditResult, insert_text_near, reflow_block, replace_span_text, resolve_font_for_span
+from engine.edit import (
+    EditResult,
+    copy_span_style,
+    insert_text_near,
+    reflow_block,
+    replace_span_text,
+    resolve_font_for_span,
+)
 from engine.errors import OpValidationError
 from engine.fonts.blocks import detect_blocks, find_block_containing
 from engine.fonts.match import FontCandidate, build_font_index
@@ -80,6 +87,16 @@ def _span_at(document: Document, page_index: int, span_index: int) -> SpanTrace:
     if not 0 <= span_index < len(spans):
         raise OpValidationError(f"page {page_index} has {len(spans)} span(s); span_index {span_index} is out of range")
     return spans[span_index]
+
+
+def find_span_index(document: Document, page_index: int, text: str) -> int:
+    """The index of the first span on `page_index` whose text contains
+    `text` literally -- how text-addressed callers (the CLI) get the
+    positional index the index-precise Ops above take."""
+    for span in extract_page_spans(document.raw, page_index):
+        if text in span.style.text:
+            return span.style.span_index
+    raise OpValidationError(f"no span on page {page_index} contains {text!r}")
 
 
 class PreviewResult(BaseModel):
@@ -149,6 +166,43 @@ class ReplaceSpanTextOp(Op):
         span = _span_at(document, self.page_index, self.span_index)
         result = replace_span_text(
             document, self.page_index, span, self.new_text, font_index=_font_index(), fit=self.fit, verify=self.verify
+        )
+        _check_tier(result, self.require_tier, where=type(self).__name__)
+        return result
+
+
+@register_op
+class CopyStyleOp(Op):
+    """EDT-07, format painter: give the span at (`target_page_index`,
+    `target_span_index`) the font, size, color and spacing of the span at
+    (`page_index`, `span_index`), keeping the target's own text. Both spans
+    are addressed by index (see _span_at), like ReplaceSpanTextOp, because
+    the UI picks them by clicking, never by searching."""
+
+    op: Literal["copy_style"] = "copy_style"
+    page_index: int
+    span_index: int
+    target_page_index: int
+    target_span_index: int
+    require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
+    verify: bool = True
+
+    def apply(self, document: Document) -> EditResult:
+        if (self.page_index, self.span_index) == (self.target_page_index, self.target_span_index):
+            raise OpValidationError("copy_style: source and target are the same span")
+        # Both looked up before anything is redrawn: indices describe the page as it is now.
+        source = _span_at(document, self.page_index, self.span_index)
+        target = _span_at(document, self.target_page_index, self.target_span_index)
+        if not target.style.text.strip():
+            raise OpValidationError("copy_style: the target span has no visible text to restyle")
+        result = copy_span_style(
+            document,
+            self.page_index,
+            source,
+            self.target_page_index,
+            target,
+            font_index=_font_index(),
+            verify=self.verify,
         )
         _check_tier(result, self.require_tier, where=type(self).__name__)
         return result

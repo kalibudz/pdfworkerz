@@ -598,3 +598,54 @@ def test_theme_choice_persists_across_a_reload(page: Page, connect_only_url: str
     page.reload()
     page.wait_for_selector(".pw-theme-toggle", timeout=5000)
     assert page.evaluate(_THEME_ATTR) == "light"
+
+
+def _span_box_font_weight(page: Page, text: str) -> str:
+    return str(
+        page.evaluate(
+            "t => [...document.querySelectorAll('.pw-span-box')].find(b => b.textContent === t)?.style.fontWeight",
+            text,
+        )
+    )
+
+
+@pytest.mark.feature("EDT-07")
+def test_format_painter_copies_a_style_onto_clicked_text(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.bold_italic_standard))
+    _wait_overlay_ready(page)
+    assert _span_box_font_weight(page, "Regular text") == "normal"
+
+    page.click(".pw-span-box:has-text('Bold text')")
+    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    page.click(".pw-copy-style")
+    page.wait_for_selector(".pw-painter-status:not([hidden])", timeout=3000)
+    assert page.query_selector(".pw-span-box.pw-span-editing") is None  # arming ends the edit
+
+    page.click(".pw-span-box:has-text('Regular text')")
+    page.wait_for_selector(".pw-history-entry:has-text('Copy style')", timeout=10000)
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.pw-span-box')]"
+        ".find(b => b.textContent === 'Regular text')?.style.fontWeight === 'bold'",
+        timeout=5000,
+    )
+    assert page.is_hidden(".pw-painter-status")
+
+
+@pytest.mark.feature("EDT-07")
+def test_escape_cancels_an_armed_format_painter(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.bold_italic_standard))
+    _wait_overlay_ready(page)
+    page.click(".pw-span-box:has-text('Bold text')")
+    page.click(".pw-copy-style")
+    page.wait_for_selector(".pw-painter-status:not([hidden])", timeout=3000)
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".pw-painter-status", state="hidden", timeout=3000)
+    # With the painter gone, a click edits again instead of painting.
+    page.click(".pw-span-box:has-text('Regular text')")
+    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    assert page.query_selector(".pw-history-entry") is None

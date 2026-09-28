@@ -352,6 +352,59 @@ def replace_span_text(
     )
 
 
+def copy_span_style(
+    document: Document,
+    source_page_index: int,
+    source: SpanTrace,
+    target_page_index: int,
+    target: SpanTrace,
+    *,
+    font_index: list[FontCandidate],
+    verify: bool = True,
+) -> EditResult:
+    """EDT-07, format painter: redraw `target`'s own text, in place, with
+    `source`'s font, size, color and text state (spacing, scaling, rise,
+    render mode). The target keeps its wording, baseline origin and
+    rotation; only its look changes.
+
+    The font is resolved against the *source* span (it's the source's
+    typeface being copied), for the *target's* characters, so a source font
+    subset that lacks one of them falls to a weaker tier exactly the way a
+    replacement would. The resolution is a self-contained font program or
+    standard-14 name, so source and target may be on different pages.
+    """
+    target_page = document.raw[target_page_index]
+    text = target.style.text
+    text_state = source.text_state or TextState()
+
+    resolution = resolve_font_for_span(document, source_page_index, source, text, font_index=font_index)
+    before = render_to_array(document.raw, target_page_index, dpi=VERIFY_DPI) if verify else None
+
+    target_page.add_redact_annot(pymupdf.Rect(target.style.bbox))
+    target_page.apply_redactions(**_REDACT_KWARGS)
+
+    end_point = draw_styled_text(
+        target_page,
+        text=text,
+        origin=target.style.chars[0].origin,
+        font_size=text_state.font_size or source.style.size,
+        color=source.style.color,
+        text_state=text_state,
+        rotation_degrees=target.style.rotation_degrees,
+        resolution=resolution,
+    )
+
+    verification = _verify_edit(document, target_page_index, before, text) if before is not None else None
+    return EditResult(
+        tier=resolution.tier,
+        confidence=resolution.confidence,
+        requires_approval=resolution.requires_approval,
+        note=resolution.note,
+        end_point=end_point,
+        verification=verification,
+    )
+
+
 def insert_text_near(
     document: Document,
     page_index: int,

@@ -20,7 +20,14 @@ from engine.document import Document
 from engine.edit import EditResult
 from engine.errors import PdfWorkerzError
 from engine.ops.base import InspectOp, PageSpansOp, RenderPageOp
-from engine.ops.text import DeleteTextOp, InsertTextOp, ReplaceTextOp, RestyleTextOp
+from engine.ops.text import (
+    CopyStyleOp,
+    DeleteTextOp,
+    InsertTextOp,
+    ReplaceTextOp,
+    RestyleTextOp,
+    find_span_index,
+)
 from server.app import create_app, run_server
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="PDFWorkerz: free, offline, token-free PDF editing.")
@@ -247,6 +254,37 @@ def insert(
                 text=text,
                 position=parsed_position,
                 reference_match=reference,
+                require_tier=require_tier,
+            )
+            result = op.apply(document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    _report([result])
+    typer.echo(f"saved -> {saved_to}")
+
+
+@app.command("copy-style")
+def copy_style(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    source: Annotated[str, typer.Option(help="Literal text of the span whose style to copy")],
+    target: Annotated[str, typer.Option(help="Literal text of the span to restyle")],
+    page: Annotated[int, typer.Option(help="0-based page of the source span")] = 0,
+    target_page: Annotated[int | None, typer.Option(help="0-based page of the target span; defaults to --page")] = None,
+    require_tier: TierOption = "approximate",
+    out: Annotated[Path | None, typer.Option(help="Output path; defaults to a new <name>.edited.pdf")] = None,
+    overwrite: Annotated[bool, typer.Option(help="Write back to the original file instead")] = False,
+    password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
+) -> None:
+    """Format painter (EDT-07): give the target text the source text's font, size and color."""
+    target_page_index = page if target_page is None else target_page
+    try:
+        with Document.open(path, password=password) as document:
+            op = CopyStyleOp(
+                page_index=page,
+                span_index=find_span_index(document, page, source),
+                target_page_index=target_page_index,
+                target_span_index=find_span_index(document, target_page_index, target),
                 require_tier=require_tier,
             )
             result = op.apply(document)

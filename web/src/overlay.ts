@@ -42,6 +42,18 @@ export interface OverlayHandle {
    * state before this render, which by the time a caller has a new
    * viewport to hand over is already gone. */
   update(pageIndex: number, spans: SpanTrace[], viewport: pdfjsLib.PageViewport): void;
+  /** EDT-07: arm the format painter with the span currently being edited
+   * as its source; the next span clicked (on any page) gets its style.
+   * A no-op when nothing is selected. */
+  armPainter(): void;
+  /** EDT-07: drop an armed painter -- the document changed underneath it. */
+  cancelPainter(): void;
+}
+
+interface SpanRef {
+  pageIndex: number;
+  spanIndex: number;
+  text: string;
 }
 
 const PREVIEW_DEBOUNCE_MS = 300;
@@ -100,6 +112,62 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
   // the box's text back to originalText while commitEdit's own save is
   // still in flight, discarding the edit before its result is even back.
   let committing = false;
+  /** The span being edited right now -- what "Copy style" copies from. */
+  let selected: SpanRef | null = null;
+  /** EDT-07: armed format painter source. Survives page changes and
+   * update() (cross-page painting is supported); cleared once applied or
+   * cancelled, and on any document change, which makes its index stale. */
+  let painterSource: SpanRef | null = null;
+
+  function disarmPainter(): void {
+    painterSource = null;
+    layer.classList.remove("pw-painting");
+    options.inspector.setPainter(null);
+  }
+
+  function armPainter(): void {
+    if (!selected) {
+      return;
+    }
+    const source = selected;
+    cancelEdit();
+    painterSource = source;
+    layer.classList.add("pw-painting");
+    options.inspector.setPainter(source.text);
+  }
+
+  async function applyPainter(target: SpanRef): Promise<void> {
+    const source = painterSource;
+    if (!source) {
+      return;
+    }
+    if (source.pageIndex === target.pageIndex && source.spanIndex === target.spanIndex) {
+      disarmPainter(); // clicking the source again just cancels
+      return;
+    }
+    disarmPainter();
+    try {
+      await options.api.applyOp(options.documentId, {
+        op: "copy_style",
+        page_index: source.pageIndex,
+        span_index: source.spanIndex,
+        target_page_index: target.pageIndex,
+        target_span_index: target.spanIndex,
+        require_tier: "fallback",
+      });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The style could not be applied.");
+      return;
+    }
+    options.onCommitted();
+  }
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && painterSource) {
+      event.preventDefault();
+      disarmPainter();
+    }
+  });
 
   function cancelEdit(): void {
     if (committing) {
@@ -119,6 +187,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     // no-op instead.
     const box = activeBox;
     activeBox = null;
+    selected = null;
     if (box) {
       box.contentEditable = "false";
       box.textContent = originalText;
@@ -181,6 +250,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }
     committing = false;
     activeBox = null;
+    selected = null;
     options.onCommitted();
   }
 
@@ -190,6 +260,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }
     activeBox = box;
     originalText = text;
+    selected = { pageIndex, spanIndex, text };
 
     box.contentEditable = "true";
     box.classList.add("pw-span-editing");
@@ -238,10 +309,16 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       box.style.fontWeight = approximateFontWeight(span.style.font);
       box.style.fontStyle = approximateFontStyle(span.style.font);
       box.textContent = span.style.text;
-      box.addEventListener("click", () => startEdit(box, pageIndex, spanIndex, span.style.text, span));
+      box.addEventListener("click", () => {
+        if (painterSource) {
+          void applyPainter({ pageIndex, spanIndex, text: span.style.text });
+        } else {
+          startEdit(box, pageIndex, spanIndex, span.style.text, span);
+        }
+      });
       layer.appendChild(box);
     }
   }
 
-  return { update };
+  return { update, armPainter, cancelPainter: disarmPainter };
 }

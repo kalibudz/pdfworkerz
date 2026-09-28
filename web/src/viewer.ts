@@ -141,7 +141,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   loadingNotice.textContent = "Loading document…";
   pageArea.replaceChildren(loadingNotice);
 
-  const inspector = createInspector(inspectorPanel);
+  const inspector = createInspector(inspectorPanel, { onCopyStyle: () => overlay.armPainter() });
   const overlay = createOverlay(editLayer, {
     api: options.api,
     documentId: options.documentId,
@@ -199,6 +199,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
    * scratch rather than guessed at. Also the one place that refreshes the
    * history panel, so every caller gets it for free. */
   async function reloadDocument(): Promise<void> {
+    overlay.cancelPainter();
     const bytes = await options.api.documentFile(options.documentId);
     pdf = await loadPdf(bytes);
     thumbRail.innerHTML = "";

@@ -148,6 +148,57 @@
     },
     {
       "additionalProperties": false,
+      "description": "EDT-07, format painter: give the span at (`target_page_index`,\n`target_span_index`) the font, size, color and spacing of the span at\n(`page_index`, `span_index`), keeping the target's own text. Both spans\nare addressed by index (see _span_at), like ReplaceSpanTextOp, because\nthe UI picks them by clicking, never by searching.",
+      "properties": {
+        "op": {
+          "const": "copy_style",
+          "default": "copy_style",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "span_index": {
+          "title": "Span Index",
+          "type": "integer"
+        },
+        "target_page_index": {
+          "title": "Target Page Index",
+          "type": "integer"
+        },
+        "target_span_index": {
+          "title": "Target Span Index",
+          "type": "integer"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_index",
+        "span_index",
+        "target_page_index",
+        "target_span_index"
+      ],
+      "title": "CopyStyleOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "EDT-02: find text (literal or regex) and replace it, matching the original style.",
       "properties": {
         "match": {

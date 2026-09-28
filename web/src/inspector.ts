@@ -17,6 +17,14 @@ export interface InspectorHandle {
    * one is in flight (SPEC.md never guesses at a match tier it hasn't
    * actually computed). */
   setPreview(preview: PreviewResult | null): void;
+  /** EDT-07: show (or clear, with null) the format painter's armed state --
+   * `sourceText` is the span whose style is waiting to be applied. */
+  setPainter(sourceText: string | null): void;
+}
+
+export interface InspectorOptions {
+  /** EDT-07: the "Copy style" button was pressed for the shown span. */
+  onCopyStyle?: () => void;
 }
 
 const TIER_LABELS: Record<string, string> = {
@@ -62,7 +70,7 @@ function row(label: string): Row {
   return { row: rowEl, value: valueEl, text };
 }
 
-export function createInspector(container: HTMLElement): InspectorHandle {
+export function createInspector(container: HTMLElement, options: InspectorOptions = {}): InspectorHandle {
   container.innerHTML = "";
   container.className = "pw-inspector";
 
@@ -93,14 +101,42 @@ export function createInspector(container: HTMLElement): InspectorHandle {
   matchRow.value.prepend(matchDot);
   fields.append(fontRow.row, sizeRow.row, colorRow.row, spacingRow.row, rotationRow.row, matchRow.row);
 
+  const copyStyleButton = document.createElement("button");
+  copyStyleButton.type = "button";
+  copyStyleButton.className = "pw-copy-style";
+  copyStyleButton.textContent = "Copy style";
+  copyStyleButton.title = "Format painter: copy this text's font, size and color onto other text";
+  // Keeps focus (and so the edit in progress) on the span box: without
+  // this, pressing the button blurs the box first, which cancels the edit
+  // and hides these fields -- button included -- before the click lands.
+  copyStyleButton.addEventListener("mousedown", (event) => event.preventDefault());
+  copyStyleButton.addEventListener("click", () => options.onCopyStyle?.());
+  // Its own block after `fields`, not inside it: the rows stay the only
+  // children there, so the Match row remains the last row.
+  const actions = document.createElement("div");
+  actions.className = "pw-inspector-actions";
+  actions.hidden = true;
+  actions.appendChild(copyStyleButton);
+  container.appendChild(actions);
+
+  // Outside `fields` and `empty`: the painter stays armed while no span is
+  // selected (that's the point -- the next click picks the target).
+  const painterStatus = document.createElement("p");
+  painterStatus.className = "pw-painter-status";
+  painterStatus.setAttribute("role", "status");
+  painterStatus.hidden = true;
+  container.appendChild(painterStatus);
+
   function showEmpty(): void {
     empty.hidden = false;
     fields.hidden = true;
+    actions.hidden = true;
   }
 
   function showSpan(span: SpanTrace): void {
     empty.hidden = true;
     fields.hidden = false;
+    actions.hidden = false;
 
     fontRow.text.textContent = formatFontName(span.style.font);
     sizeRow.text.textContent = `${span.style.size.toFixed(1)} pt`;
@@ -132,6 +168,12 @@ export function createInspector(container: HTMLElement): InspectorHandle {
     matchRow.row.title = preview.note;
   }
 
+  function setPainter(sourceText: string | null): void {
+    painterStatus.hidden = sourceText === null;
+    painterStatus.textContent =
+      sourceText === null ? "" : `Format painter: click text to give it the style of “${sourceText}” (Esc cancels).`;
+  }
+
   showEmpty();
-  return { showEmpty, showSpan, setPreview };
+  return { showEmpty, showSpan, setPreview, setPainter };
 }

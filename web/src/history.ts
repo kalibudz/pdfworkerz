@@ -79,6 +79,8 @@ function describeOp(op: HistoryOp): string {
       return `Reflow paragraph containing ${quote(op.match)} (${pageLabel(op)})`;
     case "replace_span_text":
       return `Replace text with ${quote(op.new_text)} (${pageLabel(op)})`;
+    case "copy_style":
+      return `Copy style onto text (${pageLabel({ op: op.op, page_index: op.target_page_index })})`;
     default:
       return op.op;
   }

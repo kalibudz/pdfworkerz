@@ -565,3 +565,22 @@ button {
   cursor: pointer;
   font-size: 0.82rem;
 }
+
+/* -- EDT-07: format painter -- */
+
+.pw-copy-style {
+  margin-top: 12px;
+  width: 100%;
+}
+
+.pw-painter-status {
+  margin: 12px 0 0;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.pw-edit-layer.pw-painting .pw-span-box {
+  cursor: copy;
+}

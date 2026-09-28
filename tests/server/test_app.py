@@ -280,6 +280,27 @@ def test_replace_span_text_op_via_the_generic_ops_endpoint(client: TestClient, s
     assert history["can_undo"] is True
 
 
+@pytest.mark.feature("EDT-07")
+def test_copy_style_op_via_the_generic_ops_endpoint_is_undoable(
+    client: TestClient, corpus: Corpus, work_dir: Path
+) -> None:
+    path = work_dir / "bold_italic.pdf"
+    shutil.copy(corpus.bold_italic_standard, path)
+    document_id = _open(client, path)
+
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "copy_style", "page_index": 0, "span_index": 1, "target_page_index": 0, "target_span_index": 0},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["tier"] == "exact"
+
+    history = client.get(f"/documents/{document_id}/history", headers=AUTH).json()
+    assert history["ops"][0]["op"] == "copy_style"
+    assert client.post(f"/documents/{document_id}/undo", headers=AUTH).status_code == 200
+
+
 @pytest.mark.feature("UI-04")
 def test_replace_span_text_op_round_trips_through_history_and_undo(client: TestClient, simple_path: Path) -> None:
     """UI-04's history panel describes each entry from the Op's own fields
