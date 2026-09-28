@@ -374,3 +374,36 @@ def test_move_block_command(corpus: Corpus, work_dir: Path) -> None:
         spans = extract_page_spans(document.raw, 0)
     moved = [span for span in spans if span.style.chars[0].origin[1] > 300]
     assert len(moved) > 3  # three lines, re-wrapped narrower, now lower on the page
+
+
+@pytest.mark.feature("EDT-08")
+def test_image_commands_insert_move_crop_replace_and_delete(corpus: Corpus, work_dir: Path) -> None:
+    from PIL import Image
+
+    picture = work_dir / "pic.png"
+    Image.new("RGB", (20, 20), (0, 128, 255)).save(picture)
+    steps = [
+        ["insert-image", "{src}", str(picture), "--rect", "72,200,172,300"],
+        ["move-image", "{src}", "0", "--rect", "200,400,300,500"],
+        ["crop-image", "{src}", "0", "--rect", "200,400,250,450"],
+        ["replace-image", "{src}", "0", str(picture)],
+    ]
+    src = corpus.simple
+    for number, step in enumerate(steps):
+        out = work_dir / f"step{number}.pdf"
+        result = runner.invoke(app, [arg.format(src=src) for arg in step] + ["--out", str(out)])
+        assert result.exit_code == 0, (step, result.output)
+        src = out
+    listed = json.loads(runner.invoke(app, ["images", str(src)]).output)
+    assert [round(v) for v in listed[0]["rect"]] == [200, 400, 250, 450]
+
+    final = work_dir / "final.pdf"
+    assert runner.invoke(app, ["delete-image", str(src), "0", "--out", str(final)]).exit_code == 0
+    assert json.loads(runner.invoke(app, ["images", str(final)]).output) == []
+
+
+@pytest.mark.feature("EDT-08")
+def test_delete_image_command_reports_a_bad_index(corpus: Corpus) -> None:
+    result = runner.invoke(app, ["delete-image", str(corpus.simple), "3"])
+    assert result.exit_code != 0
+    assert "out of range" in result.output

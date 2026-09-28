@@ -66,6 +66,228 @@
     },
     {
       "additionalProperties": false,
+      "description": "Every image placement on one page. Read-only, so -- like\nPageSpansOp -- never journaled; server/app.py serves it from a GET route.",
+      "properties": {
+        "op": {
+          "const": "page_images",
+          "default": "page_images",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        }
+      },
+      "title": "PageImagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Add a PNG/JPEG (or anything Pillow reads, re-encoded as PNG) at `rect`.",
+      "properties": {
+        "op": {
+          "const": "insert_image",
+          "default": "insert_image",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "rect": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Rect",
+          "type": "array"
+        },
+        "image_base64": {
+          "title": "Image Base64",
+          "type": "string"
+        },
+        "keep_proportion": {
+          "default": true,
+          "title": "Keep Proportion",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_index",
+        "rect",
+        "image_base64"
+      ],
+      "title": "InsertImageOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Swap the image at placement `index` for new image data, fitted into the same area.",
+      "properties": {
+        "op": {
+          "const": "replace_image",
+          "default": "replace_image",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "image_base64": {
+          "title": "Image Base64",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page_index",
+        "index",
+        "image_base64"
+      ],
+      "title": "ReplaceImageOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Move and/or resize the image at placement `index` to exactly `rect`.",
+      "properties": {
+        "op": {
+          "const": "move_image",
+          "default": "move_image",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "rect": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Rect",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_index",
+        "index",
+        "rect"
+      ],
+      "title": "MoveImageOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Cut the image at placement `index` down to the part inside `rect`.",
+      "properties": {
+        "op": {
+          "const": "crop_image",
+          "default": "crop_image",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "rect": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Rect",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_index",
+        "index",
+        "rect"
+      ],
+      "title": "CropImageOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Remove the image at placement `index` (only that placement).",
+      "properties": {
+        "op": {
+          "const": "delete_image",
+          "default": "delete_image",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_index",
+        "index"
+      ],
+      "title": "DeleteImageOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "Every link on one page. Read-only, so -- like PageSpansOp -- it's\nnever journaled; server/app.py serves it from a dedicated GET route.",
       "properties": {
         "op": {

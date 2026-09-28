@@ -85,6 +85,16 @@ function describeOp(op: HistoryOp): string {
       return `Edit link (${pageLabel(op)})`;
     case "remove_link":
       return `Remove link (${pageLabel(op)})`;
+    case "insert_image":
+      return `Insert image (${pageLabel(op)})`;
+    case "replace_image":
+      return `Replace image (${pageLabel(op)})`;
+    case "move_image":
+      return `Move/resize image (${pageLabel(op)})`;
+    case "crop_image":
+      return `Crop image (${pageLabel(op)})`;
+    case "delete_image":
+      return `Delete image (${pageLabel(op)})`;
     case "move_text_block":
       return typeof op.width === "number"
         ? `Resize paragraph to ${Math.round(op.width)}pt (${pageLabel(op)})`
@@ -140,7 +150,9 @@ export function createHistoryPanel(container: HTMLElement, options: HistoryOptio
         const entry = document.createElement("span");
         entry.className = "pw-history-entry";
         entry.textContent = describeOp(op);
-        entry.title = JSON.stringify(op);
+        entry.title = JSON.stringify(op, (_key, value: unknown) =>
+          typeof value === "string" && value.length > 80 ? `${value.slice(0, 77)}…` : value,
+        );
         if (index === state.ops.length - 1) {
           entry.classList.add("pw-history-current");
         }

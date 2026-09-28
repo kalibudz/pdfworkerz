@@ -58,6 +58,7 @@ from engine.errors import (
     WrongPasswordError,
 )
 from engine.ops.base import PageSpansOp, RenderPageOp, parse_op
+from engine.ops.images import PageImagesOp
 from engine.ops.journal import UndoRedoJournal
 from engine.ops.links import PageLinksOp
 from engine.ops.text import PreviewTextOp
@@ -219,6 +220,13 @@ def page_links(document_id: str, page_index: int, journal: JournalDep) -> Any:
     directly like page_spans; adding/editing/removing goes through the
     generic, journaled ops endpoint."""
     return _jsonable(PageLinksOp(page_index=page_index).apply(journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/images")
+def page_images(document_id: str, page_index: int, journal: JournalDep) -> Any:
+    """EDT-08: every image placement on one page. Read-only (PageImagesOp),
+    applied directly like page_links; every change goes through the ops endpoint."""
+    return _jsonable(PageImagesOp(page_index=page_index).apply(journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/preview")

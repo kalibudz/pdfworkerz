@@ -6,6 +6,8 @@ the browser are wired together.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from playwright.sync_api import Page
 
@@ -805,3 +807,148 @@ def test_a_click_on_a_handle_without_dragging_changes_nothing(page: Page, app_ur
     page.wait_for_timeout(500)
     assert page.query_selector(".pw-history-entry") is None
     assert page.query_selector(".pw-span-box.pw-span-editing") is not None  # the edit survived the press
+
+
+@pytest.fixture
+def image_pdf(tmp_path: Path) -> Path:
+    """One page with one 200x150pt image and a caption."""
+    import io
+
+    import pymupdf
+    from PIL import Image
+
+    png = io.BytesIO()
+    Image.new("RGB", (40, 30), (0, 160, 0)).save(png, format="PNG")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_image(pymupdf.Rect(100, 100, 300, 250), stream=png.getvalue())
+    page.insert_text((100, 300), "Figure caption", fontsize=12)
+    path = tmp_path / "with_image.pdf"
+    doc.save(path)
+    return path
+
+
+@pytest.fixture
+def small_png(tmp_path: Path) -> Path:
+    from PIL import Image
+
+    path = tmp_path / "small.png"
+    Image.new("RGB", (10, 10), (255, 0, 0)).save(path)
+    return path
+
+
+def _open_image_pdf(page: Page, app_url: str, path: Path) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(path))
+    _wait_overlay_ready(page)
+    page.wait_for_selector(".pw-image-box", timeout=5000)
+
+
+def _image_box_width_below(page: Page, limit: float) -> None:
+    page.wait_for_function(
+        "limit => (document.querySelector('.pw-image-box')?.getBoundingClientRect().width ?? 1e9) < limit",
+        arg=limit,
+        timeout=5000,
+    )
+
+
+def _box(page: Page, selector: str) -> dict[str, float]:
+    box = page.locator(selector).first.bounding_box()
+    assert box is not None
+    return box
+
+
+@pytest.mark.feature("EDT-08")
+def test_selecting_an_image_shows_it_in_the_inspector_and_delete_removes_it(
+    page: Page, app_url: str, image_pdf: Path
+) -> None:
+    _open_image_pdf(page, app_url, image_pdf)
+    page.click(".pw-image-box")
+    page.wait_for_selector(".pw-image-section:not([hidden])", timeout=3000)
+    assert "40 \u00d7 30" in (page.text_content(".pw-image-section") or "")
+
+    page.click(".pw-image-delete")
+    page.wait_for_selector(".pw-history-entry:has-text('Delete image')", timeout=10000)
+    page.wait_for_selector(".pw-image-box", state="detached", timeout=5000)
+    assert page.query_selector(".pw-span-box:has-text('Figure caption')") is not None
+
+
+@pytest.mark.feature("EDT-08")
+def test_dragging_an_image_moves_it(page: Page, app_url: str, image_pdf: Path) -> None:
+    _open_image_pdf(page, app_url, image_pdf)
+    before = _box(page, ".pw-image-box")
+    _drag(page, ".pw-image-box", 120, 200)
+    page.wait_for_selector(".pw-history-entry:has-text('Move/resize image')", timeout=10000)
+    page.wait_for_function(
+        f"() => {{ const b = document.querySelector('.pw-image-box')?.getBoundingClientRect();"
+        f" return b && b.top > {before['y'] + 150}; }}",
+        timeout=5000,
+    )
+
+
+@pytest.mark.feature("EDT-08")
+def test_dragging_the_corner_resizes_an_image(page: Page, app_url: str, image_pdf: Path) -> None:
+    _open_image_pdf(page, app_url, image_pdf)
+    before = _box(page, ".pw-image-box")
+    page.click(".pw-image-box")
+    page.wait_for_selector(".pw-image-resize", timeout=3000)
+    _drag(page, ".pw-image-resize", -before["width"] / 2, -before["height"] / 2)
+    page.wait_for_selector(".pw-history-entry:has-text('Move/resize image')", timeout=10000)
+    _image_box_width_below(page, before["width"] * 0.7)
+
+
+@pytest.mark.feature("EDT-08")
+def test_crop_mode_cuts_the_image_to_the_dragged_area(page: Page, app_url: str, image_pdf: Path) -> None:
+    _open_image_pdf(page, app_url, image_pdf)
+    before = _box(page, ".pw-image-box")
+    page.click(".pw-image-box")
+    page.click(".pw-image-crop")
+    x, y = before["x"] + before["width"] * 0.1, before["y"] + before["height"] * 0.1
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + before["width"] * 0.25, y + before["height"] * 0.25)
+    page.mouse.move(x + before["width"] * 0.4, y + before["height"] * 0.4)
+    page.mouse.up()
+    page.wait_for_selector(".pw-history-entry:has-text('Crop image')", timeout=10000)
+    _image_box_width_below(page, before["width"] * 0.5)
+
+
+@pytest.mark.feature("EDT-08")
+def test_replace_and_insert_go_through_a_file_picker(
+    page: Page, app_url: str, image_pdf: Path, small_png: Path
+) -> None:
+    _open_image_pdf(page, app_url, image_pdf)
+    page.click(".pw-image-box")
+    with page.expect_file_chooser() as chooser:
+        page.click(".pw-image-replace")
+    chooser.value.set_files(str(small_png))
+    page.wait_for_selector(".pw-history-entry:has-text('Replace image')", timeout=10000)
+
+    with page.expect_file_chooser() as chooser:
+        page.click(".pw-insert-image")
+    chooser.value.set_files(str(small_png))
+    page.wait_for_selector(".pw-history-entry:has-text('Insert image')", timeout=10000)
+    page.wait_for_function("() => document.querySelectorAll('.pw-image-box').length === 2", timeout=5000)
+
+
+@pytest.mark.feature("EDT-08")
+def test_text_over_an_image_is_still_editable(page: Page, app_url: str, tmp_path: Path) -> None:
+    import io
+
+    import pymupdf
+    from PIL import Image
+
+    png = io.BytesIO()
+    Image.new("RGB", (40, 30), (230, 230, 230)).save(png, format="PNG")
+    doc = pymupdf.open()
+    pdf_page = doc.new_page()
+    pdf_page.insert_image(pymupdf.Rect(80, 80, 400, 200), stream=png.getvalue())
+    pdf_page.insert_text((100, 140), "Label on image", fontsize=14)
+    path = tmp_path / "text_on_image.pdf"
+    doc.save(path)
+
+    _open_image_pdf(page, app_url, path)
+    span = _box(page, ".pw-span-box:has-text('Label on image')")
+    page.mouse.click(span["x"] + span["width"] / 2, span["y"] + span["height"] / 2)
+    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)

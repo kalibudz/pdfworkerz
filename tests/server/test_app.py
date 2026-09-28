@@ -348,6 +348,36 @@ def test_move_text_block_op_via_the_generic_ops_endpoint(client: TestClient, cor
     assert moved["style"]["bbox"][1] > 250
 
 
+@pytest.mark.feature("EDT-08")
+def test_images_route_reflects_an_inserted_image_and_undo(client: TestClient, simple_path: Path) -> None:
+    import base64
+    import io
+
+    from PIL import Image
+
+    png = io.BytesIO()
+    Image.new("RGB", (8, 8), (255, 0, 0)).save(png, format="PNG")
+    document_id = _open(client, simple_path)
+    images_url = f"/documents/{document_id}/pages/0/images"
+    assert client.get(images_url, headers=AUTH).json() == []
+
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={
+            "op": "insert_image",
+            "page_index": 0,
+            "rect": [72, 200, 172, 300],
+            "image_base64": base64.b64encode(png.getvalue()).decode(),
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+    assert len(client.get(images_url, headers=AUTH).json()) == 1
+
+    client.post(f"/documents/{document_id}/undo", headers=AUTH)
+    assert client.get(images_url, headers=AUTH).json() == []
+
+
 @pytest.mark.feature("UI-04")
 def test_replace_span_text_op_round_trips_through_history_and_undo(client: TestClient, simple_path: Path) -> None:
     """UI-04's history panel describes each entry from the Op's own fields

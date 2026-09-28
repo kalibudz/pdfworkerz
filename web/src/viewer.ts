@@ -16,6 +16,7 @@
 import type { Api } from "./api";
 import { createComparePanel } from "./compare";
 import { createHistoryPanel } from "./history";
+import { createImageTool } from "./images";
 import { createInspector } from "./inspector";
 import { createOverlay } from "./overlay";
 import { loadPdf, PageRenderer, thumbnailViewport, type PdfDocument } from "./pdf";
@@ -87,6 +88,11 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   compareButton.textContent = "Compare";
   compareButton.title = "Before/after split view (c)";
   compareButton.setAttribute("aria-pressed", "false");
+  const insertImageButton = document.createElement("button");
+  insertImageButton.type = "button";
+  insertImageButton.className = "pw-insert-image";
+  insertImageButton.textContent = "Image…";
+  insertImageButton.title = "Insert an image on this page";
   toolbar.append(
     title,
     prevButton,
@@ -95,6 +101,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     zoomOutButton,
     zoomIndicator,
     zoomInButton,
+    insertImageButton,
     compareButton,
   );
 
@@ -111,6 +118,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomOutButton.disabled = true;
   zoomInButton.disabled = true;
   compareButton.disabled = true;
+  insertImageButton.disabled = true;
 
   const body = document.createElement("div");
   body.className = "pw-body";
@@ -146,8 +154,15 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     onAddLink: () => overlay.addLink(),
     onEditLink: (link) => overlay.editLink(link),
     onRemoveLink: (link) => overlay.removeLink(link),
+    onImageAction: (action) => imageTool.act(action),
   });
   const overlay = createOverlay(editLayer, {
+    api: options.api,
+    documentId: options.documentId,
+    inspector,
+    onCommitted: () => void reloadDocument(),
+  });
+  const imageTool = createImageTool(editLayer, {
     api: options.api,
     documentId: options.documentId,
     inspector,
@@ -191,13 +206,15 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     updateActiveThumbnail();
     if (viewport) {
       const pageIndex = currentPage - 1; // pdf.js pages are 1-based; the API's page_index is 0-based
-      const [spans, links] = await Promise.all([
+      const [spans, links, images] = await Promise.all([
         options.api.pageSpans(options.documentId, pageIndex),
         options.api.pageLinks(options.documentId, pageIndex),
+        options.api.pageImages(options.documentId, pageIndex),
       ]);
       editLayer.style.width = `${mainCanvas.width}px`;
       editLayer.style.height = `${mainCanvas.height}px`;
       overlay.update(pageIndex, spans, viewport, links);
+      imageTool.update(pageIndex, images, viewport); // after overlay.update, which clears the layer
     }
   }
 
@@ -266,6 +283,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomOutButton.addEventListener("click", () => void setScale(scale / ZOOM_STEP));
   zoomInButton.addEventListener("click", () => void setScale(scale * ZOOM_STEP));
   compareButton.addEventListener("click", () => void setComparing(!comparing));
+  insertImageButton.addEventListener("click", () => imageTool.insert());
 
   // UI-08: every shortcut below is a keyboard path to an action the toolbar
   // or history panel already exposes by mouse -- none of them do anything
@@ -322,6 +340,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomOutButton.disabled = false;
   zoomInButton.disabled = false;
   compareButton.disabled = false;
+  insertImageButton.disabled = false;
 
   buildThumbnailRail(thumbRail, pdf, options.pageCount, thumbButtons, (pageNumber) => void goToPage(pageNumber));
 

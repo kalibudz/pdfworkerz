@@ -85,6 +85,17 @@ export interface LinkInfo {
   target_page: number | null;
 }
 
+/** Mirrors engine.images.ImageInfo (EDT-08). `index` is the placement's
+ * position in the page's current image list -- only valid until the next edit. */
+export interface ImageInfo {
+  index: number;
+  xref: number;
+  rect: [number, number, number, number];
+  pixel_width: number;
+  pixel_height: number;
+  axis_aligned: boolean;
+}
+
 /** One applied edit, exactly as it was requested -- an Op's own fields
  * (op.model_dump()), not the result of applying it. Which fields exist
  * beyond `op` depends on which Op it is; see history.ts's describeOp. */
@@ -154,6 +165,12 @@ export class Api {
   async pageLinks(documentId: string, pageIndex: number): Promise<LinkInfo[]> {
     const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/links`);
     return (await response.json()) as LinkInfo[];
+  }
+
+  /** EDT-08: every image placement on one page. */
+  async pageImages(documentId: string, pageIndex: number): Promise<ImageInfo[]> {
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/images`);
+    return (await response.json()) as ImageInfo[];
   }
 
   /** UI-02's live preview, before anything is committed: what font-resolution

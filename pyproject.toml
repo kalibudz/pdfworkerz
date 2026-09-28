@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["engine", "engine.ops", "cli", "server"]
+packages = ["engine", "engine.ops", "engine.fonts", "cli", "server"]
 
 [project]
 name = "pdfworkerz"
@@ -21,6 +21,7 @@ dependencies = [
   "numpy==2.4.6",
   "fastapi==0.141.1",
   "uvicorn==0.54.0",
+  "pillow==12.3.0",
 ]
 
 [project.scripts]

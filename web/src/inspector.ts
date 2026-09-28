@@ -6,7 +6,7 @@
  * only ever renders whatever it's told to.
  */
 
-import type { LinkInfo, PreviewResult, SpanTrace } from "./api";
+import type { ImageInfo, LinkInfo, PreviewResult, SpanTrace } from "./api";
 
 export interface InspectorHandle {
   /** Nothing selected -- the panel's resting state. */
@@ -21,7 +21,11 @@ export interface InspectorHandle {
   /** EDT-07: show (or clear, with null) the format painter's armed state --
    * `sourceText` is the span whose style is waiting to be applied. */
   setPainter(sourceText: string | null): void;
+  /** EDT-08: an image placement was selected instead of a span. */
+  showImage(image: ImageInfo): void;
 }
+
+export type ImageAction = "replace" | "crop" | "delete";
 
 export interface InspectorOptions {
   /** EDT-07: the "Copy style" button was pressed for the shown span. */
@@ -31,6 +35,8 @@ export interface InspectorOptions {
   /** EDT-10: retarget, or remove, one of the shown span's links. */
   onEditLink?: (link: LinkInfo) => void;
   onRemoveLink?: (link: LinkInfo) => void;
+  /** EDT-08: one of the selected image's buttons was pressed. */
+  onImageAction?: (action: ImageAction) => void;
 }
 
 function describeLink(link: LinkInfo): string {
@@ -84,9 +90,9 @@ interface Row {
   text: Text;
 }
 
-function row(label: string): Row {
+function row(label: string, className = "pw-inspector-row"): Row {
   const rowEl = document.createElement("div");
-  rowEl.className = "pw-inspector-row";
+  rowEl.className = className;
   const labelEl = document.createElement("span");
   labelEl.className = "pw-inspector-label";
   labelEl.textContent = label;
@@ -151,6 +157,36 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   actions.append(linksHeading, linkList, addLinkButton);
   container.appendChild(actions);
 
+  // EDT-08: shown instead of the span fields while an image is selected.
+  const imageSection = document.createElement("div");
+  imageSection.className = "pw-image-section";
+  imageSection.hidden = true;
+  // Their own row class: `.pw-inspector-row` is the span's fields, in a fixed order.
+  const pixelsRow = row("Pixels", "pw-inspector-row-image");
+  const placementRow = row("Placed at", "pw-inspector-row-image");
+  const imageButtons = document.createElement("div");
+  imageButtons.className = "pw-image-buttons";
+  imageButtons.append(
+    panelButton("Replace…", "pw-image-replace", () => options.onImageAction?.("replace")),
+    panelButton("Crop", "pw-image-crop", () => options.onImageAction?.("crop")),
+    panelButton("Delete", "pw-image-delete", () => options.onImageAction?.("delete")),
+  );
+  const imageHint = document.createElement("p");
+  imageHint.className = "pw-hint";
+  imageHint.textContent = "Drag the image to move it, or its corner to resize.";
+  imageSection.append(pixelsRow.row, placementRow.row, imageButtons, imageHint);
+  container.appendChild(imageSection);
+
+  function showImage(image: ImageInfo): void {
+    empty.hidden = true;
+    fields.hidden = true;
+    actions.hidden = true;
+    imageSection.hidden = false;
+    pixelsRow.text.textContent = `${image.pixel_width} × ${image.pixel_height}`;
+    const [x0, y0, x1, y1] = image.rect;
+    placementRow.text.textContent = `${Math.round(x1 - x0)} × ${Math.round(y1 - y0)} pt at ${Math.round(x0)}, ${Math.round(y0)}`;
+  }
+
   function showLinks(links: LinkInfo[]): void {
     linkList.replaceChildren(
       ...links.map((link) => {
@@ -182,6 +218,7 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     empty.hidden = false;
     fields.hidden = true;
     actions.hidden = true;
+    imageSection.hidden = true;
   }
 
   function showSpan(span: SpanTrace, links: LinkInfo[] = []): void {
@@ -189,6 +226,7 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     empty.hidden = true;
     fields.hidden = false;
     actions.hidden = false;
+    imageSection.hidden = true;
 
     fontRow.text.textContent = formatFontName(span.style.font);
     sizeRow.text.textContent = `${span.style.size.toFixed(1)} pt`;
@@ -227,5 +265,5 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   }
 
   showEmpty();
-  return { showEmpty, showSpan, setPreview, setPainter };
+  return { showEmpty, showSpan, setPreview, setPainter, showImage };
 }

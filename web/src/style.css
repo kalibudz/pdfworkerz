@@ -343,7 +343,8 @@ button {
   margin: 0 0 14px;
 }
 
-.pw-inspector-row {
+.pw-inspector-row,
+.pw-inspector-row-image {
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -648,4 +649,60 @@ button {
 .pw-resize-handle {
   width: 6px;
   cursor: ew-resize;
+}
+
+/* -- EDT-08: images -- */
+
+.pw-span-box {
+  z-index: 1; /* text on top of an image stays clickable */
+}
+
+.pw-image-box {
+  position: absolute;
+  z-index: 0;
+  pointer-events: auto;
+  cursor: move;
+  outline: 1px dashed transparent;
+}
+
+.pw-image-box:hover {
+  outline-color: var(--accent);
+}
+
+.pw-image-box.pw-image-selected {
+  outline: 2px solid var(--accent);
+}
+
+.pw-image-box.pw-image-cropping {
+  cursor: crosshair;
+  outline-style: dashed;
+}
+
+.pw-image-resize {
+  position: absolute;
+  z-index: 2;
+  width: 10px;
+  height: 10px;
+  pointer-events: auto;
+  cursor: nwse-resize;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+.pw-crop-rect {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  border: 2px dashed var(--accent);
+  background: rgba(47, 111, 235, 0.12);
+}
+
+.pw-image-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.pw-image-buttons button {
+  flex: 1 1 0;
 }

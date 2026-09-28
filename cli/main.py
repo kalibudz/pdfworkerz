@@ -9,6 +9,7 @@ stay on the exact same execution path once those exist.
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 from typing import Annotated, Literal
@@ -20,7 +21,8 @@ from engine.document import Document
 from engine.edit import EditResult
 from engine.errors import PdfWorkerzError
 from engine.fonts.style import extract_page_spans
-from engine.ops.base import InspectOp, PageSpansOp, RenderPageOp
+from engine.ops.base import InspectOp, Op, PageSpansOp, RenderPageOp
+from engine.ops.images import CropImageOp, DeleteImageOp, InsertImageOp, MoveImageOp, PageImagesOp, ReplaceImageOp
 from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp
 from engine.ops.text import (
     CopyStyleOp,
@@ -404,6 +406,119 @@ def remove_link(
         raise _fail(exc) from exc
     typer.echo(f"removed link {index} on page {page}")
     typer.echo(f"saved -> {saved_to}")
+
+
+OutOption = Annotated[Path | None, typer.Option(help="Output path; defaults to a new <name>.edited.pdf")]
+OverwriteOption = Annotated[bool, typer.Option(help="Write back to the original file instead")]
+PasswordOption = Annotated[str | None, typer.Option(help="User password, if the file is encrypted")]
+PageOption = Annotated[int, typer.Option(help="0-based page index")]
+ImageFileArg = Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PNG/JPEG (or other) image file")]
+
+
+def _apply_and_save(path: Path, op: Op, *, out: Path | None, overwrite: bool, password: str | None) -> Path:
+    """Open, apply one Op, save -- the shared body of the simpler edit commands."""
+    try:
+        with Document.open(path, password=password) as document:
+            op.apply(document)
+            return _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+
+
+def _image_b64(image_file: Path) -> str:
+    return base64.b64encode(image_file.read_bytes()).decode("ascii")
+
+
+@app.command()
+def images(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to inspect")],
+    page: Annotated[int, typer.Argument(help="0-based page index")] = 0,
+    password: PasswordOption = None,
+) -> None:
+    """Print every image placement on one page (EDT-08) as JSON; `index` is what the image commands take."""
+    try:
+        with Document.open(path, password=password) as document:
+            found = PageImagesOp(page_index=page).apply(document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(json.dumps([info.model_dump(mode="json") for info in found], indent=2))
+
+
+@app.command("insert-image")
+def insert_image_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    image_file: ImageFileArg,
+    rect: Annotated[str, typer.Option(help='Area to place it in, "x0,y0,x1,y1" in points')],
+    stretch: Annotated[bool, typer.Option(help="Fill the area exactly instead of keeping proportions")] = False,
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Add an image to a page (EDT-08), fitted inside --rect."""
+    op = InsertImageOp(
+        page_index=page, rect=_parse_rect(rect), image_base64=_image_b64(image_file), keep_proportion=not stretch
+    )
+    typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
+
+
+@app.command("replace-image")
+def replace_image_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    index: Annotated[int, typer.Argument(help="The image's index, as `pdfworkerz images` prints it")],
+    image_file: ImageFileArg,
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Swap one image for another, fitted into the same area (EDT-08)."""
+    op = ReplaceImageOp(page_index=page, index=index, image_base64=_image_b64(image_file))
+    typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
+
+
+@app.command("move-image")
+def move_image_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    index: Annotated[int, typer.Argument(help="The image's index, as `pdfworkerz images` prints it")],
+    rect: Annotated[str, typer.Option(help='New area, "x0,y0,x1,y1" in points')],
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Move and/or resize one image to exactly --rect (EDT-08)."""
+    op = MoveImageOp(page_index=page, index=index, rect=_parse_rect(rect))
+    typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
+
+
+@app.command("crop-image")
+def crop_image_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    index: Annotated[int, typer.Argument(help="The image's index, as `pdfworkerz images` prints it")],
+    rect: Annotated[str, typer.Option(help='Part to keep, "x0,y0,x1,y1" in page points')],
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Cut one image down to the part inside --rect (EDT-08)."""
+    op = CropImageOp(page_index=page, index=index, rect=_parse_rect(rect))
+    typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
+
+
+@app.command("delete-image")
+def delete_image_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    index: Annotated[int, typer.Argument(help="The image's index, as `pdfworkerz images` prints it")],
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Remove one image placement (EDT-08); other uses of the same image stay."""
+    op = DeleteImageOp(page_index=page, index=index)
+    typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
 
 
 @app.command()
