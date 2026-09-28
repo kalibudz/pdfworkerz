@@ -32,8 +32,20 @@ const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
 const ZOOM_STEP = 1.15;
 
+/** UI-08: a real, pre-existing bug found while adding more global shortcuts
+ * below -- this used to check only INPUT/TEXTAREA tag names, missing that
+ * overlay.ts's click-to-edit boxes are `contenteditable` `<div>`s, not
+ * INPUTs. That gap meant pressing ArrowLeft/ArrowRight to move the caret
+ * while typing inside a span *also* navigated pages and (via
+ * preventDefault in the handler below) silently broke caret movement
+ * entirely. `isContentEditable` is true for a contenteditable element and
+ * for its descendants, covering that case without overlay.ts having to
+ * know anything about this module. */
 function isTypingTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+  return (
+    target instanceof HTMLElement &&
+    (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+  );
 }
 
 export async function renderViewer(container: HTMLElement, options: ViewerOptions): Promise<void> {
@@ -51,25 +63,29 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   const prevButton = document.createElement("button");
   prevButton.type = "button";
   prevButton.textContent = "‹ Prev";
+  prevButton.title = "Previous page (← or Page Up)";
   const pageIndicator = document.createElement("span");
   pageIndicator.className = "pw-page-indicator";
   const nextButton = document.createElement("button");
   nextButton.type = "button";
   nextButton.textContent = "Next ›";
+  nextButton.title = "Next page (→ or Page Down)";
   const zoomOutButton = document.createElement("button");
   zoomOutButton.type = "button";
   zoomOutButton.textContent = "−";
-  zoomOutButton.title = "Zoom out";
+  zoomOutButton.title = "Zoom out (-)";
+  zoomOutButton.setAttribute("aria-label", "Zoom out");
   const zoomIndicator = document.createElement("span");
   zoomIndicator.className = "pw-page-indicator";
   const zoomInButton = document.createElement("button");
   zoomInButton.type = "button";
   zoomInButton.textContent = "+";
-  zoomInButton.title = "Zoom in";
+  zoomInButton.title = "Zoom in (+)";
+  zoomInButton.setAttribute("aria-label", "Zoom in");
   const compareButton = document.createElement("button");
   compareButton.type = "button";
   compareButton.textContent = "Compare";
-  compareButton.title = "Before/after split view (UI-05)";
+  compareButton.title = "Before/after split view (c)";
   compareButton.setAttribute("aria-pressed", "false");
   toolbar.append(
     title,
@@ -242,16 +258,50 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomInButton.addEventListener("click", () => void setScale(scale * ZOOM_STEP));
   compareButton.addEventListener("click", () => void setComparing(!comparing));
 
+  // UI-08: every shortcut below is a keyboard path to an action the toolbar
+  // or history panel already exposes by mouse -- none of them do anything
+  // a button click couldn't already do, so there's nothing here for
+  // reloadDocument/goToPage/setScale/history's own handlers to coordinate
+  // with beyond what they already do. Guarded on `pdf` up front: the
+  // buttons these mirror are themselves disabled until the document has
+  // loaded, and a keyboard shortcut shouldn't be able to act sooner than a
+  // click could.
   const keyHandler = (event: KeyboardEvent): void => {
-    if (isTypingTarget(event.target)) {
+    if (isTypingTarget(event.target) || !pdf) {
       return;
     }
-    if (event.key === "ArrowRight" || event.key === "PageDown") {
+    const modifier = event.ctrlKey || event.metaKey;
+    if (modifier && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        history.triggerRedo();
+      } else {
+        history.triggerUndo();
+      }
+    } else if (modifier && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      history.triggerRedo();
+    } else if (event.key === "ArrowRight" || event.key === "PageDown") {
       event.preventDefault();
       void goToPage(currentPage + 1);
     } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
       event.preventDefault();
       void goToPage(currentPage - 1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      void goToPage(1);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      void goToPage(options.pageCount);
+    } else if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      void setScale(scale * ZOOM_STEP);
+    } else if (event.key === "-" || event.key === "_") {
+      event.preventDefault();
+      void setScale(scale / ZOOM_STEP);
+    } else if (!modifier && event.key.toLowerCase() === "c") {
+      event.preventDefault();
+      void setComparing(!comparing);
     }
   };
   window.addEventListener("keydown", keyHandler);

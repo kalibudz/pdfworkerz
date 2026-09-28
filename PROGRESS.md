@@ -9,7 +9,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | First green GitHub Actions run: [run #17](https://github.com/kalibudz/pdfworkerz/actions/runs/36356246278), all 11 jobs, 2026-09-27 |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P3 | Web UI with click-to-edit | 🔶 In progress: 7/15 features proven by tests | |
+| P3 | Web UI with click-to-edit | 🔶 In progress: 8/15 features proven by tests | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,81 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-28 — UI-08: keyboard shortcuts and accessible UI
+
+- Extended `viewer.ts`'s existing keyboard handler (which already had
+  ArrowLeft/Right and PageUp/Down for page navigation) with: Home/End
+  (first/last page), `+`/`-` (zoom in/out, deliberately bare keys rather
+  than a `Ctrl`+ combination, since `Ctrl +`/`Ctrl -` are the browser's own
+  page-zoom shortcuts and intercepting those would be a worse UX than the
+  feature it adds), Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (undo/redo, mirroring
+  `history.ts`'s buttons via two new `triggerUndo`/`triggerRedo` methods
+  that are exactly `button.click()` -- a no-op on a disabled button, so a
+  shortcut can never act past what the button itself currently allows),
+  and `c` (toggle the UI-05 Compare view). Every new toolbar/history
+  button also got a `title` naming its shortcut, plus `aria-label` on the
+  two symbol-only zoom buttons, for the "accessible UI" half of this
+  feature's name.
+- **A real, pre-existing bug found while scoping this, not a new one
+  introduced by it**: `isTypingTarget` (the guard that keeps global
+  shortcuts from firing while someone is typing) checked only `INPUT`/
+  `TEXTAREA` tag names -- missing that UI-02's click-to-edit boxes
+  (`overlay.ts`) are `contenteditable` `<div>`s, not `INPUT`s. That gap
+  meant pressing ArrowLeft/ArrowRight to move the caret while actively
+  editing a span's text *also* navigated pages, and (via the handler's own
+  `preventDefault()`) silently broke caret movement inside the edit box
+  entirely. Adding Home/End/Ctrl+Z next to the existing arrow keys would
+  only have made this worse (imagine pressing Home while editing to jump
+  to the start of a line, and getting bounced to page 1 instead), so this
+  had to be fixed as part of the same change, not after: `isTypingTarget`
+  now also checks `target.isContentEditable`, which is true for a
+  contenteditable element and (unlike a tag-name check) for any of its
+  descendants too. A regression test locks this in
+  (`test_arrow_keys_move_the_caret_instead_of_navigating_pages_while_editing`).
+- **A second real bug, this time in the test suite rather than the app**,
+  found while writing this feature's own Ctrl+Z test and hunting down a
+  CI failure it exposed in an *unrelated*, already-pushed UI-05 test on
+  Windows only: `_commit_edit` (the UI-04 session's test helper) only
+  waited for editing to visibly end, which happens synchronously the
+  instant `commitEdit()` starts -- *before* the network request behind it,
+  let alone `viewer.ts`'s post-commit `reloadDocument()`, has finished.
+  `page.click()` (used for the Undo/Redo buttons directly in the existing
+  UI-04 tests) has a built-in actionability wait that happens to absorb
+  this race, which is why it went unnoticed there; a raw
+  `page.keyboard.press()` (this feature's own shortcut tests) has no such
+  wait, and neither did a UI-05 test that toggled Compare and then
+  `check()`/`uncheck()`ed its diff checkbox -- a *second*, delayed
+  `compare.show()` call (from the edit's own reload, only completing
+  *after* the test had already moved on to interacting with Compare, and
+  finding `comparing` already `true`) reset that checkbox out from under
+  the test mid-sequence, failing only on Windows CI (slower, so the race
+  window was wide enough to actually lose). Fixed once, at the source,
+  rather than patched at each call site: `_commit_edit` now also waits for
+  a `.pw-history-entry` to appear -- the actual last effect of
+  `reloadDocument()` completing -- before returning.
+- 5 new tests (382 total, 93.3% coverage): a regression test for the
+  arrow-key/caret bug, Home/End page jumps, `+`/`-` zoom, Ctrl+Z undo and
+  Ctrl+Shift+Z redo, and `c` toggling Compare. Also caught, this session,
+  by actually running the local gate's `ruff format --check` (not just
+  `ruff check`, which this session had been running alone since UI-04 --
+  a real gap in the routine, not a new problem this feature introduced):
+  two files from the UI-05 push were unformatted and had slipped through
+  to a red `lint` job on CI. Reformatted and confirmed clean; `ruff format
+  --check` is now part of every gate run from here on. mypy (scoped to
+  `engine cli tools server`), bandit, `ops.schema.json`/SPEC catalog sync
+  (unchanged) and `npm audit` all clean.
+- One more thing observed, not fixed because it didn't reproduce: a single
+  full-suite run (all 382 tests together) saw
+  `test_ctrl_z_undoes_and_ctrl_shift_z_redoes` fail on a `wait_for_function`
+  timeout; the same test passed in isolation, three repeats of the whole
+  `test_ui.py` module, and an immediate full-suite re-run. Most likely
+  this sandbox's resource contention under the full 382-test run (a real,
+  documented environment characteristic, not this feature's doing) rather
+  than a logic bug -- noted here rather than silently ignored, in case it
+  recurs and turns out to be something real.
+- UI-08 moved to `done` (50/161 total, 8/15 in P3). Remaining in P3: UI-09
+  (light/dark toggle + persistence) and EDT-05/07/08/09/10/11.
 
 ### 2026-09-28 — UI-05: before/after split view
 

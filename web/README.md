@@ -3,10 +3,11 @@
 The browser UI (SPEC.md section 8): a pdf.js canvas with a thumbnail rail
 (UI-01), the password prompt for encrypted files (UI-06), a click-to-edit
 overlay (UI-02), an inspector panel (UI-03), a history panel with
-undo/redo (UI-04), and a before/after split view (UI-05) -- and, as later
-features land, the command bar. It talks to `server/app.py` over plain
-JSON HTTP; nothing here runs on the server, and nothing in `server/`
-knows this directory exists.
+undo/redo (UI-04), a before/after split view (UI-05), and keyboard
+shortcuts for the actions above (UI-08) -- and, as later features land,
+the command bar and a light/dark theme toggle. It talks to `server/app.py`
+over plain JSON HTTP; nothing here runs on the server, and nothing in
+`server/` knows this directory exists.
 
 ## Running it
 
@@ -122,6 +123,33 @@ Comparing and editing are mutually exclusive in `viewer.ts`: the
 click-to-edit canvas and the compare panel rather than layering them, so
 `overlay.ts` and `compare.ts` never need to coordinate state neither
 otherwise needs to know about.
+
+## UI-08's keyboard shortcuts, and a real bug found while adding them
+
+Beyond the page-navigation shortcuts UI-01 already had (arrow keys,
+Page Up/Down), `viewer.ts`'s `keyHandler` now also handles: `Home`/`End`
+(first/last page), bare `+`/`-` (zoom -- deliberately not a `Ctrl`
+combination, since `Ctrl +`/`Ctrl -` are the browser's own page-zoom
+shortcuts, and hijacking those would be a worse trade than the feature),
+`Ctrl`/`Cmd+Z` and `+Shift+Z` (undo/redo, via two new `HistoryHandle`
+methods -- `triggerUndo`/`triggerRedo` -- that are exactly
+`button.click()`, so a shortcut can never act past what the button's own
+`disabled` state already allows), and `c` (toggle the UI-05 Compare
+view). Every toolbar/history button also gained a `title` naming its
+shortcut, plus `aria-label` on the two symbol-only zoom buttons.
+
+Scoping this surfaced a real, pre-existing bug, not a new one: `isTypingTarget`
+(the guard that keeps these shortcuts from firing while someone is
+typing) checked only `INPUT`/`TEXTAREA` tag names, missing that UI-02's
+click-to-edit boxes (`overlay.ts`) are `contenteditable` `<div>`s. That
+gap meant pressing ArrowLeft/ArrowRight to move the caret while actively
+editing a span's text *also* navigated pages, and silently broke caret
+movement entirely via the handler's own `preventDefault()`. Adding more
+global shortcuts next to the existing arrow keys would only have made
+this worse, so it had to be fixed first: `isTypingTarget` now also checks
+`target.isContentEditable`, true for a contenteditable element and any of
+its descendants (unlike a tag-name check). A regression test locks this
+in.
 
 ## The pdfjs-dist version pin and the `getOrInsertComputed` polyfill
 

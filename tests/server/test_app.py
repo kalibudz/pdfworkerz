@@ -179,9 +179,7 @@ def test_render_page_returns_png_bytes(client: TestClient, simple_path: Path) ->
 
 
 @pytest.mark.feature("UI-05")
-def test_render_original_page_matches_the_live_render_before_any_edit(
-    client: TestClient, simple_path: Path
-) -> None:
+def test_render_original_page_matches_the_live_render_before_any_edit(client: TestClient, simple_path: Path) -> None:
     document_id = _open(client, simple_path)
     live = client.get(f"/documents/{document_id}/pages/0/render", headers=AUTH)
     original = client.get(f"/documents/{document_id}/pages/0/render/original", headers=AUTH)

@@ -22,6 +22,13 @@ export interface HistoryHandle {
    * anything that could have changed it -- a committed edit, or this
    * panel's own undo/redo. */
   refresh(): Promise<void>;
+  /** UI-08's Ctrl/Cmd+Z and +Shift+Z: exactly what clicking the Undo/Redo
+   * button does, including doing nothing when the button is disabled
+   * (native `HTMLButtonElement.click()` on a disabled button never fires
+   * its listener), so a keyboard shortcut can never undo/redo past what
+   * the visible button state already allows. */
+  triggerUndo(): void;
+  triggerRedo(): void;
 }
 
 export interface HistoryOptions {
@@ -91,11 +98,13 @@ export function createHistoryPanel(container: HTMLElement, options: HistoryOptio
   const undoButton = document.createElement("button");
   undoButton.type = "button";
   undoButton.textContent = "↶ Undo";
+  undoButton.title = "Undo (Ctrl/Cmd+Z)";
   undoButton.disabled = true;
 
   const redoButton = document.createElement("button");
   redoButton.type = "button";
   redoButton.textContent = "↷ Redo";
+  redoButton.title = "Redo (Ctrl/Cmd+Shift+Z)";
   redoButton.disabled = true;
 
   container.append(label, list, undoButton, redoButton);
@@ -150,5 +159,9 @@ export function createHistoryPanel(container: HTMLElement, options: HistoryOptio
       .catch(() => refresh());
   });
 
-  return { refresh };
+  return {
+    refresh,
+    triggerUndo: () => undoButton.click(),
+    triggerRedo: () => redoButton.click(),
+  };
 }

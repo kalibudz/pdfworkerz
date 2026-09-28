@@ -168,7 +168,7 @@ def test_zoom_in_increases_the_rendered_canvas_size(page: Page, app_url: str, co
     _wait_viewer_ready(page)
 
     before = page.eval_on_selector(".pw-page-area canvas", "el => el.width")
-    page.click(".pw-toolbar button[title='Zoom in']")
+    page.click(".pw-toolbar button:has-text('+')")
     page.wait_for_function(f"() => document.querySelector('.pw-page-area canvas')?.width > {before}", timeout=5000)
 
 
@@ -306,12 +306,29 @@ def test_declining_the_confirmation_leaves_the_edit_uncommitted(page: Page, app_
 
 
 def _commit_edit(page: Page, app_url: str, path: str, new_text: str) -> None:
+    """Waits not just for editing to visibly end (_NOT_EDITING, which flips
+    synchronously the instant commitEdit starts -- before the network
+    request behind it, let alone viewer.ts's post-commit reloadDocument(),
+    has finished) but for a real, later effect of that reload: a history
+    entry appearing. A caller that acts right after _NOT_EDITING alone can
+    race a still-in-flight reloadDocument() -- confirmed the hard way, on
+    Windows CI only, by a UI-05 test that toggled Compare and then
+    check()/uncheck()ed its diff checkbox: a *second*, delayed
+    compare.show() call (from the edit's own reload, only now completing,
+    finding `comparing` already true) reset the checkbox out from under
+    the test mid-sequence. Playwright's own page.click() has an
+    actionability wait that happens to absorb this race for a plain
+    button click, which is why it went unnoticed in the UI-04 tests that
+    click Undo/Redo right after this helper -- but nothing saves a
+    stateful sequence, or a raw keyboard.press() with no target element to
+    wait on (as UI-08's keyboard-shortcut tests use)."""
     _open_and_click_first_span(page, app_url, path)
     page.wait_for_function(_EXACT_DOT, timeout=3000)
     page.keyboard.type(new_text)
     page.wait_for_timeout(400)  # let the debounced preview resolve before committing
     page.keyboard.press("Enter")
     page.wait_for_function(_NOT_EDITING, timeout=5000)
+    page.wait_for_selector(".pw-history-entry", timeout=5000)
 
 
 def _undo_button_disabled(page: Page) -> bool:
@@ -336,7 +353,6 @@ def test_history_panel_shows_no_edits_yet_before_any_commit(page: Page, app_url:
 @pytest.mark.feature("UI-04")
 def test_history_panel_shows_an_entry_after_a_committed_edit(page: Page, app_url: str, corpus: Corpus) -> None:
     _commit_edit(page, app_url, str(corpus.simple), "Hello, Editor.")
-    page.wait_for_selector(".pw-history-entry", timeout=5000)
     assert "Hello, Editor." in (page.text_content(".pw-history-entry") or "")
     assert _undo_button_disabled(page) is False
     assert _redo_button_disabled(page) is True
@@ -373,8 +389,7 @@ def test_redo_reapplies_the_content_and_updates_button_state(page: Page, app_url
 # -- UI-05 (before/after split view) --
 
 _COMPARE_STATUS_READY = (
-    "() => { const t = document.querySelector('.pw-compare-status')?.textContent;"
-    " return !!t && t !== 'Comparing…'; }"
+    "() => { const t = document.querySelector('.pw-compare-status')?.textContent; return !!t && t !== 'Comparing…'; }"
 )
 
 
@@ -431,5 +446,89 @@ def test_toggling_compare_off_returns_to_the_editable_canvas(page: Page, app_url
     assert page.eval_on_selector_all(".pw-canvas-wrap", "els => els.length") == 0
 
     page.click(".pw-toolbar button:has-text('Compare')")
+    page.wait_for_selector(".pw-canvas-wrap", timeout=5000)
+    assert page.eval_on_selector_all(".pw-compare", "els => els.length") == 0
+
+
+# -- UI-08 (keyboard shortcuts and accessible UI) --
+
+
+@pytest.mark.feature("UI-08")
+def test_arrow_keys_move_the_caret_instead_of_navigating_pages_while_editing(
+    page: Page, app_url: str, corpus: Corpus
+) -> None:
+    """Regression test for a real bug found while adding the shortcuts
+    below: isTypingTarget used to check only INPUT/TEXTAREA tag names,
+    missing that a click-to-edit box (overlay.ts) is a contenteditable
+    <div> -- so pressing ArrowLeft/ArrowRight to move the caret while
+    typing also navigated pages, and (via the handler's own
+    preventDefault) silently broke caret movement entirely."""
+    _open_and_click_first_span(page, app_url, str(corpus.simple))
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("ArrowRight")
+    assert page.text_content(".pw-page-indicator") == "1 / 1"
+    assert page.eval_on_selector_all(".pw-span-box.pw-span-editing", "els => els.length") == 1
+
+
+@pytest.mark.feature("UI-08")
+def test_home_and_end_keys_jump_to_first_and_last_page(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.multi_page))
+    _wait_viewer_ready(page)
+
+    page.keyboard.press("End")
+    page.wait_for_function(
+        "() => document.querySelector('.pw-page-indicator')?.textContent?.trim()"
+        f" === '{corpus.multi_page_count} / {corpus.multi_page_count}'",
+        timeout=5000,
+    )
+    page.keyboard.press("Home")
+    page.wait_for_function(
+        "() => document.querySelector('.pw-page-indicator')?.textContent?.trim().startsWith('1 /')", timeout=5000
+    )
+
+
+@pytest.mark.feature("UI-08")
+def test_plus_and_minus_keys_zoom_in_and_out(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.simple))
+    _wait_viewer_ready(page)
+
+    before = page.eval_on_selector(".pw-page-area canvas", "el => el.width")
+    page.keyboard.press("+")
+    page.wait_for_function(f"() => document.querySelector('.pw-page-area canvas')?.width > {before}", timeout=5000)
+    zoomed_in = page.eval_on_selector(".pw-page-area canvas", "el => el.width")
+    page.keyboard.press("-")
+    page.wait_for_function(f"() => document.querySelector('.pw-page-area canvas')?.width < {zoomed_in}", timeout=5000)
+
+
+@pytest.mark.feature("UI-08")
+def test_ctrl_z_undoes_and_ctrl_shift_z_redoes(page: Page, app_url: str, corpus: Corpus) -> None:
+    _commit_edit(page, app_url, str(corpus.simple), "Hello, Editor.")
+    page.keyboard.press("Control+z")
+    page.wait_for_function(
+        "() => document.querySelector('.pw-span-box')?.textContent === 'Hello, PDFWorkerz.'", timeout=5000
+    )
+    page.keyboard.press("Control+Shift+z")
+    page.wait_for_function(
+        "() => document.querySelector('.pw-span-box')?.textContent === 'Hello, Editor.'", timeout=5000
+    )
+
+
+@pytest.mark.feature("UI-08")
+def test_c_key_toggles_the_compare_view(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.simple))
+    _wait_viewer_ready(page)
+
+    page.keyboard.press("c")
+    page.wait_for_function(_COMPARE_STATUS_READY, timeout=5000)
+    assert page.eval_on_selector_all(".pw-canvas-wrap", "els => els.length") == 0
+
+    page.keyboard.press("c")
     page.wait_for_selector(".pw-canvas-wrap", timeout=5000)
     assert page.eval_on_selector_all(".pw-compare", "els => els.length") == 0
