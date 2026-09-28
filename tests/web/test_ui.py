@@ -512,6 +512,14 @@ def test_ctrl_z_undoes_and_ctrl_shift_z_redoes(page: Page, app_url: str, corpus:
     page.wait_for_function(
         "() => document.querySelector('.pw-span-box')?.textContent === 'Hello, PDFWorkerz.'", timeout=5000
     )
+    # reloadDocument() re-renders the page (the wait above) *before* it
+    # refreshes the history panel -- which is what actually re-enables the
+    # Redo button. Pressing Ctrl+Shift+Z in that gap would be a silent
+    # no-op (triggerRedo() is exactly a disabled button's click()), same
+    # race _commit_edit's own wait guards against, one step later. Waiting
+    # for the settled empty-history state (as the UI-04 undo test already
+    # does) closes that gap before the next keyboard-only action.
+    page.wait_for_selector(".pw-history-empty", timeout=5000)
     page.keyboard.press("Control+Shift+z")
     page.wait_for_function(
         "() => document.querySelector('.pw-span-box')?.textContent === 'Hello, Editor.'", timeout=5000
