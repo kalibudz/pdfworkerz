@@ -96,6 +96,16 @@ export interface ImageInfo {
   axis_aligned: boolean;
 }
 
+/** Mirrors engine.shapes.ShapeInfo (EDT-09). */
+export interface ShapeInfo {
+  index: number;
+  rect: [number, number, number, number];
+  kind: "line" | "rect" | "curve" | "path";
+  stroke_color: [number, number, number] | null;
+  fill_color: [number, number, number] | null;
+  line_width: number | null;
+}
+
 /** One applied edit, exactly as it was requested -- an Op's own fields
  * (op.model_dump()), not the result of applying it. Which fields exist
  * beyond `op` depends on which Op it is; see history.ts's describeOp. */
@@ -171,6 +181,12 @@ export class Api {
   async pageImages(documentId: string, pageIndex: number): Promise<ImageInfo[]> {
     const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/images`);
     return (await response.json()) as ImageInfo[];
+  }
+
+  /** EDT-09: every vector path on one page. */
+  async pageShapes(documentId: string, pageIndex: number): Promise<ShapeInfo[]> {
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/shapes`);
+    return (await response.json()) as ShapeInfo[];
   }
 
   /** UI-02's live preview, before anything is committed: what font-resolution

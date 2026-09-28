@@ -678,7 +678,7 @@ button {
   outline-style: dashed;
 }
 
-.pw-image-resize {
+.pw-object-resize {
   position: absolute;
   z-index: 2;
   width: 10px;
@@ -705,4 +705,54 @@ button {
 
 .pw-image-buttons button {
   flex: 1 1 0;
+}
+
+/* -- EDT-09: vector shapes -- */
+
+.pw-shape-box {
+  position: absolute;
+  z-index: 0;
+  pointer-events: auto;
+  cursor: move;
+  outline: 1px dotted transparent;
+}
+
+.pw-shape-box:hover {
+  outline-color: var(--accent);
+}
+
+.pw-shape-box.pw-shape-selected {
+  outline: 2px solid var(--accent);
+}
+
+.pw-draw-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.pw-draw-ghost {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  border: 2px dashed var(--accent);
+}
+
+.pw-draw-ghost-ellipse {
+  border-radius: 50%;
+}
+
+.pw-shape-control {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 0.85rem;
+}
+
+.pw-shape-width {
+  width: 5em;
 }

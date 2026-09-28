@@ -72,9 +72,18 @@ class UndoRedoJournal:
         return [entry.op for entry in self._undo_stack]
 
     def record(self, op: Op) -> object:
-        """Apply ``op`` to the current document and record it for undo."""
+        """Apply ``op`` to the current document and record it for undo.
+
+        If ``op`` raises, the document is restored to exactly its state
+        before the call: an Op that fails partway (say, after removing an
+        image but before redrawing it) never leaves a half-applied change
+        behind for the next Op, or a save, to pick up."""
         before = self._document.to_bytes()
-        result = op.apply(self._document)
+        try:
+            result = op.apply(self._document)
+        except Exception:
+            self._reload(before)
+            raise
         after = self._document.to_bytes()
 
         self._undo_stack.append(JournalEntry(op=op, before=before, after=after))

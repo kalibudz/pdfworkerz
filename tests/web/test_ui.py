@@ -892,8 +892,8 @@ def test_dragging_the_corner_resizes_an_image(page: Page, app_url: str, image_pd
     _open_image_pdf(page, app_url, image_pdf)
     before = _box(page, ".pw-image-box")
     page.click(".pw-image-box")
-    page.wait_for_selector(".pw-image-resize", timeout=3000)
-    _drag(page, ".pw-image-resize", -before["width"] / 2, -before["height"] / 2)
+    page.wait_for_selector(".pw-object-resize", timeout=3000)
+    _drag(page, ".pw-object-resize", -before["width"] / 2, -before["height"] / 2)
     page.wait_for_selector(".pw-history-entry:has-text('Move/resize image')", timeout=10000)
     _image_box_width_below(page, before["width"] * 0.7)
 
@@ -952,3 +952,89 @@ def test_text_over_an_image_is_still_editable(page: Page, app_url: str, tmp_path
     span = _box(page, ".pw-span-box:has-text('Label on image')")
     page.mouse.click(span["x"] + span["width"] / 2, span["y"] + span["height"] / 2)
     page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+
+
+@pytest.fixture
+def shape_pdf(tmp_path: Path) -> Path:
+    """One page with a stroked rectangle and a caption."""
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    shape = page.new_shape()
+    shape.draw_rect(pymupdf.Rect(100, 100, 300, 250))
+    shape.finish(color=(0, 0, 1), width=2)
+    shape.commit()
+    page.insert_text((100, 300), "Shape caption", fontsize=12)
+    path = tmp_path / "with_shape.pdf"
+    doc.save(path)
+    return path
+
+
+def _open_shape_pdf(page: Page, app_url: str, path: Path) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(path))
+    _wait_overlay_ready(page)
+    page.wait_for_selector(".pw-shape-box", timeout=5000)
+
+
+@pytest.mark.feature("EDT-09")
+def test_draw_mode_draws_a_rectangle_by_dragging(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.simple))
+    _wait_overlay_ready(page)
+    page.select_option(".pw-draw-select", "rect")
+    canvas = _box(page, ".pw-canvas-wrap canvas")
+    x, y = canvas["x"] + canvas["width"] * 0.3, canvas["y"] + canvas["height"] * 0.4
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + 60, y + 40)
+    page.mouse.move(x + 120, y + 80)
+    page.mouse.up()
+    page.wait_for_selector(".pw-history-entry:has-text('Draw rect')", timeout=10000)
+    page.wait_for_selector(".pw-shape-box", timeout=5000)
+
+    page.keyboard.press("Escape")  # leaves draw mode: text is clickable again
+    page.wait_for_selector(".pw-draw-surface", state="detached", timeout=3000)
+    page.click(".pw-span-box")
+    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+
+
+@pytest.mark.feature("EDT-09")
+def test_select_restyle_and_delete_a_shape(page: Page, app_url: str, shape_pdf: Path) -> None:
+    _open_shape_pdf(page, app_url, shape_pdf)
+    page.click(".pw-shape-box")
+    page.wait_for_selector(".pw-shape-section:not([hidden])", timeout=3000)
+    assert page.input_value(".pw-shape-stroke") == "#0000ff"
+    assert page.is_checked(".pw-shape-no-fill")
+
+    page.fill(".pw-shape-stroke", "#ff0000")
+    page.uncheck(".pw-shape-no-fill")
+    page.fill(".pw-shape-width", "4")
+    page.click(".pw-shape-apply")
+    page.wait_for_selector(".pw-history-entry:has-text('Edit shape')", timeout=10000)
+
+    page.click(".pw-shape-box")
+    page.wait_for_selector(".pw-shape-section:not([hidden])", timeout=3000)
+    assert page.input_value(".pw-shape-stroke") == "#ff0000"
+    assert not page.is_checked(".pw-shape-no-fill")
+
+    page.click(".pw-shape-delete")
+    page.wait_for_selector(".pw-history-entry:has-text('Delete shape')", timeout=10000)
+    page.wait_for_selector(".pw-shape-box", state="detached", timeout=5000)
+    assert page.query_selector(".pw-span-box:has-text('Shape caption')") is not None
+
+
+@pytest.mark.feature("EDT-09")
+def test_dragging_a_shape_moves_it(page: Page, app_url: str, shape_pdf: Path) -> None:
+    _open_shape_pdf(page, app_url, shape_pdf)
+    before = _box(page, ".pw-shape-box")
+    _drag(page, ".pw-shape-box", 80, 250)
+    page.wait_for_selector(".pw-history-entry:has-text('Edit shape')", timeout=10000)
+    page.wait_for_function(
+        "limit => (document.querySelector('.pw-shape-box')?.getBoundingClientRect().top ?? 0) > limit",
+        arg=before["y"] + 200,
+        timeout=5000,
+    )

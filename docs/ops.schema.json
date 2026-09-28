@@ -477,6 +477,287 @@
     },
     {
       "additionalProperties": false,
+      "description": "Every vector path on one page. Read-only, so -- like PageSpansOp --\nnever journaled; server/app.py serves it from a GET route.",
+      "properties": {
+        "op": {
+          "const": "page_shapes",
+          "default": "page_shapes",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        }
+      },
+      "title": "PageShapesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Draw a new line, rectangle, ellipse, polyline or polygon (see engine.shapes.draw_shape).",
+      "properties": {
+        "op": {
+          "const": "draw_shape",
+          "default": "draw_shape",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "line",
+            "rect",
+            "ellipse",
+            "polyline",
+            "polygon"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "points": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Points",
+          "type": "array"
+        },
+        "stroke_color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "title": "Stroke Color"
+        },
+        "fill_color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fill Color"
+        },
+        "line_width": {
+          "default": 1.0,
+          "title": "Line Width",
+          "type": "number"
+        },
+        "dashed": {
+          "default": false,
+          "title": "Dashed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_index",
+        "kind",
+        "points"
+      ],
+      "title": "DrawShapeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Move/resize (`rect`: the shape's new bounding box) and/or restyle one\nexisting shape. `no_fill` removes its fill.",
+      "properties": {
+        "op": {
+          "const": "edit_shape",
+          "default": "edit_shape",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "rect": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rect"
+        },
+        "stroke_color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stroke Color"
+        },
+        "fill_color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fill Color"
+        },
+        "no_fill": {
+          "default": false,
+          "title": "No Fill",
+          "type": "boolean"
+        },
+        "line_width": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Width"
+        }
+      },
+      "required": [
+        "page_index",
+        "index"
+      ],
+      "title": "EditShapeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Remove one vector path; text, images and other paths stay.",
+      "properties": {
+        "op": {
+          "const": "delete_shape",
+          "default": "delete_shape",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_index",
+        "index"
+      ],
+      "title": "DeleteShapeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "A read-only preview of the font resolution a replacement would use --\nnever draws, redacts or verifies anything, so (like PageSpansOp) it's\nnever journaled; server/app.py calls it directly. `span_index` is\npositional in a fresh `extract_page_spans` call on `page_index`, not a\ntext search (see _span_at).",
       "properties": {
         "op": {

@@ -11,7 +11,8 @@ import type * as pdfjsLib from "pdfjs-dist";
 
 import type { Api, HistoryOp, ImageInfo } from "./api";
 import type { ImageAction, InspectorHandle } from "./inspector";
-import { bboxToRect, viewportToMupdfPoint } from "./overlay";
+import { cornerHandle, drag, layerToPageRect } from "./drag";
+import { bboxToRect } from "./overlay";
 
 export interface ImageToolOptions {
   api: Api;
@@ -29,8 +30,6 @@ export interface ImageToolHandle {
   /** Prompt for an image file and place it in the middle of the current page. */
   insert(): void;
 }
-
-const DRAG_THRESHOLD_PX = 3;
 
 /** A file picker, resolved with the chosen file's bytes as base64 (or null). */
 export function pickImageBase64(): Promise<string | null> {
@@ -78,43 +77,15 @@ export function createImageTool(layer: HTMLElement, options: ImageToolOptions): 
 
   /** Layer pixels (two corners) -> a MuPDF page rect, normalized. */
   function toPageRect(ax: number, ay: number, bx: number, by: number): [number, number, number, number] | null {
-    if (!viewport) {
-      return null;
-    }
-    const [x0, y0] = viewportToMupdfPoint(viewport, ax, ay);
-    const [x1, y1] = viewportToMupdfPoint(viewport, bx, by);
-    return [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)];
+    return viewport ? layerToPageRect(viewport, ax, ay, bx, by) : null;
   }
 
   function deselect(): void {
     selected?.box.classList.remove("pw-image-selected", "pw-image-cropping");
-    layer.querySelector(".pw-image-resize")?.remove();
+    layer.querySelector(".pw-object-resize")?.remove();
     layer.querySelector(".pw-crop-rect")?.remove();
     selected = null;
     cropping = false;
-  }
-
-  /** Mouse-drag helper: `preview` while moving, `done` with the total delta. */
-  function drag(
-    start: MouseEvent,
-    preview: (dx: number, dy: number) => void,
-    done: (dx: number, dy: number) => void,
-  ): void {
-    start.preventDefault();
-    start.stopPropagation();
-    const onMove = (event: MouseEvent): void => preview(event.clientX - start.clientX, event.clientY - start.clientY);
-    const onUp = (event: MouseEvent): void => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      const dx = event.clientX - start.clientX;
-      const dy = event.clientY - start.clientY;
-      preview(0, 0);
-      if (Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX) {
-        done(dx, dy);
-      }
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
   }
 
   function select(image: ImageInfo, box: HTMLElement): void {
@@ -123,32 +94,12 @@ export function createImageTool(layer: HTMLElement, options: ImageToolOptions): 
     box.classList.add("pw-image-selected");
     options.inspector.showImage(image);
 
-    const left = parseFloat(box.style.left);
-    const top = parseFloat(box.style.top);
-    const width = parseFloat(box.style.width);
-    const height = parseFloat(box.style.height);
-    const handle = document.createElement("div");
-    handle.className = "pw-image-resize";
-    handle.title = "Drag to resize";
-    handle.style.left = `${left + width - 5}px`;
-    handle.style.top = `${top + height - 5}px`;
-    handle.addEventListener("mousedown", (event) =>
-      drag(
-        event,
-        (dx, dy) => {
-          box.style.width = `${Math.max(width + dx, 4)}px`;
-          box.style.height = `${Math.max(height + dy, 4)}px`;
-          handle.style.transform = dx || dy ? `translate(${dx}px, ${dy}px)` : "";
-        },
-        (dx, dy) => {
-          const rect = toPageRect(left, top, left + Math.max(width + dx, 4), top + Math.max(height + dy, 4));
-          if (rect) {
-            void send({ op: "move_image", page_index: pageIndex, index: image.index, rect });
-          }
-        },
-      ),
-    );
-    layer.appendChild(handle);
+    cornerHandle(layer, box, (left, top, right, bottom) => {
+      const rect = toPageRect(left, top, right, bottom);
+      if (rect) {
+        void send({ op: "move_image", page_index: pageIndex, index: image.index, rect });
+      }
+    });
   }
 
   function startCropDrag(image: ImageInfo, event: MouseEvent): void {
@@ -254,7 +205,7 @@ export function createImageTool(layer: HTMLElement, options: ImageToolOptions): 
   // handle) drops the selection -- including clicking a span to edit it.
   layer.addEventListener("mousedown", (event) => {
     const target = event.target as HTMLElement;
-    if (selected && !target.closest(".pw-image-box, .pw-image-resize")) {
+    if (selected && !target.closest(".pw-image-box, .pw-object-resize")) {
       deselect();
     }
   });

@@ -24,6 +24,7 @@ from engine.fonts.style import extract_page_spans
 from engine.ops.base import InspectOp, Op, PageSpansOp, RenderPageOp
 from engine.ops.images import CropImageOp, DeleteImageOp, InsertImageOp, MoveImageOp, PageImagesOp, ReplaceImageOp
 from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp
+from engine.ops.shapes import DeleteShapeOp, DrawShapeOp, EditShapeOp, PageShapesOp
 from engine.ops.text import (
     CopyStyleOp,
     DeleteTextOp,
@@ -518,6 +519,95 @@ def delete_image_command(
 ) -> None:
     """Remove one image placement (EDT-08); other uses of the same image stay."""
     op = DeleteImageOp(page_index=page, index=index)
+    typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
+
+
+def _parse_points(value: str) -> list[tuple[float, float]]:
+    return [_parse_point(pair) for pair in value.split()]
+
+
+@app.command()
+def shapes(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to inspect")],
+    page: Annotated[int, typer.Argument(help="0-based page index")] = 0,
+    password: PasswordOption = None,
+) -> None:
+    """Print every vector path on one page (EDT-09) as JSON; `index` is what the shape commands take."""
+    try:
+        with Document.open(path, password=password) as document:
+            found = PageShapesOp(page_index=page).apply(document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(json.dumps([info.model_dump(mode="json") for info in found], indent=2))
+
+
+@app.command("draw-shape")
+def draw_shape_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    kind: Annotated[Literal["line", "rect", "ellipse", "polyline", "polygon"], typer.Argument(help="What to draw")],
+    points: Annotated[str, typer.Option(help='Space-separated "x,y" points, e.g. "72,700 200,760"')],
+    stroke: Annotated[str | None, typer.Option(help='Outline color "r,g,b" (0-1); default black')] = None,
+    no_stroke: Annotated[bool, typer.Option(help="No outline (needs --fill)")] = False,
+    fill: Annotated[str | None, typer.Option(help='Fill color "r,g,b" (0-1)')] = None,
+    width: Annotated[float, typer.Option(help="Outline width in points")] = 1.0,
+    dashed: Annotated[bool, typer.Option(help="Dashed outline")] = False,
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Draw a line, rectangle, ellipse, polyline or polygon (EDT-09)."""
+    stroke_color = None if no_stroke else (_parse_color(stroke) if stroke else (0.0, 0.0, 0.0))
+    op = DrawShapeOp(
+        page_index=page,
+        kind=kind,
+        points=_parse_points(points),
+        stroke_color=stroke_color,
+        fill_color=_parse_color(fill) if fill else None,
+        line_width=width,
+        dashed=dashed,
+    )
+    typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
+
+
+@app.command("edit-shape")
+def edit_shape_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    index: Annotated[int, typer.Argument(help="The shape's index, as `pdfworkerz shapes` prints it")],
+    rect: Annotated[str | None, typer.Option(help='New bounding box "x0,y0,x1,y1" (moves/resizes)')] = None,
+    stroke: Annotated[str | None, typer.Option(help='New outline color "r,g,b" (0-1)')] = None,
+    fill: Annotated[str | None, typer.Option(help='New fill color "r,g,b" (0-1)')] = None,
+    no_fill: Annotated[bool, typer.Option(help="Remove the fill")] = False,
+    width: Annotated[float | None, typer.Option(help="New outline width in points")] = None,
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Move, resize or restyle one existing shape (EDT-09)."""
+    op = EditShapeOp(
+        page_index=page,
+        index=index,
+        rect=_parse_rect(rect) if rect else None,
+        stroke_color=_parse_color(stroke) if stroke else None,
+        fill_color=_parse_color(fill) if fill else None,
+        no_fill=no_fill,
+        line_width=width,
+    )
+    typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
+
+
+@app.command("delete-shape")
+def delete_shape_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    index: Annotated[int, typer.Argument(help="The shape's index, as `pdfworkerz shapes` prints it")],
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Remove one vector path (EDT-09); text, images and other shapes stay."""
+    op = DeleteShapeOp(page_index=page, index=index)
     typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
 
 

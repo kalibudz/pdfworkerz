@@ -61,6 +61,7 @@ from engine.ops.base import PageSpansOp, RenderPageOp, parse_op
 from engine.ops.images import PageImagesOp
 from engine.ops.journal import UndoRedoJournal
 from engine.ops.links import PageLinksOp
+from engine.ops.shapes import PageShapesOp
 from engine.ops.text import PreviewTextOp
 
 _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
@@ -227,6 +228,13 @@ def page_images(document_id: str, page_index: int, journal: JournalDep) -> Any:
     """EDT-08: every image placement on one page. Read-only (PageImagesOp),
     applied directly like page_links; every change goes through the ops endpoint."""
     return _jsonable(PageImagesOp(page_index=page_index).apply(journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/shapes")
+def page_shapes(document_id: str, page_index: int, journal: JournalDep) -> Any:
+    """EDT-09: every vector path on one page. Read-only (PageShapesOp), applied
+    directly like page_images; drawing and editing go through the ops endpoint."""
+    return _jsonable(PageShapesOp(page_index=page_index).apply(journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/preview")

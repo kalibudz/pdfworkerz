@@ -34,6 +34,17 @@ class _InsertLineOp(Op):
         page.insert_text((72, 400), self.text)
 
 
+@register_op
+class _HalfDoneThenFailOp(Op):
+    """Test double only: changes the page, then fails -- an Op that raises partway."""
+
+    op: Literal["_test_half_done_then_fail"] = "_test_half_done_then_fail"
+
+    def apply(self, document: Document) -> None:
+        next(document.iter_pages()).insert_text((72, 450), "half-applied")
+        raise ValueError("failed after changing the page")
+
+
 @pytest.fixture
 def journal(corpus: Corpus) -> Iterator[UndoRedoJournal]:
     doc = Document.open(corpus.simple)
@@ -179,3 +190,16 @@ def test_original_bytes_survives_undo_and_history_capping() -> None:
         assert small_journal.original_bytes == original  # still correct, even mid-undo
     finally:
         small_journal.document.close()
+
+
+@pytest.mark.feature("COR-05")
+def test_an_op_that_fails_partway_leaves_the_document_unchanged(journal: UndoRedoJournal) -> None:
+    journal.record(_InsertLineOp(text="kept edit"))
+    with pytest.raises(ValueError, match="failed after changing"):
+        journal.record(_HalfDoneThenFailOp())
+    text = next(journal.document.iter_pages()).get_text()
+    assert "half-applied" not in text
+    assert "kept edit" in text
+    assert len(journal.history) == 1  # the failed op isn't recorded
+    journal.undo()
+    assert "kept edit" not in next(journal.document.iter_pages()).get_text()

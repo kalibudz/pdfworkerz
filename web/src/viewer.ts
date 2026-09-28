@@ -19,6 +19,7 @@ import { createHistoryPanel } from "./history";
 import { createImageTool } from "./images";
 import { createInspector } from "./inspector";
 import { createOverlay } from "./overlay";
+import { createShapeTool, type DrawKind } from "./shapes";
 import { loadPdf, PageRenderer, thumbnailViewport, type PdfDocument } from "./pdf";
 
 export interface ViewerOptions {
@@ -93,6 +94,21 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   insertImageButton.className = "pw-insert-image";
   insertImageButton.textContent = "Image…";
   insertImageButton.title = "Insert an image on this page";
+  const drawSelect = document.createElement("select");
+  drawSelect.className = "pw-draw-select";
+  drawSelect.title = "Draw a shape: pick one, then drag on the page";
+  drawSelect.setAttribute("aria-label", "Draw a shape");
+  for (const [value, label] of [
+    ["", "Draw…"],
+    ["line", "Line"],
+    ["rect", "Rectangle"],
+    ["ellipse", "Ellipse"],
+  ]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    drawSelect.appendChild(option);
+  }
   toolbar.append(
     title,
     prevButton,
@@ -102,6 +118,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     zoomIndicator,
     zoomInButton,
     insertImageButton,
+    drawSelect,
     compareButton,
   );
 
@@ -119,6 +136,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomInButton.disabled = true;
   compareButton.disabled = true;
   insertImageButton.disabled = true;
+  drawSelect.disabled = true;
 
   const body = document.createElement("div");
   body.className = "pw-body";
@@ -155,8 +173,16 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     onEditLink: (link) => overlay.editLink(link),
     onRemoveLink: (link) => overlay.removeLink(link),
     onImageAction: (action) => imageTool.act(action),
+    onShapeStyle: (style) => shapeTool.restyle(style),
+    onShapeDelete: () => shapeTool.deleteSelected(),
   });
   const overlay = createOverlay(editLayer, {
+    api: options.api,
+    documentId: options.documentId,
+    inspector,
+    onCommitted: () => void reloadDocument(),
+  });
+  const shapeTool = createShapeTool(editLayer, {
     api: options.api,
     documentId: options.documentId,
     inspector,
@@ -206,15 +232,19 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     updateActiveThumbnail();
     if (viewport) {
       const pageIndex = currentPage - 1; // pdf.js pages are 1-based; the API's page_index is 0-based
-      const [spans, links, images] = await Promise.all([
+      const [spans, links, images, shapes] = await Promise.all([
         options.api.pageSpans(options.documentId, pageIndex),
         options.api.pageLinks(options.documentId, pageIndex),
         options.api.pageImages(options.documentId, pageIndex),
+        options.api.pageShapes(options.documentId, pageIndex),
       ]);
       editLayer.style.width = `${mainCanvas.width}px`;
       editLayer.style.height = `${mainCanvas.height}px`;
       overlay.update(pageIndex, spans, viewport, links);
-      imageTool.update(pageIndex, images, viewport); // after overlay.update, which clears the layer
+      // After overlay.update, which clears the layer; shapes before images so
+      // images stack above shapes, and both stay under the text (style.css).
+      shapeTool.update(pageIndex, shapes, viewport);
+      imageTool.update(pageIndex, images, viewport);
     }
   }
 
@@ -284,6 +314,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomInButton.addEventListener("click", () => void setScale(scale * ZOOM_STEP));
   compareButton.addEventListener("click", () => void setComparing(!comparing));
   insertImageButton.addEventListener("click", () => imageTool.insert());
+  drawSelect.addEventListener("change", () => shapeTool.setDrawMode((drawSelect.value || null) as DrawKind | null));
 
   // UI-08: every shortcut below is a keyboard path to an action the toolbar
   // or history panel already exposes by mouse -- none of them do anything
@@ -295,6 +326,11 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   // click could.
   const keyHandler = (event: KeyboardEvent): void => {
     if (isTypingTarget(event.target) || !pdf) {
+      return;
+    }
+    if (event.key === "Escape" && drawSelect.value) {
+      drawSelect.value = "";
+      shapeTool.setDrawMode(null);
       return;
     }
     const modifier = event.ctrlKey || event.metaKey;
@@ -341,6 +377,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomInButton.disabled = false;
   compareButton.disabled = false;
   insertImageButton.disabled = false;
+  drawSelect.disabled = false;
 
   buildThumbnailRail(thumbRail, pdf, options.pageCount, thumbButtons, (pageNumber) => void goToPage(pageNumber));
 

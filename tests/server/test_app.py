@@ -378,6 +378,22 @@ def test_images_route_reflects_an_inserted_image_and_undo(client: TestClient, si
     assert client.get(images_url, headers=AUTH).json() == []
 
 
+@pytest.mark.feature("EDT-09")
+def test_shapes_route_reflects_a_drawn_shape_and_undo(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    shapes_url = f"/documents/{document_id}/pages/0/shapes"
+    assert client.get(shapes_url, headers=AUTH).json() == []
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "draw_shape", "page_index": 0, "kind": "rect", "points": [[72, 200], [272, 300]]},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+    assert [s["kind"] for s in client.get(shapes_url, headers=AUTH).json()] == ["rect"]
+    client.post(f"/documents/{document_id}/undo", headers=AUTH)
+    assert client.get(shapes_url, headers=AUTH).json() == []
+
+
 @pytest.mark.feature("UI-04")
 def test_replace_span_text_op_round_trips_through_history_and_undo(client: TestClient, simple_path: Path) -> None:
     """UI-04's history panel describes each entry from the Op's own fields

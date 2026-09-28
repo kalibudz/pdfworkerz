@@ -407,3 +407,44 @@ def test_delete_image_command_reports_a_bad_index(corpus: Corpus) -> None:
     result = runner.invoke(app, ["delete-image", str(corpus.simple), "3"])
     assert result.exit_code != 0
     assert "out of range" in result.output
+
+
+@pytest.mark.feature("EDT-09")
+def test_shape_commands_draw_edit_and_delete(corpus: Corpus, work_dir: Path) -> None:
+    drawn = work_dir / "drawn.pdf"
+    result = runner.invoke(
+        app,
+        [
+            "draw-shape",
+            str(corpus.simple),
+            "ellipse",
+            "--points",
+            "72,200 272,300",
+            "--fill",
+            "1,0,0",
+            "--out",
+            str(drawn),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    listed = json.loads(runner.invoke(app, ["shapes", str(drawn)]).output)
+    assert listed[0]["kind"] == "curve" and listed[0]["fill_color"] == [1.0, 0.0, 0.0]
+
+    edited = work_dir / "edited.pdf"
+    result = runner.invoke(
+        app, ["edit-shape", str(drawn), "0", "--rect", "100,400,200,450", "--no-fill", "--out", str(edited)]
+    )
+    assert result.exit_code == 0, result.output
+    shape = json.loads(runner.invoke(app, ["shapes", str(edited)]).output)[0]
+    assert [round(v) for v in shape["rect"]] == [100, 400, 200, 450] and shape["fill_color"] is None
+
+    deleted = work_dir / "deleted.pdf"
+    assert runner.invoke(app, ["delete-shape", str(edited), "0", "--out", str(deleted)]).exit_code == 0
+    assert json.loads(runner.invoke(app, ["shapes", str(deleted)]).output) == []
+
+
+@pytest.mark.feature("EDT-09")
+def test_draw_shape_command_rejects_bad_points(corpus: Corpus) -> None:
+    result = runner.invoke(app, ["draw-shape", str(corpus.simple), "line", "--points", "72,200"])
+    assert result.exit_code != 0
+    assert "exactly 2" in result.output

@@ -95,6 +95,12 @@ function describeOp(op: HistoryOp): string {
       return `Crop image (${pageLabel(op)})`;
     case "delete_image":
       return `Delete image (${pageLabel(op)})`;
+    case "draw_shape":
+      return `Draw ${typeof op.kind === "string" ? op.kind : "shape"} (${pageLabel(op)})`;
+    case "edit_shape":
+      return `Edit shape (${pageLabel(op)})`;
+    case "delete_shape":
+      return `Delete shape (${pageLabel(op)})`;
     case "move_text_block":
       return typeof op.width === "number"
         ? `Resize paragraph to ${Math.round(op.width)}pt (${pageLabel(op)})`

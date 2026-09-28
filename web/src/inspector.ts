@@ -6,7 +6,7 @@
  * only ever renders whatever it's told to.
  */
 
-import type { ImageInfo, LinkInfo, PreviewResult, SpanTrace } from "./api";
+import type { ImageInfo, LinkInfo, PreviewResult, ShapeInfo, SpanTrace } from "./api";
 
 export interface InspectorHandle {
   /** Nothing selected -- the panel's resting state. */
@@ -23,6 +23,21 @@ export interface InspectorHandle {
   setPainter(sourceText: string | null): void;
   /** EDT-08: an image placement was selected instead of a span. */
   showImage(image: ImageInfo): void;
+  /** EDT-09: a vector shape was selected. */
+  showShape(shape: ShapeInfo): void;
+}
+
+/** EDT-09: the style fields of an edit_shape Op. */
+export interface ShapeStyle {
+  stroke_color?: [number, number, number];
+  fill_color?: [number, number, number];
+  no_fill?: boolean;
+  line_width?: number;
+}
+
+function fromHexColor(hex: string): [number, number, number] {
+  const value = parseInt(hex.slice(1), 16);
+  return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255];
 }
 
 export type ImageAction = "replace" | "crop" | "delete";
@@ -37,6 +52,9 @@ export interface InspectorOptions {
   onRemoveLink?: (link: LinkInfo) => void;
   /** EDT-08: one of the selected image's buttons was pressed. */
   onImageAction?: (action: ImageAction) => void;
+  /** EDT-09: the selected shape's "Apply" / "Delete" buttons. */
+  onShapeStyle?: (style: ShapeStyle) => void;
+  onShapeDelete?: () => void;
 }
 
 function describeLink(link: LinkInfo): string {
@@ -177,10 +195,82 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   imageSection.append(pixelsRow.row, placementRow.row, imageButtons, imageHint);
   container.appendChild(imageSection);
 
+  // EDT-09: shown while a vector shape is selected.
+  const shapeSection = document.createElement("div");
+  shapeSection.className = "pw-shape-section";
+  shapeSection.hidden = true;
+  const shapeKindRow = row("Shape", "pw-inspector-row-image");
+  function control(label: string, input: HTMLInputElement): HTMLLabelElement {
+    const wrapper = document.createElement("label");
+    wrapper.className = "pw-shape-control";
+    wrapper.append(label, input);
+    return wrapper;
+  }
+  const strokeInput = document.createElement("input");
+  strokeInput.type = "color";
+  strokeInput.className = "pw-shape-stroke";
+  const fillInput = document.createElement("input");
+  fillInput.type = "color";
+  fillInput.className = "pw-shape-fill";
+  const noFillInput = document.createElement("input");
+  noFillInput.type = "checkbox";
+  noFillInput.className = "pw-shape-no-fill";
+  const widthInput = document.createElement("input");
+  widthInput.type = "number";
+  widthInput.min = "0.1";
+  widthInput.step = "0.5";
+  widthInput.className = "pw-shape-width";
+  const shapeButtons = document.createElement("div");
+  shapeButtons.className = "pw-image-buttons";
+  shapeButtons.append(
+    panelButton("Apply", "pw-shape-apply", () => {
+      const style: ShapeStyle = { stroke_color: fromHexColor(strokeInput.value) };
+      if (noFillInput.checked) {
+        style.no_fill = true;
+      } else {
+        style.fill_color = fromHexColor(fillInput.value);
+      }
+      const width = Number(widthInput.value);
+      if (width > 0) {
+        style.line_width = width;
+      }
+      options.onShapeStyle?.(style);
+    }),
+    panelButton("Delete", "pw-shape-delete", () => options.onShapeDelete?.()),
+  );
+  const shapeHint = document.createElement("p");
+  shapeHint.className = "pw-hint";
+  shapeHint.textContent = "Drag the shape to move it, or its corner to resize.";
+  shapeSection.append(
+    shapeKindRow.row,
+    control("Outline", strokeInput),
+    control("Fill", fillInput),
+    control("No fill", noFillInput),
+    control("Width (pt)", widthInput),
+    shapeButtons,
+    shapeHint,
+  );
+  container.appendChild(shapeSection);
+
+  function showShape(shape: ShapeInfo): void {
+    empty.hidden = true;
+    fields.hidden = true;
+    actions.hidden = true;
+    imageSection.hidden = true;
+    shapeSection.hidden = false;
+    const [x0, y0, x1, y1] = shape.rect;
+    shapeKindRow.text.textContent = `${shape.kind}, ${Math.round(x1 - x0)} × ${Math.round(y1 - y0)} pt`;
+    strokeInput.value = toHexColor(shape.stroke_color ?? [0, 0, 0]).toLowerCase();
+    fillInput.value = toHexColor(shape.fill_color ?? [1, 1, 1]).toLowerCase();
+    noFillInput.checked = shape.fill_color === null;
+    widthInput.value = String(shape.line_width ?? 1);
+  }
+
   function showImage(image: ImageInfo): void {
     empty.hidden = true;
     fields.hidden = true;
     actions.hidden = true;
+    shapeSection.hidden = true;
     imageSection.hidden = false;
     pixelsRow.text.textContent = `${image.pixel_width} × ${image.pixel_height}`;
     const [x0, y0, x1, y1] = image.rect;
@@ -219,6 +309,7 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     fields.hidden = true;
     actions.hidden = true;
     imageSection.hidden = true;
+    shapeSection.hidden = true;
   }
 
   function showSpan(span: SpanTrace, links: LinkInfo[] = []): void {
@@ -227,6 +318,7 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     fields.hidden = false;
     actions.hidden = false;
     imageSection.hidden = true;
+    shapeSection.hidden = true;
 
     fontRow.text.textContent = formatFontName(span.style.font);
     sizeRow.text.textContent = `${span.style.size.toFixed(1)} pt`;
@@ -265,5 +357,5 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   }
 
   showEmpty();
-  return { showEmpty, showSpan, setPreview, setPainter, showImage };
+  return { showEmpty, showSpan, setPreview, setPainter, showImage, showShape };
 }
