@@ -26,6 +26,51 @@ A phase is complete when all of its features are **done** through the evidence g
 
 ## Session log
 
+### 2026-09-27 (cont. 11) — first real-document test: Form XObject fix, bundled Roboto
+
+- The user asked to test reading and editing on a real document: a 4-page,
+  templated account statement (not committed anywhere; all regression tests
+  use generated fixtures). Reading worked. Editing exposed two real,
+  related gaps, both fixed:
+  1. **Text inside a Form XObject couldn't be edited.** The statement draws
+     its whole header, address block, dates and page numbers inside a
+     per-page form. `classify_font` / `_bytes_per_glyph` only searched the
+     page's own `/Resources/Font`, so every such edit crashed with a raw
+     `KeyError`. When a form reuses a page-level name (`/F1` in both), a
+     name lookup would silently pick the wrong font instead. Fonts are now
+     classified by xref (`classify_font_xref`).
+  2. **No span on any page had a text state** (0/288). The content-stream
+     walkers never followed `Do`, so their glyph count never matched
+     texttrace, which does include form glyphs inline (verified). The new
+     `_walk_content` follows forms under the spec's implicit q/Q, with the
+     form's resources in scope and a cycle guard. Coverage went to 288/288,
+     recovering real Tc/Tw values and a render-mode-2 faux bold.
+  - Unlocatable fonts now raise `FontResourceNotFoundError` (422 over the
+    API) instead of a bare `ValueError`.
+  - Checked, not assumed: MuPDF's redaction already copies a shared form on
+    write, so editing it on one page leaves the other page intact. A
+    regression test locks that in; no refusal guard was needed.
+- **Bundled Roboto Light/Regular** (OFL-1.1, the official v3.016 `web/static`
+  builds, ~157KB each, covering Latin-1/Ext-A, Cyrillic and most Greek).
+  The statement's Roboto text went from approximate (Trebuchet, needs
+  approval) to exact, confidence 1.0. A test proves the bundled font is
+  the cause: exact with it in the index, approximate without.
+- Ran the user's full 10-step test on a scratch copy before handing it
+  over: inspect, render, spans, replace (page text and XObject text),
+  tier gate, delete, restyle, insert, chaining, and the whole API path
+  (open/op/render/history/undo/redo/save). All passed. The original's
+  SHA-256 was unchanged, and no files were written next to it.
+- Observed, not fixed (follow-ups):
+  - A replacement keeps the original's *left* edge, so shorter text in a
+    right-aligned header no longer ends at the right margin. Single-line
+    alignment isn't detected yet.
+  - A match text beginning with `-` needs `--` before the positional
+    arguments on the CLI (standard Click parsing).
+  - Delta-Book → Maiandra scores confidence 0.98 despite being a different
+    family. Metric confidence looks overcalibrated for cross-family matches.
+- 17 new tests (344 total, 93.2% coverage); ruff, mypy --strict, bandit and
+  pip-audit clean. No feature status changes (bug fix plus a font asset).
+
 ### 2026-09-27 (cont. 10) — three real, pre-existing CI failures fixed
 
 - Every commit from P0 through COR-11 had claimed a clean local gate, but
