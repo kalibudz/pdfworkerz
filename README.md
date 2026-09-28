@@ -12,7 +12,7 @@ You tell it what to do in one of two ways:
 
 ## Try it on a real PDF
 
-Phases P0, P1 and P2 (the flagship font-identification and style-matched editing engine) are complete. That means real editing already works from the command line:
+Phases P0 through P3 are complete: the flagship font-identification and style-matched editing engine (P2), plus the browser UI and the rest of the page-editing tools (P3). Real editing works from the command line and in the browser.
 
 ```bash
 python -m venv .venv && .venv/Scripts/pip install -e .   # use .venv/bin/pip on macOS/Linux
@@ -21,36 +21,40 @@ pdfworkerz inspect mydoc.pdf                              # what's in it: fonts,
 pdfworkerz render mydoc.pdf 0 --out page0.png             # render a page
 pdfworkerz repair damaged.pdf --out fixed.pdf             # fix a broken PDF
 
+# Text (style-matched)
 pdfworkerz replace mydoc.pdf "old text" "new text" --out edited.pdf
+pdfworkerz replace mydoc.pdf --match "- End -" "Fin"      # --match for text starting with "-"
 pdfworkerz delete mydoc.pdf "text to remove" --out edited.pdf
 pdfworkerz restyle mydoc.pdf "text" --size 14 --color 1,0,0 --out edited.pdf
 pdfworkerz insert mydoc.pdf "new text" --position 72,700 --reference "existing text" --out edited.pdf
+pdfworkerz copy-style mydoc.pdf --source "Heading" --target "plain text"      # format painter
+pdfworkerz move-block mydoc.pdf --match "a line of the paragraph" --dy 40 --width 300
+pdfworkerz spellcheck mydoc.pdf                            # offline, Hunspell en_US
+
+# Links, images, shapes
+pdfworkerz add-link mydoc.pdf --over "our website" --uri https://example.com
+pdfworkerz links mydoc.pdf 0 / remove-link mydoc.pdf 0
+pdfworkerz insert-image mydoc.pdf logo.png --rect 72,72,172,122
+pdfworkerz images mydoc.pdf 0 / move-image / crop-image / replace-image / delete-image
+pdfworkerz draw-shape mydoc.pdf rect --points "72,300 272,400" --fill 1,1,0
+pdfworkerz shapes mydoc.pdf 0 / edit-shape / delete-shape
 ```
 
-Every edit command prints which font-match tier it used (exact / approximate / fallback) and whether the result needs a look — `--require-tier exact` refuses to proceed on anything weaker. `--out` is optional; without it, the edited copy goes to `<name>.edited.pdf` next to the original, which is never touched (`--overwrite` writes back to it explicitly, when that's what you want).
+Every text edit command prints which font-match tier it used (exact / approximate / fallback) and whether the result needs a look — `--require-tier exact` refuses to proceed on anything weaker. A replacement keeps a right-aligned or centered line's edge. `--out` is optional; without it, the edited copy goes to `<name>.edited.pdf` next to the original, which is never touched (`--overwrite` writes back to it explicitly, when that's what you want).
 
-## Local API server (P3, in progress)
+## Browser UI
 
-`pdfworkerz serve` starts a local-only HTTP server (COR-11) that the future web UI talks to — the same `Op` classes as the CLI, over JSON:
+`pdfworkerz serve` starts a local-only HTTP server (COR-11); the web UI in [`web/`](web/README.md) talks to it:
 
 ```bash
-pdfworkerz serve --port 8000
+pdfworkerz serve --port 8000                 # prints a session token
+cd web && npm ci && npm run build && npm run preview
+# open the printed URL with ?token=<token>&api=http://127.0.0.1:8000
 ```
 
-It binds to `127.0.0.1` only and prints a random session token; every request must send it back in an `X-Session-Token` header (a request without it gets `401`). Roughly:
+Click any text to edit it in place, in its detected style. The inspector shows the font, size, color and match confidence, and offers **Copy style** (format painter) and the text's **links**. Drag the handles beside selected text to move or re-wrap its paragraph. Images and shapes can be selected, dragged, resized, restyled, cropped (images) and deleted. The toolbar inserts images, draws lines/rectangles/ellipses, toggles **Spelling** (underlines, with suggestions), and opens a before/after **Compare** view. Every change is undoable from the history strip (Ctrl+Z / Ctrl+Shift+Z).
 
-```bash
-curl -s -X POST http://127.0.0.1:8000/documents \
-  -H "X-Session-Token: <token>" -H "Content-Type: application/json" \
-  -d '{"path": "mydoc.pdf"}'
-# -> {"document_id": "...", "page_count": 3, "is_encrypted": false, "is_repaired": false}
-
-curl -s -X POST http://127.0.0.1:8000/documents/<document_id>/ops \
-  -H "X-Session-Token: <token>" -H "Content-Type: application/json" \
-  -d '{"op": "replace_text", "match": "old text", "replacement": "new text"}'
-```
-
-`GET /documents/{id}/pages/{n}/render` returns a PNG; `/undo`, `/redo` and `GET /history` drive the same undo/redo journal COR-05 built. The web UI itself (pdf.js canvas, click-to-edit overlay, inspector, command bar) is the rest of P3 and hasn't been built yet — for now, testing beyond the CLI means this API directly, or scripting against `engine.document.Document` and `engine.ops.text`.
+The server binds to `127.0.0.1` only, and every request must carry the session token in an `X-Session-Token` header (`401` otherwise). The API is the same `Op` classes as the CLI, over JSON: `POST /documents` opens a file, `POST /documents/{id}/ops` applies any Op (journaled, undoable), and read-only `GET .../pages/{n}/spans|links|images|shapes|spelling|render` routes describe a page. `docs/ops.schema.json` lists every Op.
 
 ## Status
 

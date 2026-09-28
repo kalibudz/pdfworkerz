@@ -699,12 +699,14 @@ button {
 
 .pw-image-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 12px;
 }
 
 .pw-image-buttons button {
-  flex: 1 1 0;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* -- EDT-09: vector shapes -- */

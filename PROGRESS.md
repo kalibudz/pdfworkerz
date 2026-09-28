@@ -9,7 +9,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | First green GitHub Actions run: [run #17](https://github.com/kalibudz/pdfworkerz/actions/runs/36356246278), all 11 jobs, 2026-09-27 |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P3 | Web UI with click-to-edit | 🔶 In progress: 9/15 features proven by tests | |
+| P3 | Web UI with click-to-edit | ✅ Done: 15/15 features proven by tests | Self-reviewed (see the 2026-09-28 P3 completion entry); independent reviewer sign-off pending |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,52 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-28 (cont.) — P3 complete: branches consolidated, EDT-05/07/08/09/10/11, real-document fixes
+
+- **Consolidation.** The UI work (UI-01..UI-09) lived on
+  `claude/epic-davinci-vu56x5`, which had never been merged, and `main` had
+  four newer commits the UI branch lacked (Form XObject editing, bundled
+  Roboto, font `meta` table). Merged both on `claude/pdf-workerz-editing-c7fz6n`
+  (PR #1). Only bookkeeping files conflicted. The full gate, including the
+  Playwright suite, passed on the merged tree.
+- **EDT-07 format painter** (`CopyStyleOp`, `copy-style`, inspector "Copy style").
+- **EDT-10 hyperlinks** (URI and go-to-page; `javascript:`/`file:`/`data:`
+  refused). PyMuPDF caches a page's link list until `reload_page`.
+- **EDT-05 move/resize paragraphs** (`MoveTextBlockOp`, drag handles). All
+  old lines are redacted before any are drawn. Block lookup tries both
+  stream order and visual order, which answers the open question about
+  `detect_blocks`' input order after an edit.
+- **EDT-08 images.** Per-placement edits via a pinpoint image-only
+  redaction (never `delete_image(xref)`, which blanks every use).
+  `insert_image(keep_proportion=True)` stretched in 1.28.2, so fitting is
+  computed here. Crop really cuts the pixels. Pillow is now a dependency.
+- **EDT-09 vector shapes.** Line-art redaction removes everything inside
+  the area, so collateral paths are diffed and redrawn. The margin must be
+  ~10x the stroke width (miter allowance), measured.
+- **EDT-11 spell-check** (spylls + bundled SCOWL en_US). spylls 0.1.7's
+  wheel installs a stray top-level `tests` package, which shadowed ours;
+  `tests/` is now a regular package.
+- **Real bugs found along the way:**
+  - The click-to-edit overlay was vertically mirrored: MuPDF's y-down
+    coordinates were fed to pdf.js's y-up conversion. The tests never
+    clicked at the text itself, so they missed it.
+  - The journal didn't roll back an Op that raised partway.
+  - `pyproject.toml` omitted `engine.fonts` from its packages.
+- **Real-document follow-ups closed:**
+  - `--match`/`--replacement` for text starting with "-".
+  - Right-aligned and centered lines keep their edge or center when
+    replaced.
+  - Cross-family metric confidence is scaled by 0.75 (the Delta-Book →
+    Maiandra 0.98 case).
+- 546 tests, 94.3% coverage; ruff, ruff format, mypy --strict, bandit,
+  pip-audit and npm audit are clean locally.
+- **CI could not confirm any of this.** From the merge commit on, every
+  GitHub Actions job on this private repo failed within seconds, with no
+  logs and no steps run. Run #31 on the UI branch had passed hours earlier.
+  That pattern matches exhausted Actions minutes or a spending limit;
+  macOS runners bill at 10x and Windows at 2x, and this matrix runs both
+  on every push and PR. It needs the account owner, not a code change.
 
 ### 2026-09-28 — UI-09: light/dark theme toggle with persistence
 

@@ -4,11 +4,20 @@ The browser UI (SPEC.md section 8): a pdf.js canvas with a thumbnail rail
 (UI-01), the password prompt for encrypted files (UI-06), a click-to-edit
 overlay (UI-02), an inspector panel (UI-03), a history panel with
 undo/redo (UI-04), a before/after split view (UI-05), keyboard shortcuts
-for the actions above (UI-08), and a light/dark theme toggle (UI-09) --
-every UI-0x feature tracked for this phase. As later features land: the
-command bar. It talks to `server/app.py` over plain JSON HTTP; nothing
-here runs on the server, and nothing in `server/` knows this directory
-exists.
+(UI-08) and a light/dark theme toggle (UI-09) -- plus the P3 editing
+tools built on them: the format painter (EDT-07, `inspector.ts`/`overlay.ts`),
+paragraph move/resize handles (EDT-05, `blockdrag.ts`), links (EDT-10),
+images (EDT-08, `images.ts`), vector shapes (EDT-09, `shapes.ts`, sharing
+`drag.ts` with images) and spell-check (EDT-11, `spelling.ts`). It talks to
+`server/app.py` over plain JSON HTTP; nothing here runs on the server, and
+nothing in `server/` knows this directory exists.
+
+The edit layer stacks, bottom to top: shape boxes, image boxes, text
+(span) boxes, spelling marks, then handles and menus -- so text over an
+image or shape is always clickable for editing. Every box is placed with
+`overlay.ts`'s `bboxToRect`, which converts MuPDF's y-down, crop-box-relative
+coordinates through pdf.js's viewport (see its comment for the bug this
+once had).
 
 ## Running it
 
