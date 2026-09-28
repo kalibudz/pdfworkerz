@@ -33,7 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from engine.fonts.classify import FontClassification, fingerprint_style, infer_style_from_name
-from engine.fonts.match import FontCandidate, extract_metrics, find_by_name, rank_by_metrics
+from engine.fonts.match import FontCandidate, extract_metrics, find_by_name, rank_by_metrics, same_family
 from engine.fonts.merge import build_merged_subset
 
 TIER_EXACT = "exact"
@@ -144,7 +144,9 @@ def resolve_font(
             note="no matching or measurable font found; using a standard-font fallback",
         )
 
-    ranked = rank_by_metrics(target_metrics, font_index, covering=frozenset(needed_text))
+    ranked = rank_by_metrics(
+        target_metrics, font_index, covering=frozenset(needed_text), target_name=classification.base_font
+    )
     if ranked:
         best = ranked[0]
         characters = "".join(set(already_rendered_text) | set(needed_text))
@@ -155,7 +157,8 @@ def resolve_font(
             fontname=None,
             font_bytes=merged,
             requires_approval=True,
-            note=f"closest metric match: {best.candidate.path.name}",
+            note=f"closest metric match: {best.candidate.path.name}"
+            + ("" if same_family(classification.base_font, best.candidate) else " (a different font family)"),
         )
 
     name = _standard_fallback_name(fingerprint.bold, fingerprint.italic, fingerprint.family_class)

@@ -155,6 +155,26 @@ def find_by_name(index: list[FontCandidate], base_font: str) -> FontCandidate | 
     return None
 
 
+_MIN_FAMILY_PREFIX = 4
+CROSS_FAMILY_FACTOR = 0.75
+"""Metric confidence is multiplied by this when the candidate is a different
+family from the document's font. Metric ratios alone differ little between
+unrelated sans-serifs: on a real statement, Delta-Book -> Maiandra GD and
+Roboto -> Trebuchet both scored 0.98, overstating how alike they look."""
+
+
+def same_family(base_font: str, candidate: FontCandidate) -> bool:
+    """Whether `candidate` is plausibly the same family as a PDF font named
+    `base_font` ("ABCDEF+Roboto-Light" vs family "Roboto"; "ArialMT" vs
+    "Arial"): one normalized family name is a prefix of the other's."""
+    _, plain = split_subset_tag(base_font)
+    target = normalize_font_name(re.split(r"[-,]", plain, maxsplit=1)[0])
+    family = normalize_font_name(candidate.family_name)
+    if len(target) < _MIN_FAMILY_PREFIX or len(family) < _MIN_FAMILY_PREFIX:
+        return target == family and bool(target)
+    return target.startswith(family) or family.startswith(target)
+
+
 def _bbox_top_ratio(glyph_set: object, cmap: dict[int, str], char: str, units_per_em: float) -> float | None:
     glyph_name = cmap.get(ord(char))
     if glyph_name is None or glyph_name not in glyph_set:  # type: ignore[operator]
@@ -249,13 +269,20 @@ def _confidence_from_distance(distance: float) -> float:
 
 
 def rank_by_metrics(
-    target: FontMetrics, index: list[FontCandidate], *, covering: frozenset[str] | None = None
+    target: FontMetrics,
+    index: list[FontCandidate],
+    *,
+    covering: frozenset[str] | None = None,
+    target_name: str | None = None,
 ) -> list[MatchCandidate]:
     """FNT-07: every candidate, ranked most-to-least similar to `target`.
 
     When `covering` is given, candidates that don't cover every character in
     it are dropped entirely -- a close metric match is useless if it can't
-    draw the text.
+    draw the text. When `target_name` (the PDF font's BaseFont) is given, a
+    candidate from a different family has its confidence scaled by
+    CROSS_FAMILY_FACTOR, so a same-family variant outranks a stranger with
+    similar proportions.
     """
     ranked = []
     for candidate in index:
@@ -272,7 +299,9 @@ def rank_by_metrics(
             )
             if not coverage.fully_covered:
                 continue
-        distance = metric_distance(target, metrics)
-        ranked.append(MatchCandidate(candidate=candidate, confidence=_confidence_from_distance(distance)))
+        confidence = _confidence_from_distance(metric_distance(target, metrics))
+        if target_name is not None and not same_family(target_name, candidate):
+            confidence *= CROSS_FAMILY_FACTOR
+        ranked.append(MatchCandidate(candidate=candidate, confidence=confidence))
     ranked.sort(key=lambda m: m.confidence, reverse=True)
     return ranked

@@ -9,11 +9,14 @@ import pytest
 
 from engine.fonts.match import (
     BUNDLED_FONTS_DIR,
+    CROSS_FAMILY_FACTOR,
+    FontCandidate,
     build_font_index,
     extract_metrics,
     find_by_name,
     metric_distance,
     rank_by_metrics,
+    same_family,
 )
 
 
@@ -205,3 +208,35 @@ def test_bundled_roboto_turns_an_approximate_match_into_an_exact_one(work_dir: P
             assert result.verification is not None and result.verification.text_matches
             tiers[label] = result.tier
     assert tiers == {"with": "exact", "without": "approximate"}
+
+
+@pytest.mark.feature("FNT-07")
+@pytest.mark.parametrize(
+    ("base_font", "family", "expected"),
+    [
+        ("ABCDEF+Roboto-Light", "Roboto", True),
+        ("ArialMT", "Arial", True),
+        ("BitstreamVeraSans-Bold", "Bitstream Vera Sans", True),
+        ("Delta-Book", "Maiandra GD", False),
+        ("Roboto-Regular", "Trebuchet MS", False),
+        ("F1", "F", False),
+    ],
+)
+def test_same_family_matches_by_normalized_family_prefix(base_font: str, family: str, expected: bool) -> None:
+    candidate = FontCandidate(
+        path=Path("x.ttf"), family_name=family, subfamily_name="Regular", postscript_name="X", source="system"
+    )
+    assert same_family(base_font, candidate) is expected
+
+
+@pytest.mark.feature("FNT-07")
+def test_a_different_family_is_scaled_down_even_with_identical_metrics(vera_index: list) -> None:
+    """The real-document case: metrics alone called a stranger a 0.98 match.
+    Vera measured against itself is distance 0, so confidence 1.0 -- unless
+    the PDF font's name says it's a different family."""
+    target = extract_metrics(BUNDLED_FONTS_DIR / "Vera.ttf")
+    same = rank_by_metrics(target, vera_index, target_name="BitstreamVeraSans-Roman")
+    other = rank_by_metrics(target, vera_index, target_name="Delta-Book")
+    assert same[0].confidence == pytest.approx(1.0)
+    assert other[0].confidence == pytest.approx(CROSS_FAMILY_FACTOR)
+    assert all(match.confidence <= CROSS_FAMILY_FACTOR for match in other)
