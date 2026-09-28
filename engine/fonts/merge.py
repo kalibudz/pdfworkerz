@@ -32,6 +32,8 @@ def build_merged_subset(full_font_path: Path, characters: str) -> bytes:
     options.notdef_glyph = True
     options.notdef_outline = True
     options.recalc_bounds = True
+    # 'meta' (language tags) can't be subset; dropping it up front avoids a WARNING per edit.
+    options.drop_tables = [*options.drop_tables, "meta"]
     subsetter = subset.Subsetter(options=options)
     subsetter.populate(text=characters)
     subsetter.subset(tt)

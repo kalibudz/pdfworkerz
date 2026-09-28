@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 import pytest
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTFont, newTable
 
 from engine.fonts.coverage import check_coverage
 from engine.fonts.match import build_font_index
@@ -70,3 +73,31 @@ def test_merged_subset_includes_a_notdef_glyph(bundled_index: list) -> None:
 
     tt = TTFont(BytesIO(merged))
     assert ".notdef" in tt.getGlyphOrder()
+
+
+@pytest.mark.feature("FNT-08")
+def test_merged_subset_of_font_with_meta_table_logs_no_warning(
+    bundled_index: list, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Fonts like Windows' Arial Bold carry a 'meta' table fontTools can't subset;
+    it must be dropped quietly rather than logging a warning on every edit."""
+    from io import BytesIO
+
+    full = next(c for c in bundled_index if c.subfamily_name == "Roman")
+    tt = TTFont(full.path)
+    meta = newTable("meta")
+    meta.data = {"dlng": "Latn", "slng": "Latn"}
+    tt["meta"] = meta
+    with_meta = tmp_path / "with_meta.ttf"
+    tt.save(with_meta)
+
+    with caplog.at_level(logging.DEBUG, logger="fontTools"):
+        merged = build_merged_subset(with_meta, "ABC")
+
+    assert not [r for r in caplog.records if "don't know how to subset" in r.getMessage()]
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert "meta" not in TTFont(BytesIO(merged))
+    result = check_coverage(
+        font_type="TrueType", embedded=True, font_bytes=merged, already_rendered_text="", characters="ABC"
+    )
+    assert result.fully_covered
