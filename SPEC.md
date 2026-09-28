@@ -201,7 +201,7 @@ Every feature has a stable ID. The table below is **generated** from `tracker/fe
 |---|---|---|---|---|---|
 | INF-01 | Specification document (SPEC.md) with generated feature catalog | Beyond | Python | P0 | S |
 | INF-02 | Live feature tracker (React JSX) driven by features.json | Beyond | React, Vite | P0 | S |
-| INF-03 | Token-free CI review workers (lint, types, tests, security, tracker gate) | Beyond | GitHub Actions, ruff, mypy, pytest, bandit, pip-audit | P0 | S |
+| INF-03 | Token-free review workers (lint, types, tests, security, tracker gate), run locally | Beyond | tools/gate.py, ruff, mypy, pytest, bandit, pip-audit | P0 | S |
 | INF-04 | Session checkpoint & token look-ahead budgeting | Beyond | Python | P0 | S |
 | INF-05 | Evidence gate: a feature is done only when its linked tests pass | Beyond | pytest | P0 | S |
 | INF-06 | Golden PDF test corpus generator (fonts, encryption, forms, scans, broken files) | Beyond | PyMuPDF, pikepdf, reportlab | P1 | M |
@@ -580,17 +580,17 @@ Running a recipe: `pdfworkerz run recipe.yaml --dry-run`, then `pdfworkerz run r
 
 | Worker | Type | Cost | Responsibility |
 |---|---|---|---|
-| **CI · lint** | GitHub Actions (ruff) | Free, no tokens | Style and common bug patterns |
-| **CI · types** | GitHub Actions (mypy --strict) | Free, no tokens | Type integrity of engine and tools |
-| **CI · tests** | GitHub Actions (pytest + coverage gate) | Free, no tokens | Functionality, including the golden-corpus and pixel-diff suites |
-| **CI · security** | GitHub Actions (bandit, pip-audit) | Free, no tokens | Unsafe code patterns, vulnerable dependencies |
-| **CI · evidence gate** | `tools/update_tracker.py --check` | Free, no tokens | Blocks any "done" claim without passing tests |
-| **CI · spec sync** | `tools/gen_spec_catalog.py --check` | Free, no tokens | SPEC.md and features.json cannot drift |
-| **CI · tracker build** | Vite build of FeatureTracker.jsx | Free, no tokens | The tracker always compiles |
+| **Gate · lint** | ruff (`tools/gate.py --job lint`) | Free, no tokens | Style and common bug patterns |
+| **Gate · types** | mypy --strict | Free, no tokens | Type integrity of engine and tools |
+| **Gate · tests** | pytest + coverage gate, Playwright UI suite | Free, no tokens | Functionality, including the golden-corpus and pixel-diff suites |
+| **Gate · security** | bandit, pip-audit, npm audit | Free, no tokens | Unsafe code patterns, vulnerable dependencies |
+| **Gate · evidence gate** | `tools/update_tracker.py --check` | Free, no tokens | Blocks any "done" claim without passing tests |
+| **Gate · spec sync** | `tools/gen_spec_catalog.py --check`, `tools/gen_ops_schema.py --check` | Free, no tokens | SPEC.md, ops schema and features.json cannot drift |
+| **Gate · tracker build** | Vite build of FeatureTracker.jsx | Free, no tokens | The tracker always compiles |
 | **Builder agent** | Claude sub-agent (build sessions only) | Uses tokens | Implements one bounded task at a time |
-| **Reviewer agent** | Independent Claude sub-agent | Uses tokens | Reviews each phase against this spec, the reviewer checklist and CI results before merge |
+| **Reviewer agent** | Independent Claude sub-agent | Uses tokens | Reviews each phase against this spec, the reviewer checklist and gate results before merge |
 
-The CI workers run on every push and pull request, independently of any AI session. They are the permanent, token-free guardians of integrity and functionality. AI agents are used only to write and review code during build sessions. They cannot mark a feature done: only passing tests can (§12.3).
+The review workers run locally through `python tools/gate.py`, which must pass before every commit. They are deterministic tooling with no AI services, the permanent, token-free guardians of integrity and functionality. `.github/workflows/ci.yml` mirrors the same jobs across three OSes but is manual-only (`workflow_dispatch`), because GitHub Actions minutes are billed on this private repository. AI agents are used only to write and review code during build sessions. They cannot mark a feature done: only passing tests can (§12.3).
 
 ## 12. Quality & anti-hallucination process
 
@@ -608,14 +608,14 @@ The CI workers run on every push and pull request, independently of any AI sessi
 
 - **Unit tests** for every engine function and every library API the code relies on (API-contract tests, which catch invented or changed APIs).
 - **Pixel-diff regression**: reference renders are stored as hashes plus tolerance images.
-- **Font-match benchmark**: accuracy of tier selection and metric matching on the corpus, reported in CI.
+- **Font-match benchmark**: accuracy of tier selection and metric matching on the corpus, reported by the local gate.
 - **UI tests**: Playwright on the local server.
 
 ### 12.3 Evidence gate: "done" means proven
 
 - Each test declares the feature it proves: `@pytest.mark.feature("EDT-01")`, optionally with `criterion=n` for features that have several acceptance criteria.
 - pytest writes `build/feature_results.json`. `tools/update_tracker.py --write` marks a feature **done** only when every criterion has a passing test and none of its tests fail.
-- `--check` runs in CI and fails the build if any feature is marked done without that evidence.
+- `--check` runs in the local gate (`tools/gate.py`) and fails it if any feature is marked done without that evidence.
 
 ### 12.4 Rules for builder and reviewer agents
 
@@ -631,9 +631,9 @@ Build sessions are finite. Usage limits, context size and session expiry can all
 1. Every task has a size estimate (S/M/L). No task is larger than L; bigger work is split.
 2. Before starting a task: `python tools/session_budget.py --remaining <tokens>`. A task starts only if its estimate fits within the remaining budget minus a 25% reserve.
 3. Long tasks commit to a WIP branch at natural break points. `state/checkpoint.json` records phase, task, step, branch and next action, and is pushed after every task.
-4. A new session reads the checkpoint, verifies the branch and CI state, and resumes at `nextAction`.
+4. A new session reads the checkpoint, verifies the branch, runs `python tools/gate.py`, and resumes at `nextAction`.
 5. Actual token use per task is appended to `state/usage_log.jsonl` to recalibrate the estimates.
-6. The CI workers keep testing pushed work even when no session is running.
+6. The gate is deterministic and token-free, so it gives the same verdict whether or not an AI session is running.
 
 ## 14. Roadmap
 
@@ -652,7 +652,7 @@ Build sessions are finite. Usage limits, context size and session expiry can all
 | P9 | Packaging & documentation | 2 | ~550k |
 <!-- END GENERATED: phases -->
 
-Each phase ends when all of its features are **done** through the evidence gate, CI is green, and the reviewer agent has signed off in PROGRESS.md.
+Each phase ends when all of its features are **done** through the evidence gate, the local gate is green on `main`, and the reviewer agent has signed off in PROGRESS.md.
 
 ## 15. Known limitations & risks
 
@@ -678,8 +678,8 @@ pdfworkerz/
 ├── web/                    ← TypeScript UI (pdf.js, overlay, command bar)
 ├── tracker/                ← features.json + FeatureTracker.jsx (live status)
 ├── tests/                  ← pytest suites, conftest evidence plugin, corpus builder
-├── tools/                  ← spec generator, evidence gate, session budget
+├── tools/                  ← local gate (gate.py), spec generator, evidence gate, session budget
 ├── state/                  ← checkpoint.json, usage_log.jsonl
 ├── docs/                   ← SESSION_PROTOCOL.md, ops.schema.json, user guide
-└── .github/workflows/      ← token-free CI workers
+└── .github/workflows/      ← manual-only mirror of the gate (3-OS matrix)
 ```

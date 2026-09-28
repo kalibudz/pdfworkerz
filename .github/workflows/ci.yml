@@ -1,9 +1,9 @@
 # Token-free review workers: deterministic tooling only, no AI services.
 name: ci
 
+# Manual-only: Actions minutes are billed on this private repo. tools/gate.py runs these same checks locally.
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read

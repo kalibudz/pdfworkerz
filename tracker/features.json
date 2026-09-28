@@ -47,7 +47,7 @@
   "features": [
     {"id": "INF-01", "category": "INF", "name": "Specification document (SPEC.md) with generated feature catalog", "parity": ["Beyond"], "libs": ["Python"], "phase": "P0", "estTokens": "S", "status": "done"},
     {"id": "INF-02", "category": "INF", "name": "Live feature tracker (React JSX) driven by features.json", "parity": ["Beyond"], "libs": ["React", "Vite"], "phase": "P0", "estTokens": "S", "status": "done"},
-    {"id": "INF-03", "category": "INF", "name": "Token-free CI review workers (lint, types, tests, security, tracker gate)", "parity": ["Beyond"], "libs": ["GitHub Actions", "ruff", "mypy", "pytest", "bandit", "pip-audit"], "phase": "P0", "estTokens": "S", "status": "done"},
+    {"id": "INF-03", "category": "INF", "name": "Token-free review workers (lint, types, tests, security, tracker gate), run locally", "parity": ["Beyond"], "libs": ["tools/gate.py", "ruff", "mypy", "pytest", "bandit", "pip-audit"], "phase": "P0", "estTokens": "S", "status": "done"},
     {"id": "INF-04", "category": "INF", "name": "Session checkpoint & token look-ahead budgeting", "parity": ["Beyond"], "libs": ["Python"], "phase": "P0", "estTokens": "S", "status": "done"},
     {"id": "INF-05", "category": "INF", "name": "Evidence gate: a feature is done only when its linked tests pass", "parity": ["Beyond"], "libs": ["pytest"], "phase": "P0", "estTokens": "S", "status": "done"},
     {"id": "INF-06", "category": "INF", "name": "Golden PDF test corpus generator (fonts, encryption, forms, scans, broken files)", "parity": ["Beyond"], "libs": ["PyMuPDF", "pikepdf", "reportlab"], "phase": "P1", "estTokens": "M", "status": "done"},
