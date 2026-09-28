@@ -190,6 +190,32 @@ def _open_and_click_first_span(page: Page, app_url: str, path: str) -> None:
 
 
 @pytest.mark.feature("UI-02")
+def test_span_boxes_sit_over_their_text_not_mirrored(page: Page, app_url: str, corpus: Corpus) -> None:
+    """MuPDF's span bboxes are y-down from the page's top-left; pdf.js
+    converts from y-up PDF space. Mixing them once put every click target
+    at the vertically mirrored position (top-of-page text clickable only
+    near the bottom). simple.pdf's only line sits ~61-75pt down an 842pt
+    page, so its box must be near the canvas top, in the same proportion."""
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.simple))
+    _wait_overlay_ready(page)
+    top_fraction = page.evaluate(
+        "() => parseFloat(document.querySelector('.pw-span-box').style.top)"
+        " / document.querySelector('.pw-canvas-wrap canvas').getBoundingClientRect().height"
+    )
+    assert top_fraction == pytest.approx(61 / 842, abs=0.01)
+    # And the visible text itself is what a click at its position hits.
+    box = page.locator(".pw-span-box").bounding_box()
+    assert box is not None
+    hit = page.evaluate(
+        "([x, y]) => document.elementFromPoint(x, y)?.className ?? ''",
+        [box["x"] + box["width"] / 2, box["y"] + box["height"] / 2],
+    )
+    assert "pw-span-box" in hit
+
+
+@pytest.mark.feature("UI-02")
 def test_clicking_a_span_opens_an_editable_overlay(page: Page, app_url: str, corpus: Corpus) -> None:
     _open_and_click_first_span(page, app_url, str(corpus.simple))
     is_editable = page.eval_on_selector(".pw-span-box.pw-span-editing", "el => el.isContentEditable")

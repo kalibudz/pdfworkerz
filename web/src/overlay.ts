@@ -104,17 +104,37 @@ function approximateFontStyle(fontName: string): string {
   return /italic|oblique/i.test(fontName) ? "italic" : "normal";
 }
 
-function bboxToRect(
+/** MuPDF (texttrace, get_links, ...) reports page coordinates y-down,
+ * unrotated, relative to the crop box's top-left corner; pdf.js's viewport
+ * converts from y-up PDF user space. `viewBox` is that crop box in PDF
+ * space, so this is the one translation between the two -- rotation and
+ * scale are then left to pdf.js. Confirmed against pymupdf 1.28.2 for
+ * rotated and cropped pages. (Feeding MuPDF's y-down values straight in,
+ * as this once did, mirrored every box vertically: top-of-page text got a
+ * click target near the bottom.) */
+export function mupdfToPdfPoint(viewport: pdfjsLib.PageViewport, x: number, y: number): [number, number] {
+  const viewBox = viewport.viewBox as number[];
+  return [viewBox[0] + x, viewBox[3] - y];
+}
+
+/** The inverse of mupdfToPdfPoint composed with pdf.js's own conversion:
+ * a CSS-pixel point on the page back to MuPDF page coordinates. */
+export function viewportToMupdfPoint(viewport: pdfjsLib.PageViewport, x: number, y: number): [number, number] {
+  const [pdfX, pdfY] = viewport.convertToPdfPoint(x, y) as [number, number];
+  const viewBox = viewport.viewBox as number[];
+  return [pdfX - viewBox[0], viewBox[3] - pdfY];
+}
+
+export function bboxToRect(
   viewport: pdfjsLib.PageViewport,
   bbox: readonly [number, number, number, number],
 ): { left: number; top: number; width: number; height: number } {
   // No convertToViewportRectangle on this PageViewport (confirmed against
   // the installed pdfjs-dist's own .d.ts before relying on it -- only
-  // point conversion exists), so both corners are converted by hand. The
-  // PDF/CSS y-axis flip this accounts for is exactly why the two y's can't
-  // just be assumed to already be in top-to-bottom order.
-  const [x0, y0] = viewport.convertToViewportPoint(bbox[0], bbox[1]);
-  const [x1, y1] = viewport.convertToViewportPoint(bbox[2], bbox[3]);
+  // point conversion exists), so both corners are converted by hand, and
+  // min/abs below because rotation can swap which corner ends up where.
+  const [x0, y0] = viewport.convertToViewportPoint(...mupdfToPdfPoint(viewport, bbox[0], bbox[1]));
+  const [x1, y1] = viewport.convertToViewportPoint(...mupdfToPdfPoint(viewport, bbox[2], bbox[3]));
   const left = Math.min(x0, x1);
   const top = Math.min(y0, y1);
   return { left, top, width: Math.abs(x1 - x0), height: Math.abs(y1 - y0) };
