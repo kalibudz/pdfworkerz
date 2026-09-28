@@ -259,6 +259,15 @@ def test_reflow_text_op_require_tier_rejects_a_weak_match(corpus: Corpus, work_d
     op = ReflowTextOp(match="AB", new_text="world", page_index=0, require_tier="exact", allow_overflow=True)
     with pytest.raises(OpValidationError, match="fell back to tier"):
         op.apply(doc)
+
+    doc.close()
+
+    # Without allow_overflow both problems are reported together, not just the first one checked.
+    # (A fresh copy: a direct apply() draws before it validates; only the journal rolls that back.)
+    doc = Document.open(path)
+    both = ReflowTextOp(match="AB", new_text="world", page_index=0, require_tier="exact")
+    with pytest.raises(OpValidationError, match=r"overflow:.*; font resolution fell back to tier"):
+        both.apply(doc)
     doc.close()
 
 

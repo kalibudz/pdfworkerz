@@ -359,6 +359,37 @@ def _commit_edit(page: Page, app_url: str, path: str, new_text: str) -> None:
     page.wait_for_selector(".pw-history-entry", timeout=5000)
 
 
+_FIRST_THUMB = "document.querySelector('.pw-thumb canvas')"
+_FIRST_THUMB_PAINTED = (
+    f"() => {{ const c = {_FIRST_THUMB}; if (!c) return false;"
+    " return c.getContext('2d').getImageData(0, 0, c.width, c.height).data.some((v, i) => i % 4 === 3 && v > 0); }"
+)
+
+
+@pytest.mark.feature("UI-01")
+def test_an_edit_rerenders_the_thumbnail_in_place(page: Page, app_url: str, corpus: Corpus) -> None:
+    """A committed edit re-renders the changed page's thumbnail on the same
+    button element, instead of tearing down and rebuilding the whole rail
+    (which also leaked the old IntersectionObserver)."""
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.simple))
+    _wait_overlay_ready(page)
+    page.wait_for_function(_FIRST_THUMB_PAINTED, timeout=5000)
+    page.evaluate(f"() => {{ const c = {_FIRST_THUMB}; c.dataset.kept = '1'; window.__before = c.toDataURL(); }}")
+
+    page.click(".pw-span-box")
+    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    page.wait_for_function(_EXACT_DOT, timeout=3000)
+    page.keyboard.type("Hello, Editor.")
+    page.wait_for_timeout(400)  # let the debounced preview resolve before committing
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".pw-history-entry", timeout=5000)
+
+    page.wait_for_function(f"() => {_FIRST_THUMB}.toDataURL() !== window.__before", timeout=5000)
+    assert page.evaluate(f"() => {_FIRST_THUMB}.dataset.kept") == "1"
+
+
 def _undo_button_disabled(page: Page) -> bool:
     return bool(page.eval_on_selector(".pw-history button:has-text('Undo')", "el => el.disabled"))
 
@@ -568,6 +599,30 @@ def test_c_key_toggles_the_compare_view(page: Page, app_url: str, corpus: Corpus
     page.keyboard.press("c")
     page.wait_for_selector(".pw-canvas-wrap", timeout=5000)
     assert page.eval_on_selector_all(".pw-compare", "els => els.length") == 0
+
+
+@pytest.mark.feature("UI-08")
+def test_question_mark_opens_the_shortcuts_list_and_escape_closes_it(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.multi_page))
+    _wait_viewer_ready(page)
+
+    page.keyboard.press("?")
+    page.wait_for_selector(".pw-shortcuts[open]", timeout=5000)
+    listed = page.text_content(".pw-shortcuts") or ""
+    for keys in ("Ctrl+Z", "Home / End", "Page Down"):
+        assert keys in listed, keys
+    # While the list is open it owns the keyboard: End must not navigate.
+    page.keyboard.press("End")
+    assert (page.text_content(".pw-page-indicator") or "").strip().startswith("1 /")
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".pw-shortcuts[open]", state="detached", timeout=5000)
+    page.click(".pw-shortcuts-toggle")
+    page.wait_for_selector(".pw-shortcuts[open]", timeout=5000)
+    page.click(".pw-shortcuts button[type=submit]")
+    page.wait_for_selector(".pw-shortcuts[open]", state="detached", timeout=5000)
 
 
 # -- UI-09 (light/dark theme toggle with persistence) --
@@ -1088,19 +1143,39 @@ def test_choosing_a_suggestion_corrects_the_word(page: Page, app_url: str, typo_
     )
 
 
-@pytest.mark.feature("EDT-11")
-def test_ignore_hides_a_word_for_the_session(page: Page, app_url: str, typo_pdf: Path) -> None:
+_MARKED_WORDS = "() => [...document.querySelectorAll('.pw-misspelling')].map(e => e.dataset.word).join() === '{}'"
+
+
+def _open_typos_with_spelling_on(page: Page, app_url: str, typo_pdf: Path, first_word: str) -> None:
     page.goto(app_url)
     page.wait_for_selector("#pw-open-path", timeout=5000)
     _open_path(page, str(typo_pdf))
     _wait_overlay_ready(page)
     page.click(".pw-spell-toggle")
-    page.wait_for_selector(".pw-misspelling[data-word='teh']", timeout=10000)
+    page.wait_for_selector(f".pw-misspelling[data-word='{first_word}']", timeout=10000)
+
+
+@pytest.mark.feature("EDT-11")
+def test_ignore_hides_a_word_and_changes_nothing_in_the_document(page: Page, app_url: str, typo_pdf: Path) -> None:
+    _open_typos_with_spelling_on(page, app_url, typo_pdf, "teh")
     page.click(".pw-misspelling[data-word='teh']")
     page.click(".pw-spell-ignore")
     # Refreshing clears every mark first, so wait for the redrawn state, not just for "teh" to go.
-    page.wait_for_function(
-        "() => [...document.querySelectorAll('.pw-misspelling')].map(e => e.dataset.word).join() === 'recieve'",
-        timeout=10000,
-    )
+    page.wait_for_function(_MARKED_WORDS.format("recieve"), timeout=10000)
     assert page.query_selector(".pw-history-entry") is None  # ignoring changes nothing in the document
+
+
+@pytest.mark.feature("EDT-11")
+def test_ignored_words_persist_across_a_reload_until_forgotten(page: Page, app_url: str, typo_pdf: Path) -> None:
+    _open_typos_with_spelling_on(page, app_url, typo_pdf, "teh")
+    page.click(".pw-misspelling[data-word='teh']")
+    page.click(".pw-spell-ignore")
+    page.wait_for_function(_MARKED_WORDS.format("recieve"), timeout=10000)
+
+    # A fresh load of the app in the same browser: the ignore list comes back from localStorage.
+    _open_typos_with_spelling_on(page, app_url, typo_pdf, "recieve")
+    page.wait_for_function(_MARKED_WORDS.format("recieve"), timeout=10000)
+
+    page.click(".pw-misspelling[data-word='recieve']")
+    page.click(".pw-spell-forget:has-text('(1)')")
+    page.wait_for_function(_MARKED_WORDS.format("recieve,teh"), timeout=10000)

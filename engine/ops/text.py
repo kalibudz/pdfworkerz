@@ -47,12 +47,19 @@ def _font_index() -> list[FontCandidate]:
     return _font_index_cache
 
 
+def _tier_problem(result: EditResult, require_tier: str) -> str | None:
+    if _TIER_ORDER[result.tier] <= _TIER_ORDER[require_tier]:
+        return None
+    return (
+        f"font resolution fell back to tier {result.tier!r}, weaker than the "
+        f"required {require_tier!r} (confidence {result.confidence:.2f}: {result.note})"
+    )
+
+
 def _check_tier(result: EditResult, require_tier: str, *, where: str) -> None:
-    if _TIER_ORDER[result.tier] > _TIER_ORDER[require_tier]:
-        raise OpValidationError(
-            f"{where}: font resolution fell back to tier {result.tier!r}, weaker than the "
-            f"required {require_tier!r} (confidence {result.confidence:.2f}: {result.note})"
-        )
+    problem = _tier_problem(result, require_tier)
+    if problem:
+        raise OpValidationError(f"{where}: {problem}")
 
 
 def _compile_pattern(match: str, mode: str, case_sensitive: bool) -> re.Pattern[str]:
@@ -439,8 +446,13 @@ class ReflowTextOp(Op):
         results = reflow_block(
             document, self.page_index, block, self.new_text, font_index=font_index, verify=self.verify
         )
+        # Report every problem at once: checking overflow first used to hide a weak font match behind it.
+        problems = []
         if not self.allow_overflow and "overflow:" in results[-1].note:
-            raise OpValidationError(f"reflow_text: {results[-1].note}")
-        for result in results:
-            _check_tier(result, self.require_tier, where=type(self).__name__)
+            problems.append(results[-1].note)
+        weak = next((p for p in (_tier_problem(r, self.require_tier) for r in results) if p), None)
+        if weak:
+            problems.append(weak)
+        if problems:
+            raise OpValidationError(f"{type(self).__name__}: " + "; ".join(problems))
         return results

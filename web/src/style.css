@@ -800,3 +800,41 @@ button {
   border-top: 1px solid var(--border) !important;
   color: var(--text-muted);
 }
+
+/* UI-08: keyboard shortcuts list, a native modal <dialog> (top layer, so it
+ * never competes with in-flow chrome the way position:fixed did). */
+.pw-shortcuts {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 20px 24px;
+  max-width: min(440px, calc(100vw - 32px));
+}
+.pw-shortcuts::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+.pw-shortcuts h2 {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+}
+.pw-shortcuts dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0 0 16px;
+}
+.pw-shortcuts dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+.pw-shortcuts kbd {
+  font: 0.85rem ui-monospace, "Cascadia Mono", Consolas, monospace;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.pw-shortcuts form {
+  text-align: right;
+}

@@ -13,6 +13,7 @@ for the project's pinned one.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess  # nosec B404 -- fixed argument lists only, never shell=True
 import sys
@@ -31,6 +32,7 @@ class Step:
     name: str
     cmd: tuple[str, ...]
     cwd: Path = ROOT
+    env: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,7 @@ def build_steps(python: str = sys.executable, npm: str | None = None) -> list[St
             "tests",
             "pytest + coverage gate",
             (python, "-m", "pytest", "--feature-results", "--cov", "--cov-report=term-missing"),
+            env=(("PDFWORKERZ_REQUIRE_WEB", "1"),),  # a missing web/dist fails the UI tests instead of skipping them
         ),
         Step("tests", "evidence gate", (python, "tools/update_tracker.py", "--check")),
         Step("security", "bandit", (python, "-m", "bandit", "-q", "-r", *py_dirs)),
@@ -71,7 +74,12 @@ def build_steps(python: str = sys.executable, npm: str | None = None) -> list[St
 
 def run_subprocess(step: Step) -> int:
     print(f"\n=== [{step.job}] {step.name}: {' '.join(step.cmd)}", flush=True)
-    return subprocess.run(step.cmd, cwd=step.cwd, check=False).returncode  # nosec B603 -- fixed argv, no shell
+    env = {**os.environ, **dict(step.env)}
+    try:
+        return subprocess.run(step.cmd, cwd=step.cwd, env=env, check=False).returncode  # nosec B603 -- fixed argv, no shell
+    except OSError as error:  # e.g. the program isn't installed: fail this step, keep running the rest
+        print(f"could not start {step.cmd[0]!r}: {error}", flush=True)
+        return 127
 
 
 def run(steps: Sequence[Step], runner: Runner = run_subprocess) -> list[Outcome]:
@@ -96,9 +104,16 @@ def main(argv: list[str] | None = None, runner: Runner = run_subprocess) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--job", action="append", choices=JOBS, help="run only this job (repeatable)")
     parser.add_argument("--list", action="store_true", help="print the steps without running them")
+    parser.add_argument(
+        "--python",
+        default=sys.executable,
+        help="interpreter for the Python steps, e.g. a Python 3.11 venv to check the oldest supported version",
+    )
     args = parser.parse_args(argv)
 
-    steps = [s for s in build_steps() if not args.job or s.job in args.job]
+    # Absolute, because Windows' CreateProcess won't launch a relative interpreter path.
+    python = str(Path(args.python).resolve())
+    steps = [s for s in build_steps(python=python) if not args.job or s.job in args.job]
     if args.list:
         for s in steps:
             print(f"[{s.job}] {s.name}: {' '.join(s.cmd)}  (in {s.cwd.relative_to(ROOT)})")

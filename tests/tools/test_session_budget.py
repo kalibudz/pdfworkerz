@@ -64,6 +64,16 @@ def test_checkpoint_file_has_required_fields() -> None:
 
 
 @pytest.mark.feature("INF-04")
+def test_every_open_question_names_a_real_phase_and_a_known_kind() -> None:
+    checkpoint = json.loads((ROOT / "state" / "checkpoint.json").read_text(encoding="utf-8"))
+    phases = {p["id"] for p in json.loads((ROOT / "tracker" / "features.json").read_text(encoding="utf-8"))["phases"]}
+    for question in checkpoint["openQuestions"]:
+        assert question["phase"] in phases, question
+        assert question["kind"] in {"todo", "limitation", "decision"}, question
+        assert question["text"].strip(), question
+
+
+@pytest.mark.feature("INF-04")
 def test_session_protocol_documents_resume_procedure() -> None:
     text = (ROOT / "docs" / "SESSION_PROTOCOL.md").read_text(encoding="utf-8")
     for phrase in ("session_budget.py", "checkpoint.json", "usage_log.jsonl", "nextAction"):

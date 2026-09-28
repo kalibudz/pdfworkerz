@@ -6,38 +6,56 @@
   "lastGreenCommit": "28fe0e278465b58ea89de2a784ac454e519e46db (local gate, Windows 11, Python 3.14.3, 14/14 steps)",
   "nextAction": "1) Independent reviewer pass for P1-P3 (a fresh sub-agent that did not build them), signed off in PROGRESS.md. 2) Start P4 (CMD-01..08: plain-English command grammar and recipes); run tools/session_budget.py first. Every session: run python tools/gate.py before each commit; push only with the owner's approval.",
   "openQuestions": [
-    "Only Windows + Python 3.14 is exercised routinely now (tools/gate.py), though requires-python is >=3.11 and ruff targets py311, so 3.12+-only syntax or a Linux/macOS-only failure would go unnoticed. ci.yml's 3-OS x 3.11/3.13 matrix still exists but is manual-only (workflow_dispatch) and costs Actions minutes (macOS 10x). Run it once before a release, or install Python 3.11 locally and add a --python option to the gate.",
-    "Editing a shape (EDT-09) is remove-then-redraw from get_drawings() data: blend modes, pattern/shading paints and optional-content membership are not carried over -- documented in engine/shapes.py.",
-    "Image crop (EDT-08) is refused for rotated/skewed placements; image and shape boxes in the UI skip near-full-page shapes (backgrounds) so they can't swallow clicks.",
-    "Spell-check ignore lists are per browser session only (no persistent user dictionary yet); only en_US is bundled.",
-    "UI-09's theme toggle is a 3-state cycle (Auto/Light/Dark), not a simple 2-state light/dark switch -- deliberately preserves the pre-existing passive OS-preference support as a real, chooseable option ('Auto') rather than discarding it once an explicit toggle was added. Any future change to this cycle order or the LABELS record in theme.ts should keep 'system' as a real, reachable state, not just an implicit default.",
-    "A fixed-position UI element anywhere in this app's layout is now a known risk, not just a one-off -- confirmed twice in this session's history (the theme toggle over the Compare button) that CSS position:fixed content can silently overlap and eat clicks on whatever happens to be underneath at a given window width, and Playwright's own actionability-wait failure (naming the exact intercepting element) is what caught it, not visual inspection. Prefer real in-flow layout (flexbox/grid reserved space) over position:fixed for any future persistent UI chrome in this app.",
-    "Any Playwright test that acts on the UI immediately after an action whose visible effect resolves BEFORE the full async chain behind it settles needs to wait for that chain's actual last effect, not an intermediate one -- confirmed twice in the UI-08 session (once in _commit_edit itself, once one step further in the same test's own undo-then-redo sequence: reloadDocument() re-renders content before it refreshes the history panel that re-enables the Redo button). page.click()'s own actionability wait happens to absorb this class of race for a plain button click; a raw page.keyboard.press() never does. Any future test chaining a keyboard shortcut after a document-changing action needs an explicit wait for the specific state the shortcut depends on (e.g. a button's enabled state), not just the action's most visible symptom.",
-    "ALWAYS run `python3 -m ruff format --check engine cli tools tests server` as part of the local gate, not just `python3 -m ruff check .` -- these are two separate CI 'lint' job steps and only running the first one left a real formatting violation undetected for a full push-and-fail cycle earlier this session.",
-    "isTypingTarget (viewer.ts) checks `target.isContentEditable`, not just INPUT/TEXTAREA tag names -- the correct general check for 'is the user typing somewhere', since isContentEditable is true for a contenteditable element AND its descendants. Any FUTURE editable UI surface gets this guard for free as long as it's built on contenteditable or a real INPUT/TEXTAREA.",
-    "UI-08's keyboard shortcuts are deliberately NOT documented anywhere in the UI itself (no shortcuts-help modal) -- only via each button's title/aria-label. Matches the feature's S-sizing; worth revisiting if user feedback says shortcuts aren't discoverable enough.",
-    "UI-05's diff overlay is computed client-side with a per-channel tolerance of 24 (web/src/compare.ts's CHANNEL_TOLERANCE) -- empirical, not derived from engine/verify.py's DEFAULT_TOLERANCE (a different kind of threshold entirely).",
-    "UI-05's 'before' image is always the document exactly as first opened (UndoRedoJournal.original_bytes), never 'the state before the most recent edit'. FNT-12 (already built) is the per-edit-diff feature, a different thing.",
-    "UI-04's history panel shows only what was requested (an Op's own fields), never the EditResult each op produced -- tier, confidence, verification are NOT part of GET .../history's response. Documented in history.ts's module docstring.",
-    "mypy must be run scoped to `engine cli tools server` (matching .github/workflows), never over the whole tree -- running it over `tests/` too surfaces ~240 pre-existing errors in test files never meant to be strictly typed.",
-    "PyMuPDF's Document.tobytes() is NOT idempotent even with zero document changes between calls -- regenerates a random component of the PDF's /ID array on every call. Compare parsed content (get_text(), page_count, rendered PNG bytes), never raw PDF bytes, in any test.",
-    "pip-audit in this sandbox flags CVEs in cryptography/httplib2/pip/pyjwt/setuptools/urllib3/wheel -- none are pdfworkerz's own dependencies. Sandbox environment drift, not something a code change here introduces or can fix.",
-    "UI-02's click-to-edit overlay approximates the font family/weight/style shown while editing rather than loading the document's actual embedded font as a browser @font-face -- documented in web/README.md.",
-    "overlay.ts's cancelEdit() has a documented reentrancy fix (contentEditable=false can synchronously fire blur, re-entering cancelEdit) -- preserve the 'clear shared state before touching the box' ordering in any future edit.",
-    "ReplaceTextOp (search-based) must never be reused for a UI action that targets one specific span the user clicked -- it edits every occurrence of the matched text on the page. ReplaceSpanTextOp (index-based) is what click-to-edit uses instead.",
-    "PreviewTextOp/PageSpansOp/render_original_page are read-only and deliberately never journaled -- applied directly in server/app.py. Any FUTURE read-only Op or route should follow the same direct-apply pattern.",
-    "viewer.ts's reloadDocument rebuilds the ENTIRE thumbnail rail rather than invalidating just the current page's thumbnail -- a deliberately accepted minor inefficiency, not a bug.",
-    "server/app.py's CORSMiddleware is scoped to a loopback-origin regex -- deliberately permissive on port since auth here is a header a browser never auto-attaches. Revisit before ever adding cookie-based or credentialed auth.",
-    "web/package.json pins pdfjs-dist==6.3.289 deliberately: versions >=5.6.83 <6.2.108 carry a public high-severity CVE. Re-run npm audit by hand after ever changing this pin.",
-    "web/src/polyfills.ts + web/src/pdf.worker.ts work around a real Map/WeakMap.prototype.getOrInsertComputed gap on this sandbox's pinned Playwright test browser.",
-    "tests/web/'s Playwright tests build on a *built* web/dist, never `vite dev` -- if web/dist doesn't exist, the whole module is skipped (not failed).",
-    "Re-verify iLovePDF / Nitro parity tags against the vendors' current feature pages before the first release",
-    "P1 and P2 were self-reviewed (builder and reviewer were the same session); an independent reviewer pass is still owed",
-    "RTL scripts (Arabic, Hebrew) and CJK vertical writing mode are not supported for editing -- documented in tests/engine/test_font_cjk.py's module docstring",
-    "fit=True (FNT-10) fragments a span's texttrace into one span per character, breaking a second edit's ability to find that text as one span -- defaults to False",
-    "FNT-09's kerning only reads legacy 'kern' tables, not GPOS pair positioning; no GSUB ligature substitution is attempted at all",
-    "font-name matching between texttrace and Page.get_fonts()/pikepdf now goes through engine.fonts.match.normalize_font_name plus a containment-match fallback in two places (engine/edit.py's _find_font_entry and engine/fonts/tounicode.py's recover_broken_spans) -- three real, distinct name-mismatch bugs were found this way across P2; reuse this same pattern rather than comparing font-name strings directly anywhere new",
-    "ReflowTextOp's overflow check runs before its require_tier check (engine/ops/text.py), so an overflowing edit is reported as overflow even when the real issue is also a weak font match -- both are surfaced eventually (allow_overflow=True lets the tier check run too), but the error message a caller sees first is whichever condition is checked first, not necessarily the most actionable one"
+    {
+      "phase": "P1",
+      "kind": "todo",
+      "text": "P1-P3 were self-reviewed by the sessions that built them; an independent reviewer pass is running (2026-09-28)."
+    },
+    {
+      "phase": "P2",
+      "kind": "limitation",
+      "text": "RTL scripts (Arabic, Hebrew) and CJK vertical writing mode are not supported for editing -- documented in tests/engine/test_font_cjk.py's module docstring"
+    },
+    {
+      "phase": "P2",
+      "kind": "todo",
+      "text": "fit=True (FNT-10) fragments a span's texttrace into one span per character, so a second edit can no longer find that text as one span. fit defaults to False until this is fixed."
+    },
+    {
+      "phase": "P2",
+      "kind": "limitation",
+      "text": "FNT-09 kerning reads only legacy 'kern' tables, not GPOS pair positioning, and no GSUB ligature substitution is attempted."
+    },
+    {
+      "phase": "P3",
+      "kind": "limitation",
+      "text": "Editing a shape (EDT-09) is remove-then-redraw from get_drawings() data: blend modes, pattern/shading paints and optional-content membership are not carried over -- documented in engine/shapes.py."
+    },
+    {
+      "phase": "P3",
+      "kind": "limitation",
+      "text": "Image crop (EDT-08) is refused for rotated/skewed placements; image and shape boxes in the UI skip near-full-page shapes (backgrounds) so they can't swallow clicks."
+    },
+    {
+      "phase": "P3",
+      "kind": "limitation",
+      "text": "Spell-check bundles only an en_US dictionary; the ignore list is per browser (localStorage), not a shared user dictionary."
+    },
+    {
+      "phase": "P3",
+      "kind": "todo",
+      "text": "Click-to-edit (UI-02) shows an approximation of the span's font family/weight/style while typing, not the document's own embedded font loaded as a browser @font-face (documented in web/README.md)."
+    },
+    {
+      "phase": "P9",
+      "kind": "todo",
+      "text": "Only Windows is tested routinely (Python 3.14 via tools/gate.py, Python 3.11 via gate.py --python .venv311/...). Linux and macOS are exercised only by ci.yml's manual workflow_dispatch matrix, which costs Actions minutes: run it once before a release."
+    },
+    {
+      "phase": "P9",
+      "kind": "todo",
+      "text": "Re-verify the iLovePDF / Nitro parity tags against the vendors' current feature pages before the first release."
+    }
   ],
   "updated": "2026-09-28"
 }

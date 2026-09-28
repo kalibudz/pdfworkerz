@@ -63,6 +63,41 @@ def test_gate_list_runs_nothing(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 @pytest.mark.feature("INF-03")
+def test_gate_makes_a_missing_ui_build_fail_not_skip(tmp_path: Path) -> None:
+    from tests.web.conftest import REQUIRE_ENV, check_built_ui
+
+    (pytest_step,) = [s for s in gate.build_steps() if "--feature-results" in s.cmd]
+    assert dict(pytest_step.env) == {REQUIRE_ENV: "1"}
+
+    missing = tmp_path / "dist"
+    with pytest.raises(pytest.fail.Exception):
+        check_built_ui(missing, required=True)
+    with pytest.raises(pytest.skip.Exception):
+        check_built_ui(missing, required=False)
+    missing.mkdir()
+    check_built_ui(missing, required=True)
+
+
+@pytest.mark.feature("INF-03")
+def test_gate_python_option_selects_the_interpreter_for_python_steps() -> None:
+    seen: list[tuple[str, ...]] = []
+
+    def record(step: gate.Step) -> int:
+        seen.append(step.cmd)
+        return 0
+
+    assert gate.main(["--job", "types", "--python", "py311/python.exe"], runner=record) == 0
+    # Resolved to an absolute path: Windows' CreateProcess can't launch a relative one.
+    assert seen == [(str(Path("py311/python.exe").resolve()), "-m", "mypy", "engine", "cli", "tools", "server")]
+
+
+@pytest.mark.feature("INF-03")
+def test_a_step_whose_program_is_missing_fails_instead_of_crashing_the_gate(tmp_path: Path) -> None:
+    step = gate.Step("types", "missing tool", (str(tmp_path / "no-such-program.exe"),))
+    assert gate.run_subprocess(step) == 127
+
+
+@pytest.mark.feature("INF-03")
 def test_ci_is_manual_only_so_it_cannot_bill_unasked(workflow: dict) -> None:
     triggers = workflow.get("on") or workflow.get(True)  # PyYAML parses bare `on` as True
     assert set(triggers) == {"workflow_dispatch"}

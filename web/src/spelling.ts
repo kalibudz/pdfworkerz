@@ -4,7 +4,8 @@
  * edit layer; clicking one opens a small menu of suggestions. Choosing one
  * sends correct_word (engine.ops.spellcheck), which re-checks that the word
  * is still where it was before replacing it in its span's own style.
- * "Ignore" hides that word for the rest of this browser session.
+ * "Ignore" hides that word from now on: the ignore list is kept in this
+ * browser's localStorage, and "Forget ignored words" clears it.
  */
 
 import type * as pdfjsLib from "pdfjs-dist";
@@ -26,12 +27,33 @@ export interface SpellToolHandle {
   setEnabled(enabled: boolean): Promise<void>;
 }
 
+const IGNORED_KEY = "pw-spell-ignored";
+
+// Storage can be unavailable (private browsing, a locked-down browser); the
+// list then just lasts for this page's lifetime, never an error.
+function loadIgnored(): Set<string> {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(IGNORED_KEY) ?? "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((w): w is string => typeof w === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function storeIgnored(words: Set<string>): void {
+  try {
+    window.localStorage.setItem(IGNORED_KEY, JSON.stringify([...words].sort()));
+  } catch {
+    // see loadIgnored
+  }
+}
+
 export function createSpellTool(layer: HTMLElement, options: SpellToolOptions): SpellToolHandle {
   let enabled = false;
   let pageIndex = 0;
   let viewport: pdfjsLib.PageViewport | null = null;
   let requestId = 0;
-  const ignored = new Set<string>();
+  const ignored = loadIgnored();
 
   function clear(): void {
     for (const el of layer.querySelectorAll(".pw-misspelling, .pw-spell-menu")) {
@@ -91,8 +113,16 @@ export function createSpellTool(layer: HTMLElement, options: SpellToolOptions): 
     }
     add(`Ignore “${miss.word}”`, "pw-spell-ignore", () => {
       ignored.add(miss.word.toLowerCase());
+      storeIgnored(ignored);
       void refresh();
     });
+    if (ignored.size > 0) {
+      add(`Forget ignored words (${ignored.size})`, "pw-spell-forget", () => {
+        ignored.clear();
+        storeIgnored(ignored);
+        void refresh();
+      });
+    }
     layer.appendChild(menu);
     menu.querySelector("button")?.focus();
   }

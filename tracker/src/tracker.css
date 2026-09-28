@@ -137,7 +137,19 @@ h1 { font: 600 clamp(26px, 4vw, 36px)/1.15 var(--font-display); letter-spacing: 
 .kv dt { color: var(--muted); font-size: 13px; padding-top: 1px; }
 .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .kv .next { color: var(--accent); font-weight: 500; }
-.questions { margin: 0; padding-left: 18px; font-size: 14px; }
+.questions { margin: 0; padding-left: 18px; font-size: 14px; display: grid; gap: 6px; }
+.oq-groups { display: grid; gap: 18px; }
+.oq-group { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 18px; }
+.kind {
+  font: 500 11px/1.6 var(--font-mono);
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid var(--rule);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.kind-todo { border-color: var(--accent); color: var(--accent); }
+.kind-decision { border-color: var(--progress); color: var(--progress); }
 
 .field { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
 input, select {

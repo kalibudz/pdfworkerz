@@ -5,15 +5,18 @@ uvicorn, in a background thread -- an in-process ``TestClient`` can't be
 navigated to by a browser) and a real static file server for `web/dist`
 (the production build; `vite dev`'s own server is not under test here),
 driven by a real Chromium through `pytest-playwright`. `web/dist` must
-already be built (`npm ci && npm run build` in `web/`) -- this module
-skips entirely rather than building it itself, the same separation of
-concerns `tracker/`'s own build has from the Python test suite.
+already be built (`npm ci && npm run build` in `web/`). Without it these
+tests skip rather than building it themselves (the same separation of
+concerns `tracker/`'s own build has from the Python test suite) -- except
+under tools/gate.py, which sets PDFWORKERZ_REQUIRE_WEB=1 so a missing build
+fails instead of passing silently.
 """
 
 from __future__ import annotations
 
 import functools
 import http.server
+import os
 import threading
 import time
 from collections.abc import Iterator
@@ -34,10 +37,23 @@ TOKEN = "playwright-test-token"  # a fixed test-only value, not a real secret
 # this override only applies when that fixed path actually exists.
 _SANDBOX_CHROMIUM = Path("/opt/pw-browsers/chromium")
 
-pytestmark = pytest.mark.skipif(
-    not DIST_DIR.exists(),
-    reason="web/dist is not built -- run `npm ci && npm run build` in web/ first",
-)
+REQUIRE_ENV = "PDFWORKERZ_REQUIRE_WEB"
+_NOT_BUILT = "web/dist is not built -- run `npm ci && npm run build` in web/ first"
+
+
+def check_built_ui(dist: Path, required: bool) -> None:
+    if dist.exists():
+        return
+    if required:
+        pytest.fail(f"{_NOT_BUILT} ({REQUIRE_ENV}=1)")
+    pytest.skip(_NOT_BUILT)
+
+
+# An autouse fixture, not `pytestmark`: pytest ignores `pytestmark` in a
+# conftest.py, so the skip that used to be declared that way never applied.
+@pytest.fixture(autouse=True)
+def _require_built_ui() -> None:
+    check_built_ui(DIST_DIR, os.environ.get(REQUIRE_ENV) == "1")
 
 
 @pytest.fixture(scope="session")

@@ -102,6 +102,13 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   spellButton.title = "Underline misspelled words on this page";
   spellButton.setAttribute("aria-pressed", "false");
   const drawSelect = document.createElement("select");
+  const shortcutsButton = document.createElement("button");
+  shortcutsButton.type = "button";
+  shortcutsButton.className = "pw-shortcuts-toggle";
+  shortcutsButton.textContent = "?";
+  shortcutsButton.title = "Keyboard shortcuts (?)";
+  shortcutsButton.setAttribute("aria-label", "Keyboard shortcuts");
+  const shortcutsDialog = createShortcutsDialog();
   drawSelect.className = "pw-draw-select";
   drawSelect.title = "Draw a shape: pick one, then drag on the page";
   drawSelect.setAttribute("aria-label", "Draw a shape");
@@ -128,6 +135,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     drawSelect,
     spellButton,
     compareButton,
+    shortcutsButton,
   );
 
   // Disabled until the document has actually loaded below -- otherwise
@@ -167,7 +175,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   const historyPanel = document.createElement("div");
 
   body.append(thumbRail, pageArea, inspectorPanel);
-  root.append(toolbar, body, historyPanel);
+  root.append(toolbar, body, historyPanel, shortcutsDialog);
   container.appendChild(root);
 
   const loadingNotice = document.createElement("p");
@@ -223,7 +231,8 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   let currentPage = 1;
   let scale = 1;
   let comparing = false;
-  const thumbButtons: HTMLButtonElement[] = [];
+  const thumbnails = createThumbnailRail(thumbRail, options.pageCount, (pageNumber) => void goToPage(pageNumber));
+  const thumbButtons = thumbnails.buttons;
 
   function updateToolbar(): void {
     pageIndicator.textContent = `${currentPage} / ${options.pageCount}`;
@@ -275,9 +284,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     overlay.cancelPainter();
     const bytes = await options.api.documentFile(options.documentId);
     pdf = await loadPdf(bytes);
-    thumbRail.innerHTML = "";
-    thumbButtons.length = 0;
-    buildThumbnailRail(thumbRail, pdf, options.pageCount, thumbButtons, (pageNumber) => void goToPage(pageNumber));
+    thumbnails.setDocument(pdf);
     await renderCurrentPage();
     await history.refresh();
     if (comparing) {
@@ -339,6 +346,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     void spellTool.setEnabled(next);
   });
   drawSelect.addEventListener("change", () => shapeTool.setDrawMode((drawSelect.value || null) as DrawKind | null));
+  shortcutsButton.addEventListener("click", () => shortcutsDialog.showModal());
 
   // UI-08: every shortcut below is a keyboard path to an action the toolbar
   // or history panel already exposes by mouse -- none of them do anything
@@ -349,7 +357,13 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   // loaded, and a keyboard shortcut shouldn't be able to act sooner than a
   // click could.
   const keyHandler = (event: KeyboardEvent): void => {
-    if (isTypingTarget(event.target) || !pdf) {
+    // While the shortcuts dialog is open it owns the keyboard (Escape closes it natively).
+    if (isTypingTarget(event.target) || !pdf || shortcutsDialog.open) {
+      return;
+    }
+    if (event.key === "?") {
+      event.preventDefault();
+      shortcutsDialog.showModal();
       return;
     }
     if (event.key === "Escape" && drawSelect.value) {
@@ -404,33 +418,67 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   drawSelect.disabled = false;
   spellButton.disabled = false;
 
-  buildThumbnailRail(thumbRail, pdf, options.pageCount, thumbButtons, (pageNumber) => void goToPage(pageNumber));
+  thumbnails.setDocument(pdf);
 
   await renderCurrentPage();
   await history.refresh();
 }
 
-function buildThumbnailRail(
+const SHORTCUTS: readonly [string, string][] = [
+  ["→ / Page Down", "Next page"],
+  ["← / Page Up", "Previous page"],
+  ["Home / End", "First / last page"],
+  ["+ / −", "Zoom in / out"],
+  ["Ctrl+Z", "Undo"],
+  ["Ctrl+Shift+Z / Ctrl+Y", "Redo"],
+  ["C", "Before/after compare view"],
+  ["Enter", "Commit the text being edited"],
+  ["Esc", "Discard an edit, cancel a tool, close a menu"],
+  ["?", "Show this list"],
+];
+
+function createShortcutsDialog(): HTMLDialogElement {
+  const dialog = document.createElement("dialog");
+  dialog.className = "pw-shortcuts";
+  dialog.setAttribute("aria-labelledby", "pw-shortcuts-title");
+  const heading = document.createElement("h2");
+  heading.id = "pw-shortcuts-title";
+  heading.textContent = "Keyboard shortcuts";
+  const list = document.createElement("dl");
+  for (const [keys, action] of SHORTCUTS) {
+    const dt = document.createElement("dt");
+    const kbd = document.createElement("kbd");
+    kbd.textContent = keys;
+    dt.appendChild(kbd);
+    const dd = document.createElement("dd");
+    dd.textContent = action;
+    list.append(dt, dd);
+  }
+  const form = document.createElement("form");
+  form.method = "dialog";
+  const close = document.createElement("button");
+  close.type = "submit";
+  close.textContent = "Close";
+  form.appendChild(close);
+  dialog.append(heading, list, form);
+  return dialog;
+}
+
+interface ThumbnailRail {
+  buttons: HTMLButtonElement[];
+  /** Point every thumbnail at a (re)loaded document. Buttons are kept, so the
+   * rail doesn't flicker or lose its scroll position; each keeps its old image
+   * until its lazy re-render (only visible ones re-render right away). */
+  setDocument(pdf: PdfDocument): void;
+}
+
+function createThumbnailRail(
   rail: HTMLElement,
-  pdf: PdfDocument,
   pageCount: number,
-  thumbButtons: HTMLButtonElement[],
   onSelect: (pageNumber: number) => void,
-): void {
-  const renderedPages = new Set<number>();
-  const observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) {
-          continue;
-        }
-        const pageNumber = Number((entry.target as HTMLElement).dataset.page);
-        observer.unobserve(entry.target);
-        void renderThumbnail(pdf, pageNumber, entry.target as HTMLElement, renderedPages);
-      }
-    },
-    { root: rail, rootMargin: "200px 0px" },
-  );
+): ThumbnailRail {
+  const buttons: HTMLButtonElement[] = [];
+  let observer: IntersectionObserver | null = null;
 
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
     const button = document.createElement("button");
@@ -448,9 +496,33 @@ function buildThumbnailRail(
 
     button.addEventListener("click", () => onSelect(pageNumber));
     rail.appendChild(button);
-    thumbButtons.push(button);
-    observer.observe(button);
+    buttons.push(button);
   }
+
+  return {
+    buttons,
+    setDocument(pdf) {
+      observer?.disconnect();
+      const renderedPages = new Set<number>();
+      const current = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) {
+              continue;
+            }
+            const pageNumber = Number((entry.target as HTMLElement).dataset.page);
+            current.unobserve(entry.target);
+            void renderThumbnail(pdf, pageNumber, entry.target as HTMLElement, renderedPages);
+          }
+        },
+        { root: rail, rootMargin: "200px 0px" },
+      );
+      observer = current;
+      for (const button of buttons) {
+        current.observe(button);
+      }
+    },
+  };
 }
 
 async function renderThumbnail(

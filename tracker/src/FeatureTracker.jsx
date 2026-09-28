@@ -126,18 +126,51 @@ function Checkpoint() {
         <dd className="mono">{checkpoint.branch}</dd>
         <dt>Next action</dt>
         <dd className="next">{checkpoint.nextAction}</dd>
+        <dt>Last green</dt>
+        <dd className="mono small">{checkpoint.lastGreenCommit}</dd>
         <dt>Updated</dt>
         <dd className="num">{checkpoint.updated}</dd>
       </dl>
-      {checkpoint.openQuestions?.length > 0 && (
-        <>
-          <h3 className="eyebrow">Open questions</h3>
-          <ul className="questions">
-            {checkpoint.openQuestions.map((q) => (
-              <li key={q}>{q}</li>
-            ))}
-          </ul>
-        </>
+    </section>
+  );
+}
+
+const KIND_LABEL = { todo: "To do", limitation: "Known limitation", decision: "Needs a decision" };
+
+// Plain strings (the older checkpoint format) are shown under "Unassigned".
+function normalizeQuestion(q) {
+  return typeof q === "string" ? { phase: null, kind: "todo", text: q } : q;
+}
+
+function OpenQuestions({ phases }) {
+  const questions = (checkpoint.openQuestions ?? []).map(normalizeQuestion);
+  const groups = [...phases, { id: null, name: "Unassigned" }]
+    .map((p) => ({ ...p, items: questions.filter((q) => q.phase === p.id) }))
+    .filter((g) => g.items.length > 0);
+  return (
+    <section aria-labelledby="oq-h">
+      <h2 id="oq-h" className="section-title">
+        Open questions by phase <span className="num muted">({questions.length})</span>
+      </h2>
+      {groups.length === 0 ? (
+        <p className="muted">None open.</p>
+      ) : (
+        <div className="oq-groups">
+          {groups.map((g) => (
+            <div key={g.id ?? "none"} className="oq-group">
+              <h3 className="cat-title">
+                {g.id && <span className="mono">{g.id}</span>} {g.name}
+              </h3>
+              <ul className="questions">
+                {g.items.map((q) => (
+                  <li key={q.text}>
+                    <span className={`kind kind-${q.kind}`}>{KIND_LABEL[q.kind] ?? q.kind}</span> {q.text}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       )}
     </section>
   );
@@ -330,7 +363,8 @@ export default function FeatureTracker() {
           <h1>Every feature, and the evidence behind it</h1>
           <p className="lede muted">
             Status comes from <span className="mono">tracker/features.json</span>. A feature turns{" "}
-            <StatusPill status="done" /> only when its linked tests pass in CI.
+            <StatusPill status="done" /> only when its linked tests pass in the local gate (
+            <span className="mono">tools/gate.py</span>).
           </p>
         </div>
       </header>
@@ -340,6 +374,7 @@ export default function FeatureTracker() {
         <Budget features={features} phases={phases} sizes={sizes} />
       </div>
       <Phases features={features} phases={phases} sizes={sizes} />
+      <OpenQuestions phases={phases} />
       <Parity features={features} />
       <Catalog features={features} categories={categories} phases={phases} />
       <footer className="muted small">
