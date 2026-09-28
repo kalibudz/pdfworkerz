@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import io
 import math
+from collections.abc import Iterator
 from typing import Any
 
 import pikepdf
@@ -170,7 +171,36 @@ def _span_style_from_texttrace(page_index: int, span_index: int, span: dict[str,
     )
 
 
-def _bytes_per_glyph(pdf_page: pikepdf.Page, resource_name: str | None) -> int:
+def _page_resources(pdf_page: pikepdf.Page) -> pikepdf.Object:
+    try:
+        return pdf_page.Resources
+    except AttributeError:
+        return pikepdf.Dictionary()
+
+
+def _walk_content(
+    content: pikepdf.Object | pikepdf.Page, resources: pikepdf.Object, seen: frozenset[tuple[int, int]]
+) -> Iterator[tuple[str, Any, pikepdf.Object]]:
+    """Yield (operator, operands, active /Resources) for a content stream,
+    following ``Do`` into Form XObjects in place -- where texttrace reports
+    their glyphs too -- wrapped in the implicit q/Q the PDF spec gives every
+    Form XObject (ISO 32000-1 8.10.1), so text state set inside a form never
+    leaks back out. A form without its own /Resources uses its parent's.
+    ``seen`` stops a (malformed) form that invokes itself from recursing forever.
+    """
+    for instr in pikepdf.parse_content_stream(content):
+        op = str(instr.operator)
+        if op == "Do":
+            xobject = resources.get("/XObject", pikepdf.Dictionary()).get(str(instr.operands[0]))
+            if xobject is not None and xobject.get("/Subtype") == "/Form" and xobject.objgen not in seen:
+                yield "q", [], resources
+                yield from _walk_content(xobject, xobject.get("/Resources", resources), seen | {xobject.objgen})
+                yield "Q", [], resources
+            continue
+        yield op, instr.operands, resources
+
+
+def _bytes_per_glyph(resources: pikepdf.Object, resource_name: str | None) -> int:
     """1 for a simple font, 2 for the common Identity-H/V composite case.
 
     Composite fonts with an embedded (non-Identity) CMap can use other byte
@@ -180,9 +210,8 @@ def _bytes_per_glyph(pdf_page: pikepdf.Page, resource_name: str | None) -> int:
     """
     if resource_name is None:
         return 1
-    try:
-        font_dict = pdf_page.Resources.Font[f"/{resource_name}"]
-    except KeyError:
+    font_dict = resources.get("/Font", pikepdf.Dictionary()).get(f"/{resource_name}")
+    if font_dict is None:
         return 1
     if str(font_dict.get("/Subtype")) != "/Type0":
         return 1
@@ -198,19 +227,15 @@ def _string_glyph_count(value: pikepdf.Object, bytes_per_glyph: int) -> int:
 
 
 def _walk_glyph_states(pdf_page: pikepdf.Page) -> list[TextState]:
-    """Replay a page's content stream(s); return one TextState per glyph shown,
-    in document order. `q`/`Q` save and restore the whole text state, matching
-    the PDF graphics-state model (ISO 32000-1 8.4)."""
+    """Replay a page's content stream(s), including any Form XObjects it
+    draws; return one TextState per glyph shown, in document order. `q`/`Q`
+    save and restore the whole text state, matching the PDF graphics-state
+    model (ISO 32000-1 8.4)."""
     stack: list[TextState] = []
     current = TextState()
     per_glyph: list[TextState] = []
 
-    def glyph_width() -> int:
-        return _bytes_per_glyph(pdf_page, current.font_resource)
-
-    for instr in pikepdf.parse_content_stream(pdf_page):
-        op = str(instr.operator)
-        operands = instr.operands
+    for op, operands, resources in _walk_content(pdf_page, _page_resources(pdf_page), frozenset()):
         if op == "q":
             stack.append(current)
         elif op == "Q":
@@ -233,14 +258,16 @@ def _walk_glyph_states(pdf_page: pikepdf.Page) -> list[TextState]:
                 update={"font_resource": str(operands[0]).lstrip("/"), "font_size": float(operands[1])}
             )
         elif op == "Tj" or op == "'":
-            per_glyph.extend([current] * _string_glyph_count(operands[0], glyph_width()))
+            width = _bytes_per_glyph(resources, current.font_resource)
+            per_glyph.extend([current] * _string_glyph_count(operands[0], width))
         elif op == '"':
             current = current.model_copy(
                 update={"word_spacing": float(operands[0]), "char_spacing": float(operands[1])}
             )
-            per_glyph.extend([current] * _string_glyph_count(operands[2], glyph_width()))
+            width = _bytes_per_glyph(resources, current.font_resource)
+            per_glyph.extend([current] * _string_glyph_count(operands[2], width))
         elif op == "TJ":
-            width = glyph_width()
+            width = _bytes_per_glyph(resources, current.font_resource)
             for item in operands[0]:
                 if isinstance(item, pikepdf.String):
                     per_glyph.extend([current] * _string_glyph_count(item, width))
@@ -261,22 +288,23 @@ def walk_raw_glyph_codes(pdf_page: pikepdf.Page) -> list[int]:
     Identity-H/V composite font, where it equals the glyph's GID directly.
     """
     codes: list[int] = []
+    font_stack: list[str | None] = []
     current_font_resource: str | None = None
 
-    def glyph_width() -> int:
-        return _bytes_per_glyph(pdf_page, current_font_resource)
-
-    for instr in pikepdf.parse_content_stream(pdf_page):
-        op = str(instr.operator)
-        operands = instr.operands
-        if op == "Tf":
+    for op, operands, resources in _walk_content(pdf_page, _page_resources(pdf_page), frozenset()):
+        width = _bytes_per_glyph(resources, current_font_resource)
+        if op == "q":
+            font_stack.append(current_font_resource)
+        elif op == "Q":
+            if font_stack:
+                current_font_resource = font_stack.pop()
+        elif op == "Tf":
             current_font_resource = str(operands[0]).lstrip("/")
         elif op == "Tj" or op == "'":
-            codes.extend(_split_codes(operands[0], glyph_width()))
+            codes.extend(_split_codes(operands[0], width))
         elif op == '"':
-            codes.extend(_split_codes(operands[2], glyph_width()))
+            codes.extend(_split_codes(operands[2], width))
         elif op == "TJ":
-            width = glyph_width()
             for item in operands[0]:
                 if isinstance(item, pikepdf.String):
                     codes.extend(_split_codes(item, width))

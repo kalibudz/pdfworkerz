@@ -46,6 +46,7 @@ from engine.document import Document
 from engine.errors import (
     CertificateEncryptedError,
     DocumentNotFoundError,
+    FontResourceNotFoundError,
     NotAPdfError,
     NothingToUndoError,
     OpValidationError,
@@ -68,6 +69,7 @@ _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
     OverwriteRefusedError: 409,
     NothingToUndoError: 409,
     OpValidationError: 400,
+    FontResourceNotFoundError: 422,
 }
 
 

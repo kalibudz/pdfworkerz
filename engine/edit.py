@@ -38,8 +38,9 @@ import pymupdf
 from numpy.typing import NDArray
 
 from engine.document import Document
+from engine.errors import FontResourceNotFoundError
 from engine.fonts.blocks import TextBlock
-from engine.fonts.classify import classify_font, split_subset_tag
+from engine.fonts.classify import classify_font_xref, split_subset_tag
 from engine.fonts.fit import fit_to_width
 from engine.fonts.kerning import build_kern_pairs
 from engine.fonts.match import FontCandidate, normalize_font_name
@@ -257,11 +258,13 @@ def resolve_font_for_span(
 
     found = _find_font_entry(page, style.font)
     if found is None:
-        raise ValueError(f"could not find the page's own font resource for {style.font!r}")
+        raise FontResourceNotFoundError(f"could not find the font resource for {style.font!r} on page {page_index}")
     xref, resource_name = found
 
+    # By xref, not name: get_fonts() includes fonts inside Form XObjects, whose
+    # resource names ("F1") can collide with a different page-level font.
     with pikepdf.open(io.BytesIO(document.to_bytes())) as pikepdf_doc:
-        classification = classify_font(pikepdf_doc, page_index, resource_name)
+        classification = classify_font_xref(pikepdf_doc, xref, resource_name)
 
     original_bytes = document.raw.extract_font(xref)[3] or None
     already_used = _collect_font_usage(extract_page_spans(document.raw, page_index), style.font)

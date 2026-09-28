@@ -114,8 +114,22 @@ def _encoding_name(font_dict: pikepdf.Object) -> str | None:
 
 
 def classify_font(pdf: pikepdf.Pdf, page_index: int, resource_name: str) -> FontClassification:
-    """FNT-03: classify the font a page refers to by its Tf resource name (e.g. "F1")."""
-    font_dict = pdf.pages[page_index].Resources.Font[f"/{resource_name}"]
+    """FNT-03: classify the font a page refers to by its Tf resource name (e.g. "F1").
+
+    Only sees the page's own /Resources/Font. Text drawn inside a Form XObject
+    uses the XObject's resources, where the same name can mean a different
+    font -- use :func:`classify_font_xref` whenever the font's xref is known.
+    """
+    return _classify_font_dict(pdf.pages[page_index].Resources.Font[f"/{resource_name}"], resource_name)
+
+
+def classify_font_xref(pdf: pikepdf.Pdf, xref: int, resource_name: str) -> FontClassification:
+    """FNT-03 by object number: unambiguous for fonts inside Form XObjects, where
+    a resource name like "F1" can collide with a different page-level font."""
+    return _classify_font_dict(pdf.get_object((xref, 0)), resource_name)
+
+
+def _classify_font_dict(font_dict: pikepdf.Object, resource_name: str) -> FontClassification:
     base_font = str(font_dict.get("/BaseFont", "")).lstrip("/")
     subset_tag, _ = split_subset_tag(base_font)
     subtype = str(font_dict.get("/Subtype", "")).lstrip("/")

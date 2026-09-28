@@ -55,3 +55,8 @@ class NothingToUndoError(PdfWorkerzError):
 
 class OpValidationError(PdfWorkerzError):
     """An Op failed validation before it could be applied or serialized."""
+
+
+class FontResourceNotFoundError(PdfWorkerzError):
+    """The font a text span was drawn with could not be located in the document's
+    font resources, so the span can't be edited in its original style."""

@@ -52,6 +52,8 @@ class Corpus:
     embedded_font_subset: Path
     cjk: Path
     paragraph: Path
+    form_xobject: Path
+    shared_form_xobject: Path
     user_password: str = USER_PASSWORD
     owner_password: str = OWNER_PASSWORD
 
@@ -300,6 +302,61 @@ def _paragraph(path: Path) -> None:
     doc.close()
 
 
+def _type1_font(pdf: pikepdf.Pdf, base_font: str) -> pikepdf.Object:
+    return pdf.make_indirect(
+        pikepdf.Dictionary(Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1, BaseFont=pikepdf.Name(f"/{base_font}"))
+    )
+
+
+def _form(pdf: pikepdf.Pdf, content: bytes, fonts: pikepdf.Dictionary) -> pikepdf.Object:
+    return pdf.make_stream(
+        content,
+        Type=pikepdf.Name.XObject,
+        Subtype=pikepdf.Name.Form,
+        BBox=[0, 0, 612, 792],
+        Resources=pikepdf.Dictionary(Font=fonts),
+    )
+
+
+def _form_xobject(path: Path) -> None:
+    """Text drawn inside a Form XObject, the way templated statements and
+    reports draw their headers. The form's own font is registered as /F1 --
+    the same name the page uses for a *different* font -- so a lookup by
+    resource name alone picks the wrong one. The form also sets Tc 2, which
+    must not leak into the page text drawn after it (implicit q/Q)."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    form = _form(
+        pdf,
+        b"BT /F1 14 Tf 2 Tc 1 0 0 1 72 600 Tm (Header in form) Tj ET",
+        pikepdf.Dictionary(F1=_type1_font(pdf, "Courier")),
+    )
+    page.Resources = pikepdf.Dictionary(
+        Font=pikepdf.Dictionary(F1=_type1_font(pdf, "Helvetica")), XObject=pikepdf.Dictionary(Fm0=form)
+    )
+    page.Contents = pdf.make_stream(
+        b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (Page text before) Tj ET q /Fm0 Do Q "
+        b"BT /F1 12 Tf 1 0 0 1 72 500 Tm (Page text after) Tj ET"
+    )
+    pdf.save(path)
+
+
+def _shared_form_xobject(path: Path) -> None:
+    """One Form XObject drawn on two pages -- editing it on one page must not
+    change the other."""
+    pdf = pikepdf.new()
+    form = _form(
+        pdf,
+        b"BT /F1 14 Tf 1 0 0 1 72 600 Tm (Shared header) Tj ET",
+        pikepdf.Dictionary(F1=_type1_font(pdf, "Helvetica")),
+    )
+    for _ in range(2):
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Fm0=form))
+        page.Contents = pdf.make_stream(b"q /Fm0 Do Q")
+    pdf.save(path)
+
+
 def _layered(path: Path) -> None:
     """A page with an optional-content group (COR-03 has_layers / future COR-12)."""
     doc = pymupdf.open()
@@ -335,6 +392,8 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         "embedded_font_subset": out_dir / "embedded_font_subset.pdf",
         "cjk": out_dir / "cjk.pdf",
         "paragraph": out_dir / "paragraph.pdf",
+        "form_xobject": out_dir / "form_xobject.pdf",
+        "shared_form_xobject": out_dir / "shared_form_xobject.pdf",
     }
 
     if force or not paths["simple"].exists():
@@ -373,6 +432,10 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         _paragraph(paths["paragraph"])
     if force or not paths["cjk"].exists():
         _cjk(paths["cjk"])
+    if force or not paths["form_xobject"].exists():
+        _form_xobject(paths["form_xobject"])
+    if force or not paths["shared_form_xobject"].exists():
+        _shared_form_xobject(paths["shared_form_xobject"])
 
     return Corpus(
         simple=paths["simple"],
@@ -396,6 +459,8 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         embedded_font_subset=paths["embedded_font_subset"],
         cjk=paths["cjk"],
         paragraph=paths["paragraph"],
+        form_xobject=paths["form_xobject"],
+        shared_form_xobject=paths["shared_form_xobject"],
     )
 
 
