@@ -21,8 +21,20 @@ instead of 16MB, and it still round-trips correctly through
 never had, exactly like the Vera family does for Latin text. To widen its
 coverage, regenerate it with `tools/gen_noto_subset.py --text "<more characters>"`.
 
-**Follow-up** (tracked in PROGRESS.md): widen the Latin-script set to a proper
-small OFL family with real Unicode-range breadth (Latin, Cyrillic, Greek;
-serif, sans and monospace) — for example Google Fonts' Open Sans / Noto Serif
-/ Roboto Mono, all OFL-licensed. Nothing in `engine.fonts.match` assumes Vera
-specifically; adding more fonts here is just dropping more font files in.
+Also: **Roboto** Light and Regular (`Roboto-Light.ttf`, `Roboto-Regular.ttf`),
+SIL Open Font License 1.1 (`OFL-Roboto.txt`; the license statement is also
+embedded in each font's own `name` table, IDs 13/14). These are the unmodified
+`web/static/` files from the official
+[Roboto v3.016 release](https://github.com/googlefonts/roboto-3-classic/releases/tag/v3.016)
+(`Roboto_v3.016.zip`). The web build covers Latin-1, Latin Extended-A, Cyrillic
+and most Greek in ~157KB each, against ~397KB for the full unhinted build.
+Roboto is a very common document font (statements, invoices, anything produced
+from Android or Google tooling). With these bundled, a document's Roboto text
+resolves to the **exact** tier by name (FNT-06) instead of an approximate metric
+match. The release zip ships no separate license file, so `OFL-Roboto.txt` is the
+standard OFL-1.1 text with Roboto's copyright line.
+
+**Follow-up** (tracked in PROGRESS.md): widen the set further — serif and
+monospace (for example Noto Serif and Roboto Mono, both OFL-licensed), plus the
+other Roboto weights and italics. Nothing in `engine.fonts.match` assumes any
+particular font; adding more is just dropping more font files in.

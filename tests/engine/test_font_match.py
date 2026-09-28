@@ -154,3 +154,54 @@ def test_rank_by_metrics_on_empty_index_returns_empty() -> None:
     target = extract_metrics(BUNDLED_FONTS_DIR / "Vera.ttf")
     assert target is not None
     assert rank_by_metrics(target, []) == []
+
+
+@pytest.mark.feature("FNT-06")
+@pytest.mark.parametrize("weight", ["Light", "Regular"])
+def test_bundled_roboto_is_found_by_a_subset_tagged_name(bundled_index: list, weight: str) -> None:
+    """A real statement embedded "IOXRUB+Roboto-Light"; without Roboto bundled
+    it fell back to an approximate match (Trebuchet)."""
+    found = find_by_name(bundled_index, f"IOXRUB+Roboto-{weight}")
+    assert found is not None
+    assert found.source == "bundled"
+    assert found.postscript_name == f"Roboto-{weight}"
+
+
+@pytest.mark.feature("FNT-06")
+def test_bundled_roboto_ships_with_its_ofl_license() -> None:
+    from fontTools.ttLib import TTFont
+
+    license_text = (BUNDLED_FONTS_DIR / "OFL-Roboto.txt").read_text(encoding="utf-8")
+    assert "SIL OPEN FONT LICENSE Version 1.1" in license_text
+    assert "The Roboto Project Authors" in license_text
+    for weight in ("Light", "Regular"):
+        embedded = TTFont(BUNDLED_FONTS_DIR / f"Roboto-{weight}.ttf")["name"].getDebugName(13)
+        assert embedded is not None and "Open Font License" in embedded
+
+
+@pytest.mark.feature("FNT-06")
+def test_bundled_roboto_turns_an_approximate_match_into_an_exact_one(work_dir: Path, bundled_index: list) -> None:
+    import pymupdf
+
+    from engine.document import Document
+    from engine.edit import replace_span_text
+    from engine.fonts.style import extract_page_spans
+
+    path = work_dir / "roboto.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_font(fontname="RobotoL", fontfile=str(BUNDLED_FONTS_DIR / "Roboto-Light.ttf"))
+    page.insert_text((72, 100), "Balance forward", fontname="RobotoL", fontsize=8)
+    doc.subset_fonts()
+    doc.save(path)
+    doc.close()
+
+    without_roboto = [c for c in bundled_index if not c.postscript_name.startswith("Roboto")]
+    tiers = {}
+    for label, index in (("with", bundled_index), ("without", without_roboto)):
+        with Document.open(path) as document:
+            span = extract_page_spans(document.raw, 0)[0]
+            result = replace_span_text(document, 0, span, "Summary forward", font_index=index)
+            assert result.verification is not None and result.verification.text_matches
+            tiers[label] = result.tier
+    assert tiers == {"with": "exact", "without": "approximate"}
