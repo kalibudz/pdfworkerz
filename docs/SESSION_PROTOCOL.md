@@ -5,8 +5,8 @@ Build sessions can end at any time: usage limits, context size or session expiry
 ## 1. Start of every session
 
 1. Read `state/checkpoint.json`. It records `phase`, `taskId`, `step`, `branch`, `lastGreenCommit`, `nextAction` and `openQuestions`.
-2. `git fetch && git status` to confirm that the branch named in the checkpoint exists and matches the remote.
-3. Check that the latest CI run on that branch is green. If it is red, fixing it becomes the next task.
+2. `git status` to confirm that the branch named in the checkpoint exists locally and has no stray changes.
+3. Run `python tools/gate.py` (the local review workers; GitHub Actions is manual-only because its minutes are billed). If it is red, fixing it becomes the next task.
 4. Resume at `nextAction`. Do not start something new while a checkpointed task is unfinished.
 
 ## 2. Look-ahead before every task
@@ -25,18 +25,18 @@ python tools/session_budget.py --remaining <tokens left in this session>
 
 - Tasks are atomic: one feature (or one acceptance criterion of an L feature) together with its tests.
 - Work on a branch `wip/<feature-id>`. Commit at every natural break point, for example after tests are written, after the implementation passes locally, or after refactoring.
-- Before any long-running or risky step, update the checkpoint and push the WIP branch.
+- Before any long-running or risky step, update the checkpoint and commit to the WIP branch.
 - Sub-agents each get exactly one bounded task. The orchestrator never dispatches a sub-agent whose estimate exceeds the remaining usable budget. Sub-agents commit to their own WIP branch so partial work survives.
 
 ## 4. End of every task (or when the budget runs low)
 
-1. Run the full suite with evidence: `pytest --feature-results`, then `python tools/update_tracker.py --write`.
+1. Run the full gate, which includes the suite with evidence: `python tools/gate.py`, then `python tools/update_tracker.py --write`.
 2. Update `state/checkpoint.json` (the `nextAction` must be concrete enough for a cold start) and `PROGRESS.md`.
 3. Append one line to `state/usage_log.jsonl`:
    ```json
    {"date": "2026-09-26", "taskId": "INF-06", "estimate": "M", "estTokens": 150000, "actualTokens": 132000, "outcome": "done"}
    ```
-4. Commit and push. After the push, the token-free CI workers keep testing whether or not a session is alive.
+4. Commit. Push only with the owner's approval; a push is a backup and triggers no CI run.
 
 ## 5. Recalibration
 

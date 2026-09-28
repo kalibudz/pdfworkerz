@@ -17,7 +17,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P8 | Optimize, compare, accessibility, batch, extras | Planned | |
 | P9 | Packaging & documentation | Planned | |
 
-A phase is complete when all of its features are **done** through the evidence gate, CI is green on `main`, and the reviewer agent has signed off here.
+A phase is complete when all of its features are **done** through the evidence gate, the local gate (`python tools/gate.py`) is green on `main`, and the reviewer agent has signed off here.
 
 ## Standing review items
 
@@ -25,6 +25,36 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-28 (cont. 2) — verification moves from GitHub Actions to a local gate; PR #1 merged locally
+
+- **Independent re-verification** of the P3 branch on a second machine
+  (Windows 11, Python 3.14.3, Node 24), from a fresh dependency install:
+  546 tests passed, including the Playwright suite against a fresh
+  `web/dist`, at 94.21% coverage. ruff, ruff format, mypy --strict,
+  bandit, pip-audit, npm audit, the SPEC catalog and ops-schema checks
+  were all clean. `update_tracker.py --write` found no status changes:
+  57/161 features, 0 unsupported claims. The previous entry's claims
+  reproduce.
+- **All branches consolidated into `main`.** `claude/pdf-workerz-editing-c7fz6n`
+  already contained every commit from `claude/epic-davinci-vu56x5` and
+  `main`, so `main` was fast-forwarded to it (this merges PR #1).
+- **GitHub Actions is now manual-only.** Its minutes are billed on this
+  private repo, which is what stopped every job after the P3 merge.
+  `ci.yml` triggers only on `workflow_dispatch` and still mirrors all six
+  jobs across three OSes for an occasional on-demand run.
+- **`tools/gate.py` is the everyday gate.** It runs the same checks as
+  `ci.yml` locally (lint, types, spec sync, tests with the evidence gate,
+  security, tracker build), keeps going past a failure, and prints a
+  summary. Python tools run as `sys.executable -m <tool>`, never from PATH.
+- **INF-03's evidence moved to the gate.** Its old test required CI to run
+  on push and pull request; the new tests prove the gate defines every job,
+  enforces the evidence and spec checks, reports failures without stopping,
+  uses no AI services, and that `ci.yml` cannot run without a manual
+  trigger. SPEC.md, SESSION_PROTOCOL.md and README.md now describe the gate.
+- **Coverage lost:** only Windows and Python 3.14 are exercised routinely
+  now, although `requires-python` is `>=3.11`. Recorded in the checkpoint's
+  open questions.
 
 ### 2026-09-28 (cont.) — P3 complete: branches consolidated, EDT-05/07/08/09/10/11, real-document fixes
 

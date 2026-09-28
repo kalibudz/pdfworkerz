@@ -1,12 +1,12 @@
 {
   "phase": "P4",
-  "taskId": "P3 complete (15/15). 57/161 features done. Next: P4 (command bar & recipes)",
-  "step": "546 tests passing, full local gate clean (94.3% coverage). All work is on claude/pdf-workerz-editing-c7fz6n, PR #1 to main (consolidates the UI branch). GitHub Actions has not run any job since the merge commit: every job fails in seconds with no logs, consistent with exhausted Actions minutes on this private repo. Needs the account owner (billing/spending limit, or trim the macOS/Windows matrix).",
-  "branch": "claude/pdf-workerz-editing-c7fz6n",
-  "lastGreenCommit": "37c6c782328dcbd588fed23f813fd6748d67ce1f (UI branch, CI run #31); nothing since could run on CI",
-  "nextAction": "1) Get CI running again (account owner: Actions minutes/spending limit) and confirm PR #1 green on all platforms, then merge it. 2) Independent reviewer pass for P1-P3. 3) Start P4 (CMD-01..08: plain-English command grammar and recipes); run tools/session_budget.py first.",
+  "taskId": "P3 complete (15/15). 57/161 features done. Next: independent P1-P3 review, then P4 (command bar & recipes)",
+  "step": "All branches consolidated into main (PR #1 merged locally by fast-forward). Verification moved from GitHub Actions (billed; manual-only now) to the local gate: python tools/gate.py, 14/14 steps, 551 tests, 94.25% coverage.",
+  "branch": "main",
+  "lastGreenCommit": "28fe0e278465b58ea89de2a784ac454e519e46db (local gate, Windows 11, Python 3.14.3, 14/14 steps)",
+  "nextAction": "1) Independent reviewer pass for P1-P3 (a fresh sub-agent that did not build them), signed off in PROGRESS.md. 2) Start P4 (CMD-01..08: plain-English command grammar and recipes); run tools/session_budget.py first. Every session: run python tools/gate.py before each commit; push only with the owner's approval.",
   "openQuestions": [
-    "GitHub Actions: every job since the P3 merge commit failed within seconds with no logs (no steps ran) on this private repo; consistent with exhausted Actions minutes / spending limit (macOS bills 10x, Windows 2x). Consider running the macOS/Windows test shards only on pull_request or on a schedule.",
+    "Only Windows + Python 3.14 is exercised routinely now (tools/gate.py), though requires-python is >=3.11 and ruff targets py311, so 3.12+-only syntax or a Linux/macOS-only failure would go unnoticed. ci.yml's 3-OS x 3.11/3.13 matrix still exists but is manual-only (workflow_dispatch) and costs Actions minutes (macOS 10x). Run it once before a release, or install Python 3.11 locally and add a --python option to the gate.",
     "Editing a shape (EDT-09) is remove-then-redraw from get_drawings() data: blend modes, pattern/shading paints and optional-content membership are not carried over -- documented in engine/shapes.py.",
     "Image crop (EDT-08) is refused for rotated/skewed placements; image and shape boxes in the UI skip near-full-page shapes (backgrounds) so they can't swallow clicks.",
     "Spell-check ignore lists are per browser session only (no persistent user dictionary yet); only en_US is bundled.",

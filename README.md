@@ -76,18 +76,19 @@ npm run dev
 
 The dev server hot-reloads whenever `features.json` or `state/checkpoint.json` changes. `npm run artifact` bundles a single self-contained HTML page. A published snapshot is at https://claude.ai/artifact/GSgFTQKmziP9ZzyyFiEG6m (private until shared); it is republished as statuses change.
 
-## Development checks (same as CI)
+## Development checks (the local gate)
 
 ```bash
 python -m venv .venv
 .venv/Scripts/pip install -e ".[dev]"          # use .venv/bin/pip on macOS/Linux
-pytest --feature-results --cov                  # tests + evidence for the tracker
-python tools/update_tracker.py --write          # statuses follow test evidence
-python tools/update_tracker.py --check          # fails on any unproven "done"
-python tools/gen_spec_catalog.py --check        # SPEC.md in sync with features.json
-python tools/session_budget.py --remaining 600000   # which task fits this session
-ruff check . && mypy tools && bandit -q -r tools
+.venv/Scripts/python -m playwright install chromium
+.venv/Scripts/python tools/gate.py              # every review worker: lint, types, spec sync, tests, security, tracker build
+.venv/Scripts/python tools/gate.py --job lint   # just one job (repeatable); --list shows every step
+.venv/Scripts/python tools/update_tracker.py --write     # statuses follow the evidence the gate's test run produced
+.venv/Scripts/python tools/session_budget.py --remaining 600000   # which task fits this session
 ```
+
+The gate must pass before every commit. `.github/workflows/ci.yml` runs the same jobs across Linux, Windows and macOS, but only when triggered by hand from the Actions tab: Actions minutes are billed on this private repository.
 
 A feature is marked **done** only when tests linked to it with `@pytest.mark.feature("ID")` pass. Nobody sets that status by hand.
 
