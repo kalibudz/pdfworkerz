@@ -11,8 +11,12 @@
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
+/* Passive OS-preference support (unchanged from before UI-09): followed
+ * only while no explicit choice has been made, i.e. `data-theme` isn't
+ * "light" -- an explicit "dark" choice would match this anyway, but an
+ * explicit "light" choice must be able to override a dark OS. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #14161a;
     --panel: #1e2126;
     --text: #e6e9ef;
@@ -23,6 +27,26 @@
     --danger: #ff6b64;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   }
+}
+
+/* UI-09: explicit overrides, set by theme.ts via a data-theme attribute
+ * on <html> and persisted in localStorage -- these win regardless of what
+ * the OS's own color-scheme preference says. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #14161a;
+  --panel: #1e2126;
+  --text: #e6e9ef;
+  --text-muted: #9aa3b2;
+  --border: #33373e;
+  --accent: #5b8dfa;
+  --accent-text: #0b0e14;
+  --danger: #ff6b64;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 * {
@@ -45,8 +69,20 @@ body {
     sans-serif;
 }
 
+/* #pw-theme-toggle is a reserved strip above #app, not a floating overlay
+ * on top of it -- a fixed-position button was tried first and found (via
+ * a real Playwright failure, not by inspection) to intercept clicks on
+ * the viewer toolbar's rightmost buttons whenever the toolbar's own
+ * content happened to reach that corner. In-flow layout can't collide
+ * with anything below it, at any window width. */
+body {
+  display: flex;
+  flex-direction: column;
+}
+
 #app {
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 button {
@@ -507,4 +543,25 @@ button {
   top: 0;
   left: 0;
   pointer-events: none;
+}
+
+/* -- UI-09: theme toggle -- */
+
+#pw-theme-toggle {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.pw-theme-toggle {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.82rem;
 }

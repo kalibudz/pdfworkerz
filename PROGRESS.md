@@ -9,7 +9,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | First green GitHub Actions run: [run #17](https://github.com/kalibudz/pdfworkerz/actions/runs/36356246278), all 11 jobs, 2026-09-27 |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P3 | Web UI with click-to-edit | 🔶 In progress: 8/15 features proven by tests | |
+| P3 | Web UI with click-to-edit | 🔶 In progress: 9/15 features proven by tests | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,55 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-28 — UI-09: light/dark theme toggle with persistence
+
+- `web/src/theme.ts`: an explicit light/dark toggle layered on top of
+  `style.css`'s existing *passive* `prefers-color-scheme` support, rather
+  than replacing it -- "system" (the default, and previously the only
+  choice) still follows the OS; "light" and "dark" are explicit overrides
+  that win regardless of what the OS says. A `data-theme` attribute on
+  `<html>` drives new `:root[data-theme="light"]`/`[data-theme="dark"]`
+  CSS blocks; the existing `@media (prefers-color-scheme: dark)` block is
+  now guarded by `:root:not([data-theme="light"])` so an explicit light
+  choice can still override a dark OS. Persisted to `localStorage`
+  (wrapped in try/catch -- private browsing or a locked-down browser just
+  means the choice won't survive a reload, never a crash), and applied as
+  early as possible in `main.ts` (before `mount()`) so a returning
+  visitor's choice takes effect without a flash of the wrong theme.
+- The toggle itself lives *outside* `app.ts`'s screen-swapping: `mount()`
+  replaces `#app`'s entire content wholesale on every connect -> open ->
+  viewer transition, so anything placed inside `#app` would be wiped by
+  the next screen. `index.html` gained a `#pw-theme-toggle` sibling to
+  `#app`; `main.ts` mounts the toggle there once, so it (and the theme
+  choice) persist across every screen rather than just the viewer.
+- **A real bug, caught by the Playwright suite catching a real click
+  failure, not by inspection**: the toggle's first design used
+  `position: fixed` to float it in a screen corner. On the viewer screen,
+  the toolbar's own button row happened to reach that exact corner at the
+  test browser's window width, and the fixed-position toggle sat on top
+  of it in z-order -- silently eating clicks meant for the "Compare"
+  button (four previously-passing UI-05 tests started failing the moment
+  this was added, each timing out on `page.click(".pw-toolbar
+  button:has-text('Compare')")` with Playwright's own error naming the
+  exact intercepting element). Fixed by making `body` a flex column with
+  `#pw-theme-toggle` as a real, in-flow reserved strip above `#app`
+  (`flex: 0 0 auto`) rather than a floating overlay on top of it --
+  `#app` takes the remaining height (`flex: 1 1 auto; min-height: 0`).
+  In-flow layout can't collide with anything below it at any window
+  width, which a fixed-position overlay can't guarantee.
+- 4 new Playwright tests (386 total, 93.3% coverage): the toggle is
+  visible before any document is open (proving it survives screen
+  swaps), cycling through Auto -> Light -> Dark -> Auto, an explicit dark
+  choice actually changing a computed CSS variable (not just the
+  attribute), and the choice surviving a reload. ruff (check and format),
+  mypy (scoped to `engine cli tools server`), bandit,
+  `ops.schema.json`/SPEC catalog sync (unchanged -- no backend touched at
+  all this session) and `npm audit` all clean.
+- UI-09 moved to `done` (51/161 total, 9/15 in P3 -- **8/8 of P3's UI-0x
+  features**, every one tracked for this phase, is now built and
+  proven). Only EDT-05/07/08/09/10/11 remain open in P3, independent of
+  the UI scaffolding this and the prior several sessions built.
 
 ### 2026-09-28 — UI-08: keyboard shortcuts and accessible UI
 

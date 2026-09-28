@@ -113,7 +113,7 @@
     {"id": "UI-06", "category": "UI", "name": "Password prompt for encrypted files", "parity": ["iLovePDF", "Nitro"], "libs": ["TypeScript"], "phase": "P3", "estTokens": "S", "status": "done"},
     {"id": "UI-07", "category": "UI", "name": "Drag-and-drop page organizer", "parity": ["iLovePDF", "Nitro"], "libs": ["TypeScript"], "phase": "P5", "estTokens": "M", "status": "planned"},
     {"id": "UI-08", "category": "UI", "name": "Keyboard shortcuts and accessible UI", "parity": ["Nitro"], "libs": ["TypeScript"], "phase": "P3", "estTokens": "S", "status": "done"},
-    {"id": "UI-09", "category": "UI", "name": "Light and dark themes", "parity": ["Nitro"], "libs": ["CSS"], "phase": "P3", "estTokens": "S", "status": "planned"},
+    {"id": "UI-09", "category": "UI", "name": "Light and dark themes", "parity": ["Nitro"], "libs": ["CSS"], "phase": "P3", "estTokens": "S", "status": "done"},
     {"id": "CMD-01", "category": "CMD", "name": "Deterministic plain-English command grammar", "parity": ["Beyond"], "libs": ["Lark"], "phase": "P4", "estTokens": "M", "status": "planned"},
     {"id": "CMD-02", "category": "CMD", "name": "Target selectors (\"text\", /regex/, page ranges, odd/even, all pages)", "parity": ["Beyond"], "libs": ["Lark"], "phase": "P4", "estTokens": "M", "status": "planned"},
     {"id": "CMD-03", "category": "CMD", "name": "Style modifiers (match style, bold, size, color)", "parity": ["Beyond"], "libs": ["Lark"], "phase": "P4", "estTokens": "S", "status": "planned"},

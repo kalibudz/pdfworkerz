@@ -3,11 +3,12 @@
 The browser UI (SPEC.md section 8): a pdf.js canvas with a thumbnail rail
 (UI-01), the password prompt for encrypted files (UI-06), a click-to-edit
 overlay (UI-02), an inspector panel (UI-03), a history panel with
-undo/redo (UI-04), a before/after split view (UI-05), and keyboard
-shortcuts for the actions above (UI-08) -- and, as later features land,
-the command bar and a light/dark theme toggle. It talks to `server/app.py`
-over plain JSON HTTP; nothing here runs on the server, and nothing in
-`server/` knows this directory exists.
+undo/redo (UI-04), a before/after split view (UI-05), keyboard shortcuts
+for the actions above (UI-08), and a light/dark theme toggle (UI-09) --
+every UI-0x feature tracked for this phase. As later features land: the
+command bar. It talks to `server/app.py` over plain JSON HTTP; nothing
+here runs on the server, and nothing in `server/` knows this directory
+exists.
 
 ## Running it
 
@@ -150,6 +151,35 @@ this worse, so it had to be fixed first: `isTypingTarget` now also checks
 `target.isContentEditable`, true for a contenteditable element and any of
 its descendants (unlike a tag-name check). A regression test locks this
 in.
+
+## UI-09's theme toggle, and a fixed-position layout bug it exposed
+
+`src/theme.ts` layers an explicit light/dark toggle on top of
+`style.css`'s existing *passive* `prefers-color-scheme` support rather
+than replacing it: "Auto" (the default, and previously the only choice)
+still follows the OS; "Light" and "Dark" are explicit overrides that win
+regardless of what the OS says, via a `data-theme` attribute on `<html>`
+persisted to `localStorage`. It's mounted from `main.ts` into a
+`#pw-theme-toggle` element that's a *sibling* of `#app` in `index.html`,
+not something inside it -- `app.ts`'s `mount()` replaces `#app`'s entire
+content wholesale on every connect -> open -> viewer transition, so
+anything placed inside `#app` would be wiped by the next screen. Living
+outside it is what lets the toggle (and the theme choice) survive every
+screen, not just the viewer.
+
+The first version of this toggle used `position: fixed` to float it in a
+screen corner -- and broke four *already-passing* UI-05 tests the moment
+it was added, each failing with Playwright's own error naming the exact
+element blocking the click: the viewer toolbar's own button row reached
+that same corner at the test browser's window width, and the
+fixed-position toggle sat on top of it in z-order, silently eating clicks
+meant for "Compare". Fixed by making `body` a flex column with
+`#pw-theme-toggle` as a real, in-flow reserved strip (`flex: 0 0 auto`)
+above `#app` (`flex: 1 1 auto; min-height: 0`) instead of a floating
+overlay on top of it. In-flow layout can't collide with anything below
+it at any window width; a fixed-position element never has that
+guarantee. Worth remembering before adding any other persistent UI chrome
+to this app.
 
 ## The pdfjs-dist version pin and the `getOrInsertComputed` polyfill
 

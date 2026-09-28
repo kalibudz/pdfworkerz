@@ -540,3 +540,61 @@ def test_c_key_toggles_the_compare_view(page: Page, app_url: str, corpus: Corpus
     page.keyboard.press("c")
     page.wait_for_selector(".pw-canvas-wrap", timeout=5000)
     assert page.eval_on_selector_all(".pw-compare", "els => els.length") == 0
+
+
+# -- UI-09 (light/dark theme toggle with persistence) --
+
+_THEME_ATTR = "() => document.documentElement.dataset.theme ?? null"
+
+
+@pytest.mark.feature("UI-09")
+def test_theme_toggle_is_visible_before_any_document_is_open(page: Page, connect_only_url: str) -> None:
+    """The toggle lives outside app.ts's screen-swapping (main.ts mounts it
+    into a sibling of #app, never #app itself), so it's there on the very
+    first screen, before a session is even configured -- not just once a
+    document is open."""
+    page.goto(connect_only_url)
+    page.wait_for_selector(".pw-theme-toggle", timeout=5000)
+
+
+@pytest.mark.feature("UI-09")
+def test_theme_toggle_cycles_through_auto_light_and_dark(page: Page, connect_only_url: str) -> None:
+    page.goto(connect_only_url)
+    page.wait_for_selector(".pw-theme-toggle", timeout=5000)
+    assert page.evaluate(_THEME_ATTR) is None  # "system" -- no explicit override yet
+
+    page.click(".pw-theme-toggle")
+    assert page.evaluate(_THEME_ATTR) == "light"
+
+    page.click(".pw-theme-toggle")
+    assert page.evaluate(_THEME_ATTR) == "dark"
+
+    page.click(".pw-theme-toggle")
+    assert page.evaluate(_THEME_ATTR) is None  # back to "system"
+
+
+@pytest.mark.feature("UI-09")
+def test_choosing_dark_actually_changes_the_rendered_colors(page: Page, connect_only_url: str) -> None:
+    """Not just that the attribute gets set -- that style.css's rules for
+    it actually take effect, proven by a real computed style change."""
+    page.goto(connect_only_url)
+    page.wait_for_selector(".pw-theme-toggle", timeout=5000)
+    light_bg = page.evaluate("() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()")
+
+    page.click(".pw-theme-toggle")  # -> light (explicit, same as default here, but exercises the path)
+    page.click(".pw-theme-toggle")  # -> dark
+    dark_bg = page.evaluate("() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()")
+
+    assert dark_bg != light_bg
+
+
+@pytest.mark.feature("UI-09")
+def test_theme_choice_persists_across_a_reload(page: Page, connect_only_url: str) -> None:
+    page.goto(connect_only_url)
+    page.wait_for_selector(".pw-theme-toggle", timeout=5000)
+    page.click(".pw-theme-toggle")  # -> light
+    assert page.evaluate(_THEME_ATTR) == "light"
+
+    page.reload()
+    page.wait_for_selector(".pw-theme-toggle", timeout=5000)
+    assert page.evaluate(_THEME_ATTR) == "light"
