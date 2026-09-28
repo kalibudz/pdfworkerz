@@ -14,6 +14,7 @@
  */
 
 import type { Api } from "./api";
+import { createHistoryPanel } from "./history";
 import { createInspector } from "./inspector";
 import { createOverlay } from "./overlay";
 import { loadPdf, PageRenderer, thumbnailViewport, type PdfDocument } from "./pdf";
@@ -104,8 +105,10 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
 
   const inspectorPanel = document.createElement("div");
 
+  const historyPanel = document.createElement("div");
+
   body.append(thumbRail, pageArea, inspectorPanel);
-  root.append(toolbar, body);
+  root.append(toolbar, body, historyPanel);
   container.appendChild(root);
 
   const loadingNotice = document.createElement("p");
@@ -119,7 +122,12 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     api: options.api,
     documentId: options.documentId,
     inspector,
-    onCommitted: () => void reloadAfterCommit(),
+    onCommitted: () => void reloadDocument(),
+  });
+  const history = createHistoryPanel(historyPanel, {
+    api: options.api,
+    documentId: options.documentId,
+    onChanged: () => void reloadDocument(),
   });
 
   const renderer = new PageRenderer();
@@ -159,16 +167,19 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     }
   }
 
-  /** UI-02's commit step changed the document server-side; span indices and
-   * this page's rendered content are both stale now, so everything that
-   * depends on either is reloaded from scratch rather than guessed at. */
-  async function reloadAfterCommit(): Promise<void> {
+  /** The document changed server-side -- a committed edit (UI-02) or an
+   * undo/redo (UI-04) -- so span indices and this page's rendered content
+   * are both stale now; everything that depends on either is reloaded from
+   * scratch rather than guessed at. Also the one place that refreshes the
+   * history panel, so every caller gets it for free. */
+  async function reloadDocument(): Promise<void> {
     const bytes = await options.api.documentFile(options.documentId);
     pdf = await loadPdf(bytes);
     thumbRail.innerHTML = "";
     thumbButtons.length = 0;
     buildThumbnailRail(thumbRail, pdf, options.pageCount, thumbButtons, (pageNumber) => void goToPage(pageNumber));
     await renderCurrentPage();
+    await history.refresh();
   }
 
   async function goToPage(pageNumber: number): Promise<void> {
@@ -220,6 +231,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   buildThumbnailRail(thumbRail, pdf, options.pageCount, thumbButtons, (pageNumber) => void goToPage(pageNumber));
 
   await renderCurrentPage();
+  await history.refresh();
 }
 
 function buildThumbnailRail(

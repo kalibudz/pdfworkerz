@@ -75,6 +75,21 @@ export interface PreviewResult {
   note: string;
 }
 
+/** One applied edit, exactly as it was requested -- an Op's own fields
+ * (op.model_dump()), not the result of applying it. Which fields exist
+ * beyond `op` depends on which Op it is; see history.ts's describeOp. */
+export interface HistoryOp {
+  op: string;
+  [field: string]: unknown;
+}
+
+/** Mirrors server/app.py's HistoryResponse (UI-04). */
+export interface HistoryState {
+  ops: HistoryOp[];
+  can_undo: boolean;
+  can_redo: boolean;
+}
+
 async function parseErrorDetail(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json();
@@ -157,6 +172,25 @@ export class Api {
         require_tier: requireTier,
       }),
     });
+  }
+
+  /** UI-04: the ops applied so far (oldest first), and whether there's
+   * anything to undo/redo right now. */
+  async history(documentId: string): Promise<HistoryState> {
+    const response = await this.request(`/documents/${documentId}/history`);
+    return (await response.json()) as HistoryState;
+  }
+
+  /** UI-04: revert the most recent op. Rejects (409, via ApiError) if
+   * there's nothing to undo -- callers should already be gating this on
+   * HistoryState.can_undo, this is the belt-and-suspenders backstop. */
+  async undo(documentId: string): Promise<void> {
+    await this.request(`/documents/${documentId}/undo`, { method: "POST" });
+  }
+
+  /** UI-04: re-apply the most recently undone op. */
+  async redo(documentId: string): Promise<void> {
+    await this.request(`/documents/${documentId}/redo`, { method: "POST" });
   }
 
   private async request(path: string, init: RequestInit = {}): Promise<Response> {

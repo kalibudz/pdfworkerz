@@ -2,10 +2,11 @@
 
 The browser UI (SPEC.md section 8): a pdf.js canvas with a thumbnail rail
 (UI-01), the password prompt for encrypted files (UI-06), a click-to-edit
-overlay (UI-02) and an inspector panel (UI-03) -- and, as later features
-land, the command bar and history panel. It talks to `server/app.py` over
-plain JSON HTTP; nothing here runs on the server, and nothing in `server/`
-knows this directory exists.
+overlay (UI-02), an inspector panel (UI-03), and a history panel with
+undo/redo (UI-04) -- and, as later features land, the command bar and a
+before/after split view. It talks to `server/app.py` over plain JSON
+HTTP; nothing here runs on the server, and nothing in `server/` knows
+this directory exists.
 
 ## Running it
 
@@ -59,6 +60,30 @@ local copy of the shared "currently editing" reference and clears the
 shared one immediately, before touching the box at all, specifically so
 that reentrant call becomes a harmless no-op instead of operating on a
 box the outer call has already moved past.
+
+## UI-04's history panel shows what was asked for, not how well it went
+
+`src/history.ts` renders `GET .../history`'s `ops` list, which is
+`journal.history` -- each applied `Op`'s own requested fields
+(`model_dump()`), not the `EditResult` it produced. Tier, confidence and
+verification are not part of that response, so a history entry describes
+*what was asked for* (e.g. "Replace text with \"Hello, Editor.\""), not
+*how well it went* (SPEC.md's own mockup shows a richer summary like "14
+hits, Exact" that this doesn't attempt). Getting that would mean the
+journal itself recording results per entry, not just inputs -- out of
+this feature's tracked scope. `describeOp` switches on each Op's `op`
+discriminator and falls back to the raw op name for one it doesn't
+recognize, rather than guessing at fields that might not exist.
+
+`viewer.ts`'s `reloadDocument` (generalized from UI-02's
+`reloadAfterCommit`) is the one place that refreshes everything after any
+document-changing action -- a commit, an undo, or a redo -- ending with
+`history.refresh()`. Both the overlay's commit callback and the history
+panel's own undo/redo callbacks call this single function rather than
+each managing a partial refresh, which is also why the panel's undo/redo
+button handlers don't call `refresh()` themselves on success: `reloadDocument`
+already will. They still call `refresh()` on failure, to re-sync the
+buttons' disabled state if the undo/redo request itself was rejected.
 
 ## The pdfjs-dist version pin and the `getOrInsertComputed` polyfill
 

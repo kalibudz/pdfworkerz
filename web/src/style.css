@@ -157,7 +157,7 @@ button {
 .pw-viewer {
   height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto 1fr auto;
 }
 
 .pw-toolbar {
@@ -358,4 +358,65 @@ button {
 
 .pw-match-dot.pw-match-fallback {
   background: var(--danger);
+}
+
+/* -- UI-04: history panel -- */
+
+.pw-history {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.pw-history-label {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.pw-history-list {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.pw-history-entry {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.pw-history-entry.pw-history-current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pw-history-separator {
+  color: var(--border);
+  flex: 0 0 auto;
+}
+
+.pw-history-empty {
+  color: var(--text-muted);
+}
+
+.pw-history button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.pw-history button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }

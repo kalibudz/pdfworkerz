@@ -9,7 +9,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | First green GitHub Actions run: [run #17](https://github.com/kalibudz/pdfworkerz/actions/runs/36356246278), all 11 jobs, 2026-09-27 |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P3 | Web UI with click-to-edit | 🔶 In progress: 5/15 features proven by tests | |
+| P3 | Web UI with click-to-edit | 🔶 In progress: 6/15 features proven by tests | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,59 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-28 — UI-04: history panel with undo/redo
+
+- The smallest remaining UI item, and the least novel: `GET .../history`
+  and `POST .../undo`/`.../redo` already existed and were already fully
+  tested from the COR-11 session, so this was almost entirely frontend
+  wiring, not new backend design.
+- `web/src/history.ts`: a footer strip (SPEC.md section 8.1's mockup) --
+  a compact, horizontally-scrollable list of applied ops plus Undo/Redo
+  buttons. `describeOp` renders a human-readable line per Op type by
+  switching on its own discriminator field, matching `engine/ops/text.py`'s
+  registered Op shapes field-for-field; an Op it doesn't recognize falls
+  back to the raw op name rather than guessing.
+- **One real limitation, documented rather than papered over**:
+  `journal.history` (and so the API's `HistoryResponse`) is a list of the
+  Ops as they were *requested* (an Op's own fields via `model_dump()`),
+  not the `EditResult` each one produced -- tier, confidence and
+  verification aren't part of it. Entries describe what was asked for, not
+  how well it went; the richer per-edit summary SPEC.md's own mockup shows
+  ("14 hits, Exact") would need the history endpoint to start recording
+  results too, out of this feature's tracked scope (`tracker/features.json`'s
+  UI-04 is just "History panel with undo/redo").
+- `viewer.ts`'s post-commit reload (previously `reloadAfterCommit`,
+  written for UI-02) generalized into `reloadDocument`, now the one place
+  that owns "something about the document changed": re-fetch bytes,
+  reload pdf.js, rebuild the thumbnail rail, re-render the current page,
+  and refresh the history panel. Both the overlay's commit callback and
+  the history panel's own undo/redo callback call this same function now,
+  rather than each managing a partial refresh -- avoided a first-draft
+  redundancy where the panel's undo/redo handlers would have refreshed
+  history themselves *and* through this shared reload, double-fetching on
+  every click.
+- One new backend test (`test_replace_span_text_op_round_trips_through_history_and_undo`,
+  tagged UI-04 since it's proving *this* feature's assumption, not COR-11's
+  general undo/redo plumbing already covered): confirms `replace_span_text`'s
+  fields -- what `describeOp` actually reads -- really are present in the
+  history response, and that undo/redo work for this specific Op, not just
+  the generically-tested `replace_text`.
+- 5 new tests (369 total, 93.2% coverage); ruff, `mypy --strict` (scoped to
+  `engine cli tools server`, matching CI -- running it over the whole tree
+  including `tests/` isn't the actual gate and produces hundreds of
+  unrelated pre-existing errors in test files that were never meant to be
+  strictly typed), bandit, `ops.schema.json`/SPEC catalog sync all clean.
+  `npm audit` on `web/` still finds 0 vulnerabilities. `pip-audit` flags
+  several CVEs in `cryptography`/`httplib2`/`pip`/`pyjwt`/`setuptools`/
+  `urllib3`/`wheel` -- none of them are pdfworkerz dependencies (grepped
+  `pyproject.toml` to confirm; `setuptools` appears only as a
+  `build-system` version floor, not a runtime dep), so this is sandbox
+  environment drift in the advisory database since the last session, not
+  anything this change introduced or can fix from here.
+- UI-04 moved to `done` (48/161 total, 6/15 in P3). Remaining in P3:
+  UI-05 (before/after split view), UI-08 (keyboard shortcuts beyond page
+  nav), UI-09 (light/dark toggle + persistence), and EDT-05/07/08/09/10/11.
 
 ### 2026-09-28 — UI-02 and UI-03: click-to-edit and the inspector panel
 

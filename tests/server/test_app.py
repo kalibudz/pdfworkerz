@@ -246,6 +246,43 @@ def test_replace_span_text_op_via_the_generic_ops_endpoint(client: TestClient, s
     assert history["can_undo"] is True
 
 
+@pytest.mark.feature("UI-04")
+def test_replace_span_text_op_round_trips_through_history_and_undo(client: TestClient, simple_path: Path) -> None:
+    """UI-04's history panel describes each entry from the Op's own fields
+    (web/src/history.ts's describeOp) -- so those fields, not just an op
+    count, need to actually be there. Also confirms undo/redo work for this
+    Op specifically, not just for the generic replace_text already covered
+    by test_undo_redo_round_trip_through_the_api."""
+    document_id = _open(client, simple_path)
+    client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "replace_span_text", "page_index": 0, "span_index": 0, "new_text": "Hello, Editor."},
+        headers=AUTH,
+    )
+
+    history = client.get(f"/documents/{document_id}/history", headers=AUTH).json()
+    assert history["ops"] == [
+        {
+            "op": "replace_span_text",
+            "page_index": 0,
+            "span_index": 0,
+            "new_text": "Hello, Editor.",
+            "require_tier": "approximate",
+            "fit": False,
+            "verify": True,
+        }
+    ]
+
+    undo_response = client.post(f"/documents/{document_id}/undo", headers=AUTH)
+    assert undo_response.status_code == 200
+    assert undo_response.json()["op"]["new_text"] == "Hello, Editor."
+    assert client.get(f"/documents/{document_id}/history", headers=AUTH).json()["can_redo"] is True
+
+    redo_response = client.post(f"/documents/{document_id}/redo", headers=AUTH)
+    assert redo_response.status_code == 200
+    assert redo_response.json()["op"]["new_text"] == "Hello, Editor."
+
+
 @pytest.mark.feature("COR-11")
 def test_document_file_route_returns_the_current_pdf_bytes(client: TestClient, simple_path: Path) -> None:
     document_id = _open(client, simple_path)

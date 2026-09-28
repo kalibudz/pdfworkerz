@@ -300,3 +300,71 @@ def test_declining_the_confirmation_leaves_the_edit_uncommitted(page: Page, app_
     page.wait_for_timeout(500)
     assert page.eval_on_selector_all(".pw-span-box.pw-span-editing", "els => els.length") == 1
     assert page.eval_on_selector(".pw-span-box.pw-span-editing", "el => el.textContent") == "X"
+
+
+# -- UI-04 (history panel with undo/redo) --
+
+
+def _commit_edit(page: Page, app_url: str, path: str, new_text: str) -> None:
+    _open_and_click_first_span(page, app_url, path)
+    page.wait_for_function(_EXACT_DOT, timeout=3000)
+    page.keyboard.type(new_text)
+    page.wait_for_timeout(400)  # let the debounced preview resolve before committing
+    page.keyboard.press("Enter")
+    page.wait_for_function(_NOT_EDITING, timeout=5000)
+
+
+def _undo_button_disabled(page: Page) -> bool:
+    return bool(page.eval_on_selector(".pw-history button:has-text('Undo')", "el => el.disabled"))
+
+
+def _redo_button_disabled(page: Page) -> bool:
+    return bool(page.eval_on_selector(".pw-history button:has-text('Redo')", "el => el.disabled"))
+
+
+@pytest.mark.feature("UI-04")
+def test_history_panel_shows_no_edits_yet_before_any_commit(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.simple))
+    _wait_viewer_ready(page)
+    page.wait_for_selector(".pw-history-empty", timeout=5000)
+    assert _undo_button_disabled(page) is True
+    assert _redo_button_disabled(page) is True
+
+
+@pytest.mark.feature("UI-04")
+def test_history_panel_shows_an_entry_after_a_committed_edit(page: Page, app_url: str, corpus: Corpus) -> None:
+    _commit_edit(page, app_url, str(corpus.simple), "Hello, Editor.")
+    page.wait_for_selector(".pw-history-entry", timeout=5000)
+    assert "Hello, Editor." in (page.text_content(".pw-history-entry") or "")
+    assert _undo_button_disabled(page) is False
+    assert _redo_button_disabled(page) is True
+
+
+@pytest.mark.feature("UI-04")
+def test_undo_reverts_the_content_and_updates_button_state(page: Page, app_url: str, corpus: Corpus) -> None:
+    """corpus.simple's original text -- see test_inspector_shows_the_selected_spans_style's
+    docstring above -- is "Hello, PDFWorkerz."."""
+    _commit_edit(page, app_url, str(corpus.simple), "Hello, Editor.")
+    page.click(".pw-history button:has-text('Undo')")
+    page.wait_for_function(
+        "() => document.querySelector('.pw-span-box')?.textContent === 'Hello, PDFWorkerz.'", timeout=5000
+    )
+    page.wait_for_selector(".pw-history-empty", timeout=5000)
+    assert _undo_button_disabled(page) is True
+    assert _redo_button_disabled(page) is False
+
+
+@pytest.mark.feature("UI-04")
+def test_redo_reapplies_the_content_and_updates_button_state(page: Page, app_url: str, corpus: Corpus) -> None:
+    _commit_edit(page, app_url, str(corpus.simple), "Hello, Editor.")
+    page.click(".pw-history button:has-text('Undo')")
+    page.wait_for_selector(".pw-history-empty", timeout=5000)
+    page.click(".pw-history button:has-text('Redo')")
+    page.wait_for_function(
+        "() => document.querySelector('.pw-span-box')?.textContent === 'Hello, Editor.'", timeout=5000
+    )
+    page.wait_for_selector(".pw-history-entry", timeout=5000)
+    assert _undo_button_disabled(page) is False
+    assert _redo_button_disabled(page) is True
