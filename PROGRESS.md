@@ -6,10 +6,10 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 
 | Phase | Scope | Status | Reviewer sign-off |
 |---|---|---|---|
-| P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | Pending: first green GitHub Actions run |
+| P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | First green GitHub Actions run: [run #17](https://github.com/kalibudz/pdfworkerz/actions/runs/36356246278), all 11 jobs, 2026-09-27 |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P3 | Web UI with click-to-edit | 🔶 In progress: 1/15 features proven by tests | |
+| P3 | Web UI with click-to-edit | 🔶 In progress: 9/15 features proven by tests | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,468 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-28 — UI-09: light/dark theme toggle with persistence
+
+- `web/src/theme.ts`: an explicit light/dark toggle layered on top of
+  `style.css`'s existing *passive* `prefers-color-scheme` support, rather
+  than replacing it -- "system" (the default, and previously the only
+  choice) still follows the OS; "light" and "dark" are explicit overrides
+  that win regardless of what the OS says. A `data-theme` attribute on
+  `<html>` drives new `:root[data-theme="light"]`/`[data-theme="dark"]`
+  CSS blocks; the existing `@media (prefers-color-scheme: dark)` block is
+  now guarded by `:root:not([data-theme="light"])` so an explicit light
+  choice can still override a dark OS. Persisted to `localStorage`
+  (wrapped in try/catch -- private browsing or a locked-down browser just
+  means the choice won't survive a reload, never a crash), and applied as
+  early as possible in `main.ts` (before `mount()`) so a returning
+  visitor's choice takes effect without a flash of the wrong theme.
+- The toggle itself lives *outside* `app.ts`'s screen-swapping: `mount()`
+  replaces `#app`'s entire content wholesale on every connect -> open ->
+  viewer transition, so anything placed inside `#app` would be wiped by
+  the next screen. `index.html` gained a `#pw-theme-toggle` sibling to
+  `#app`; `main.ts` mounts the toggle there once, so it (and the theme
+  choice) persist across every screen rather than just the viewer.
+- **A real bug, caught by the Playwright suite catching a real click
+  failure, not by inspection**: the toggle's first design used
+  `position: fixed` to float it in a screen corner. On the viewer screen,
+  the toolbar's own button row happened to reach that exact corner at the
+  test browser's window width, and the fixed-position toggle sat on top
+  of it in z-order -- silently eating clicks meant for the "Compare"
+  button (four previously-passing UI-05 tests started failing the moment
+  this was added, each timing out on `page.click(".pw-toolbar
+  button:has-text('Compare')")` with Playwright's own error naming the
+  exact intercepting element). Fixed by making `body` a flex column with
+  `#pw-theme-toggle` as a real, in-flow reserved strip above `#app`
+  (`flex: 0 0 auto`) rather than a floating overlay on top of it --
+  `#app` takes the remaining height (`flex: 1 1 auto; min-height: 0`).
+  In-flow layout can't collide with anything below it at any window
+  width, which a fixed-position overlay can't guarantee.
+- 4 new Playwright tests (386 total, 93.3% coverage): the toggle is
+  visible before any document is open (proving it survives screen
+  swaps), cycling through Auto -> Light -> Dark -> Auto, an explicit dark
+  choice actually changing a computed CSS variable (not just the
+  attribute), and the choice surviving a reload. ruff (check and format),
+  mypy (scoped to `engine cli tools server`), bandit,
+  `ops.schema.json`/SPEC catalog sync (unchanged -- no backend touched at
+  all this session) and `npm audit` all clean.
+- UI-09 moved to `done` (51/161 total, 9/15 in P3 -- **8/8 of P3's UI-0x
+  features**, every one tracked for this phase, is now built and
+  proven). Only EDT-05/07/08/09/10/11 remain open in P3, independent of
+  the UI scaffolding this and the prior several sessions built.
+
+### 2026-09-28 — UI-08: keyboard shortcuts and accessible UI
+
+- Extended `viewer.ts`'s existing keyboard handler (which already had
+  ArrowLeft/Right and PageUp/Down for page navigation) with: Home/End
+  (first/last page), `+`/`-` (zoom in/out, deliberately bare keys rather
+  than a `Ctrl`+ combination, since `Ctrl +`/`Ctrl -` are the browser's own
+  page-zoom shortcuts and intercepting those would be a worse UX than the
+  feature it adds), Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (undo/redo, mirroring
+  `history.ts`'s buttons via two new `triggerUndo`/`triggerRedo` methods
+  that are exactly `button.click()` -- a no-op on a disabled button, so a
+  shortcut can never act past what the button itself currently allows),
+  and `c` (toggle the UI-05 Compare view). Every new toolbar/history
+  button also got a `title` naming its shortcut, plus `aria-label` on the
+  two symbol-only zoom buttons, for the "accessible UI" half of this
+  feature's name.
+- **A real, pre-existing bug found while scoping this, not a new one
+  introduced by it**: `isTypingTarget` (the guard that keeps global
+  shortcuts from firing while someone is typing) checked only `INPUT`/
+  `TEXTAREA` tag names -- missing that UI-02's click-to-edit boxes
+  (`overlay.ts`) are `contenteditable` `<div>`s, not `INPUT`s. That gap
+  meant pressing ArrowLeft/ArrowRight to move the caret while actively
+  editing a span's text *also* navigated pages, and (via the handler's own
+  `preventDefault()`) silently broke caret movement inside the edit box
+  entirely. Adding Home/End/Ctrl+Z next to the existing arrow keys would
+  only have made this worse (imagine pressing Home while editing to jump
+  to the start of a line, and getting bounced to page 1 instead), so this
+  had to be fixed as part of the same change, not after: `isTypingTarget`
+  now also checks `target.isContentEditable`, which is true for a
+  contenteditable element and (unlike a tag-name check) for any of its
+  descendants too. A regression test locks this in
+  (`test_arrow_keys_move_the_caret_instead_of_navigating_pages_while_editing`).
+- **A second real bug, this time in the test suite rather than the app**,
+  found while writing this feature's own Ctrl+Z test and hunting down a
+  CI failure it exposed in an *unrelated*, already-pushed UI-05 test on
+  Windows only: `_commit_edit` (the UI-04 session's test helper) only
+  waited for editing to visibly end, which happens synchronously the
+  instant `commitEdit()` starts -- *before* the network request behind it,
+  let alone `viewer.ts`'s post-commit `reloadDocument()`, has finished.
+  `page.click()` (used for the Undo/Redo buttons directly in the existing
+  UI-04 tests) has a built-in actionability wait that happens to absorb
+  this race, which is why it went unnoticed there; a raw
+  `page.keyboard.press()` (this feature's own shortcut tests) has no such
+  wait, and neither did a UI-05 test that toggled Compare and then
+  `check()`/`uncheck()`ed its diff checkbox -- a *second*, delayed
+  `compare.show()` call (from the edit's own reload, only completing
+  *after* the test had already moved on to interacting with Compare, and
+  finding `comparing` already `true`) reset that checkbox out from under
+  the test mid-sequence, failing only on Windows CI (slower, so the race
+  window was wide enough to actually lose). Fixed once, at the source,
+  rather than patched at each call site: `_commit_edit` now also waits for
+  a `.pw-history-entry` to appear -- the actual last effect of
+  `reloadDocument()` completing -- before returning.
+- 5 new tests (382 total, 93.3% coverage): a regression test for the
+  arrow-key/caret bug, Home/End page jumps, `+`/`-` zoom, Ctrl+Z undo and
+  Ctrl+Shift+Z redo, and `c` toggling Compare. Also caught, this session,
+  by actually running the local gate's `ruff format --check` (not just
+  `ruff check`, which this session had been running alone since UI-04 --
+  a real gap in the routine, not a new problem this feature introduced):
+  two files from the UI-05 push were unformatted and had slipped through
+  to a red `lint` job on CI. Reformatted and confirmed clean; `ruff format
+  --check` is now part of every gate run from here on. mypy (scoped to
+  `engine cli tools server`), bandit, `ops.schema.json`/SPEC catalog sync
+  (unchanged) and `npm audit` all clean.
+- One more thing observed, not fixed because it didn't reproduce: a single
+  full-suite run (all 382 tests together) saw
+  `test_ctrl_z_undoes_and_ctrl_shift_z_redoes` fail on a `wait_for_function`
+  timeout; the same test passed in isolation, three repeats of the whole
+  `test_ui.py` module, and an immediate full-suite re-run. Most likely
+  this sandbox's resource contention under the full 382-test run (a real,
+  documented environment characteristic, not this feature's doing) rather
+  than a logic bug -- noted here rather than silently ignored, in case it
+  recurs and turns out to be something real.
+- UI-08 moved to `done` (50/161 total, 8/15 in P3). Remaining in P3: UI-09
+  (light/dark toggle + persistence) and EDT-05/07/08/09/10/11.
+
+### 2026-09-28 — UI-05: before/after split view
+
+- **Backend, one small addition**: `UndoRedoJournal` now captures
+  `original_bytes` once, at construction -- the document exactly as first
+  opened, independent of the undo stack (which caps at `max_history` and
+  drops its oldest entries, so `_undo_stack[0].before` stops being the true
+  original after enough edits in a long session). A new route,
+  `GET .../pages/{n}/render/original`, renders from a throwaway
+  `Document.from_bytes(journal.original_bytes)` using the *same*
+  `RenderPageOp` the existing `GET .../render` route already uses on the
+  live document -- no new Op type, just a second place to apply the one
+  that already exists. Never touches the journal's undo/redo state.
+- **Deliberately reuses the server's authoritative PNG render for both
+  sides, not a second pdf.js instance** -- unlike the main canvas (which
+  is pdf.js, client-side, for interactivity), a before/after comparison
+  should show the exact render the document would produce if saved right
+  now, on both sides, not the browser's own approximation of one of them.
+- **Frontend**: `src/compare.ts` builds two side-by-side scrollable panes
+  (before/after), fetches both PNGs via the new API method
+  (`Api.renderPage(id, page, {original})`, returning a `Blob` turned into
+  an object URL), and mirrors scroll position between the two panes
+  (SPEC.md 8.4's "synchronized scrolling") with a guard flag so the
+  mirrored scroll event doesn't bounce straight back. The "diff overlay
+  toggle" SPEC.md also asks for is computed client-side -- draw both PNGs
+  to canvases, compare pixels with a small per-channel tolerance (PNG
+  re-encoding and anti-aliasing introduce noise even between genuinely
+  identical renders), and paint a translucent red overlay only where they
+  differ -- rather than reusing `engine/verify.py`'s numpy-based pixel-diff
+  harness, which is Python-only (built for FNT-12's per-edit verification
+  and the P1 regression suite) and not reachable from the browser without
+  a new endpoint; a same-size image comparison is simple enough to do
+  directly in JS. A status line ("Pages are identical" / "Pages differ
+  (X.X% of pixels changed)") is always shown, independent of whether the
+  overlay itself is toggled on -- both a genuinely useful signal on its own
+  and what let the Playwright tests assert something concrete without
+  needing to inspect canvas pixel data through the DOM.
+- `viewer.ts` gained a "Compare" toolbar toggle. Comparing and editing are
+  mutually exclusive -- toggling swaps `pageArea`'s content between the
+  normal click-to-edit canvas and the compare panel, rather than layering
+  them, since SPEC.md's mockup doesn't ask for editing *while* comparing
+  and keeping them exclusive means `overlay.ts` and `compare.ts` never
+  need to coordinate shared state neither otherwise needs to know about.
+  `goToPage` and `reloadDocument` both refresh the compare view too, if
+  it's currently showing, so paging through the document or making
+  another edit while comparing doesn't leave it stale.
+- 8 new tests (377 total, 93.3% coverage): 2 engine (`original_bytes`'s
+  stability, including across history capping), 2 server (the new route
+  matches the live one before any edit, stays unchanged across an edit and
+  an undo), 4 Playwright (toggle shows both renders and reports identical
+  pre-edit; reports "differ" post-edit; the diff checkbox shows/hides the
+  overlay canvas; toggling off returns to the editable canvas). One test
+  needed a real fix, not a design change: comparing `to_bytes()` output
+  byte-for-byte for the *engine* test failed, because PyMuPDF regenerates
+  a random component of the PDF's `/ID` on every `tobytes()` call even
+  with nothing else changed (confirmed directly -- two back-to-back calls
+  on the same untouched document differ at one byte offset) -- fixed by
+  comparing actual text content instead, the same fix pattern already
+  used for a similar false assumption in the UI-02/UI-03 session's preview
+  test. ruff, `mypy --strict` (scoped to `engine cli tools server`,
+  matching CI), bandit, `ops.schema.json`/SPEC catalog sync (unchanged --
+  no new Op type) and `npm audit` all clean.
+- UI-05 moved to `done` (49/161 total, 7/15 in P3). Remaining in P3:
+  UI-08 (keyboard shortcuts beyond page nav), UI-09 (light/dark toggle +
+  persistence), and EDT-05/07/08/09/10/11.
+
+### 2026-09-28 — UI-04: history panel with undo/redo
+
+- The smallest remaining UI item, and the least novel: `GET .../history`
+  and `POST .../undo`/`.../redo` already existed and were already fully
+  tested from the COR-11 session, so this was almost entirely frontend
+  wiring, not new backend design.
+- `web/src/history.ts`: a footer strip (SPEC.md section 8.1's mockup) --
+  a compact, horizontally-scrollable list of applied ops plus Undo/Redo
+  buttons. `describeOp` renders a human-readable line per Op type by
+  switching on its own discriminator field, matching `engine/ops/text.py`'s
+  registered Op shapes field-for-field; an Op it doesn't recognize falls
+  back to the raw op name rather than guessing.
+- **One real limitation, documented rather than papered over**:
+  `journal.history` (and so the API's `HistoryResponse`) is a list of the
+  Ops as they were *requested* (an Op's own fields via `model_dump()`),
+  not the `EditResult` each one produced -- tier, confidence and
+  verification aren't part of it. Entries describe what was asked for, not
+  how well it went; the richer per-edit summary SPEC.md's own mockup shows
+  ("14 hits, Exact") would need the history endpoint to start recording
+  results too, out of this feature's tracked scope (`tracker/features.json`'s
+  UI-04 is just "History panel with undo/redo").
+- `viewer.ts`'s post-commit reload (previously `reloadAfterCommit`,
+  written for UI-02) generalized into `reloadDocument`, now the one place
+  that owns "something about the document changed": re-fetch bytes,
+  reload pdf.js, rebuild the thumbnail rail, re-render the current page,
+  and refresh the history panel. Both the overlay's commit callback and
+  the history panel's own undo/redo callback call this same function now,
+  rather than each managing a partial refresh -- avoided a first-draft
+  redundancy where the panel's undo/redo handlers would have refreshed
+  history themselves *and* through this shared reload, double-fetching on
+  every click.
+- One new backend test (`test_replace_span_text_op_round_trips_through_history_and_undo`,
+  tagged UI-04 since it's proving *this* feature's assumption, not COR-11's
+  general undo/redo plumbing already covered): confirms `replace_span_text`'s
+  fields -- what `describeOp` actually reads -- really are present in the
+  history response, and that undo/redo work for this specific Op, not just
+  the generically-tested `replace_text`.
+- 5 new tests (369 total, 93.2% coverage); ruff, `mypy --strict` (scoped to
+  `engine cli tools server`, matching CI -- running it over the whole tree
+  including `tests/` isn't the actual gate and produces hundreds of
+  unrelated pre-existing errors in test files that were never meant to be
+  strictly typed), bandit, `ops.schema.json`/SPEC catalog sync all clean.
+  `npm audit` on `web/` still finds 0 vulnerabilities. `pip-audit` flags
+  several CVEs in `cryptography`/`httplib2`/`pip`/`pyjwt`/`setuptools`/
+  `urllib3`/`wheel` -- none of them are pdfworkerz dependencies (grepped
+  `pyproject.toml` to confirm; `setuptools` appears only as a
+  `build-system` version floor, not a runtime dep), so this is sandbox
+  environment drift in the advisory database since the last session, not
+  anything this change introduced or can fix from here.
+- UI-04 moved to `done` (48/161 total, 6/15 in P3). Remaining in P3:
+  UI-05 (before/after split view), UI-08 (keyboard shortcuts beyond page
+  nav), UI-09 (light/dark toggle + persistence), and EDT-05/07/08/09/10/11.
+
+### 2026-09-28 — UI-02 and UI-03: click-to-edit and the inspector panel
+
+- Continuing straight from the checkpoint's own plan: UI-03 (inspector
+  panel) and UI-02 (click-to-edit overlay) together, since they share the
+  same per-span style data that nothing server-side exposed yet.
+- **Backend, in its own commit before any frontend work** (three new
+  pieces, all thin wrappers over existing engine internals -- nothing here
+  duplicates logic that already existed):
+  - `PageSpansOp` (`engine/ops/base.py`): every span's style and text
+    state on a page, read-only, exposed at `GET .../pages/{n}/spans`.
+  - `PreviewTextOp` (`engine/ops/text.py`): what committing a text edit
+    *would* do -- the exact font-resolution decision
+    `engine.edit.resolve_font_for_span` already makes, already
+    side-effect-free -- without drawing, redacting or touching the
+    document at all. `GET .../pages/{n}/preview`. This is what lets the
+    overlay show a live "Match" tier as the user types, before they've
+    committed to anything, and is also where tracker/features.json's
+    "confidence" field for UI-03 actually comes from (not buildable from
+    `PageSpansOp`'s static data alone).
+  - `ReplaceSpanTextOp` (`engine/ops/text.py`): a real bug headed off
+    before it shipped. `ReplaceTextOp` finds its target by *searching*
+    page text, so if the overlay's commit step had reused it, clicking one
+    specific span and committing would have silently edited *every* span
+    with the same text on that page instead -- confirmed with a
+    two-identical-spans test fixture. This Op targets a span by its
+    position in a fresh extraction instead (shared `_span_at` helper with
+    `PreviewTextOp`, raising a clear `OpValidationError` rather than a raw
+    `IndexError` on a bad index) -- exactly one span changes, guaranteed.
+    Journaled normally, unlike its two read-only siblings above.
+  - Also added `pdfworkerz spans` (mirrors `inspect`/`render`) and 15 new
+    engine/server/CLI tests for all three.
+- **Frontend**: `src/inspector.ts` (UI-03) is a small, focused side panel
+  -- font (subset tag parsed out for readability), size, color (swatch +
+  hex), Tc/Tz spacing, rotation, and a live "Match" row (a colored dot --
+  green/amber/red for exact/approximate/fallback -- plus the confidence
+  percentage and the resolver's own note as a tooltip). `src/overlay.ts`
+  (UI-02) draws one absolutely-positioned box per span over the canvas
+  (positioned via pdf.js's own `convertToViewportPoint` on the span's
+  bbox corners -- confirmed against the installed pdfjs-dist's own `.d.ts`
+  that no `convertToViewportRectangle` exists on this version's
+  `PageViewport`, so both corners are converted and normalized by hand
+  instead of assuming a method that isn't there). Clicking turns a box
+  `contenteditable`; typing debounces into `PreviewTextOp` calls that
+  drive the inspector's Match row live; Enter commits through
+  `ReplaceSpanTextOp` (asking for confirmation first via `window.confirm`
+  when the preview's own `requires_approval` says so -- SPEC.md section
+  5.3's tiers 3/4, not a tier-name string comparison reinvented in TS);
+  Escape discards. `viewer.ts` now owns fetching this page's spans
+  alongside every render and reloading everything (bytes, spans, this
+  page's render, the *whole* thumbnail rail -- simplest correct choice
+  over tracking one stale thumbnail) after a commit, since span indices
+  aren't assumed stable across one.
+- **The font shown while editing is a deliberate approximation, not the
+  document's real embedded typeface**: `overlay.ts` styles each box with
+  the span's exact size and color, but only a serif/sans/mono +
+  bold/italic guess from the font's *name* for family/weight/style --
+  loading the actual embedded font as a browser `@font-face` is a
+  documented gap (web/README.md), not a silent one. The size, color and
+  (once committed) the real drawn result all still go through the exact
+  same `engine.edit` pipeline the CLI and server already use.
+- **Two more real bugs found by actually driving this in a browser** (on
+  top of a caught-before-shipping design gap, the `ReplaceTextOp`-would
+  edit-every-occurrence issue above):
+  1. A UI-03 layout bug: `.pw-inspector-value`'s color swatch and match
+     dot were `<span>`s I `prepend()`-ed into the value cell, then set
+     text via `.lastChild.textContent` -- but after prepending, the swatch
+     *is* `lastChild`, so that line was setting text *inside* the little
+     colored box, not next to it. Fixed by giving each row its own
+     dedicated text node up front, never reusing the icon element as a
+     text target.
+  2. A real reentrancy bug in `overlay.ts`, caught by an automated
+     click-away test, not by inspection: setting `contentEditable = false`
+     on a focused element can itself fire a synchronous `blur`, which
+     re-enters `cancelEdit()` through `box.onblur` *before* the outer call
+     finishes -- the reentrant call nulls out the shared "active box"
+     reference first, so the outer call's next line crashed setting
+     `.textContent` on what was now `null`. Root-caused by rebuilding the
+     failure against `vite dev`'s unminified source to get a real stack
+     trace, then fixed by having `cancelEdit()` take a local copy of the
+     box and clear the shared reference *before* touching it at all, so a
+     reentrant call becomes a harmless no-op.
+- `tests/web/test_ui.py` gained 9 real, end-to-end Playwright tests (click
+  opens an editable box; the inspector shows exact known values for a
+  fixture with a known font/size/color; the Match dot populates as soon as
+  a span is selected, before any typing; typing keeps it exact for
+  ordinary text; Escape and clicking away both discard without saving --
+  the second one is exactly what caught bug 2 above; Enter commits an
+  exact match with no dialog; a Type3 fixture's fallback match asks for
+  confirmation first; declining that confirmation leaves the edit
+  uncommitted). 20/20 pass, stable across repeated runs.
+- 364 tests total (93.2% coverage); ruff, mypy --strict, bandit, pip-audit
+  and `npm audit` (0 vulnerabilities) all clean. UI-02 and UI-03 moved to
+  "done" by the evidence gate (47/161 total, 5/15 in P3).
+- **A third real bug, caught by CI itself rather than locally**: pushed
+  this and found the macOS shards (only macOS, both Python versions) failed
+  two of the new tests -- typed text was inserted at the start of the
+  original text instead of replacing it. Root cause: `Control+A` is the
+  Cocoa/Emacs "move to start of line" binding on macOS, not select-all
+  (`Cmd+A` is); six of the new tests pressed it before typing, on the
+  mistaken assumption it was needed. It never was -- `overlay.ts`'s
+  `startEdit()` already calls `selectAllContents()` the instant a box
+  becomes editable, so every platform already has the text selected by
+  the time a test types into it. Deleted the keypress rather than
+  branching per platform; Linux and Windows had been passing only because
+  both treat Ctrl+A as select-all too, silently masking that it did
+  nothing. Confirmed green on all three OSes afterward
+  ([run #25](https://github.com/kalibudz/pdfworkerz/actions/runs/36365316425)).
+- Still open in P3: UI-04/05/08/09 (history panel, before/after split
+  view, keyboard shortcuts, themes) and EDT-05/07/08/09/10/11 (block
+  move/resize, format painter, images, shapes, hyperlinks, spell-check).
+  UI-04 (history panel) is a natural next step -- `GET .../history` and
+  `POST .../undo` / `.../redo` already exist and are tested (COR-11); it's
+  mostly frontend wiring onto what's already there, unlike UI-02 was.
+
+### 2026-09-27 (cont. 11) — UI-01 and UI-06: the first real browser UI
+
+- `web/`: a new TypeScript + Vite + pdf.js frontend (SPEC.md section 4.1's
+  chosen stack), talking to `server/app.py` over plain JSON HTTP with no
+  build-time coupling between the two. `src/config.ts` reads
+  `?token=&api=` from the URL once (state/checkpoint.json's own suggested
+  design from the end of the COR-11 session), remembers them in
+  `sessionStorage`, and scrubs them from the address bar; `src/connect.ts`
+  is the manual fallback when neither is known. `src/open.ts` (UI-06) and
+  `src/viewer.ts` + `src/pdf.ts` (UI-01) are the two features themselves;
+  `src/api.ts` is the typed client and `src/app.ts` wires the three
+  screens together.
+- **Four real bugs found and fixed before this could be called done, each
+  through the same discipline the rest of this project already uses --
+  build it, then actually drive it with a real browser and see what
+  breaks, rather than trusting the code by inspection:**
+  1. **CORS.** The UI and the API are always two different origins
+     (different ports), even on one machine -- confirmed by hitting an
+     actual browser-blocked `fetch` (no `Access-Control-Allow-Origin`)
+     the first time the built UI tried to open a document from a static
+     file server on a different port than `pdfworkerz serve`.
+     `server/app.py` now adds `CORSMiddleware` scoped to loopback origins
+     only (`127.0.0.1`/`localhost`/`::1`, never a wildcard) -- safe to
+     scope this loosely (any port) because authentication here is the
+     `X-Session-Token` *header*, which unlike a cookie a browser never
+     attaches automatically, so a page on some other origin still can't
+     act as this user without already knowing the random token. Two new
+     direct tests confirm the header is actually granted for a loopback
+     `Origin` and actually absent for a non-loopback one, not just that
+     the regex looks right.
+  2. **A genuinely incompatible pdf.js release, caught by version, not by
+     guessing.** `pdfjs-dist` versions `>=5.6.83 <6.2.108` carry a public,
+     high-severity CVE (arbitrary JS execution opening a malicious PDF --
+     exactly this tool's own threat model); `npm audit` (now gated in the
+     `security` CI job too) refused every version in that range. But the
+     current, patched release (and, it turned out, everything back to at
+     least 5.5.207) throws `getOrInsertComputed is not a function` on
+     this sandbox's pinned test browser -- a `Map`/`WeakMap` method
+     (TC39's "Upsert" proposal) pdf.js relies on that a real, current
+     browser has natively by now but an older engine doesn't.
+     `src/polyfills.ts` fills the gap only when the native method is
+     missing (a no-op on any browser that already has it), and
+     `src/pdf.worker.ts` wraps pdfjs-dist's own worker script so the same
+     polyfill also installs in *that* separate realm -- confirmed by
+     testing that the error came from both the main-thread bundle and the
+     worker bundle before fixing only one and calling it done.
+  3. **A real race condition in `viewer.ts`.** The toolbar's prev/next/zoom
+     buttons and the keyboard-navigation handler were wired up *after* the
+     `await`s that fetch and parse the document, but `.pw-viewer` (and
+     those buttons) were already in the DOM before that -- so an
+     interaction fast enough to land in that window was simply lost, no
+     error, because no listener existed yet. Caught by the automated
+     Playwright tests failing intermittently, not by manual testing (whose
+     own incidental delays had been masking it). Fixed by attaching every
+     listener immediately and disabling the affected controls until the
+     document has actually loaded, rather than trying to guess a safe
+     delay.
+  4. **A real logic bug in the password-retry message**, caught the same
+     way: distinguishing "needs a password" from "wrong password" only
+     needs to look at whether *this* request sent one, not any memory of
+     earlier attempts -- the earlier, more complicated version compared
+     the current attempt against the *previous* attempt's state and picked
+     the wrong branch on the very first wrong-password retry.
+- `tests/web/`: real end-to-end evidence, not a DOM/unit test double --
+  a real `server/app.py` instance (uvicorn, background thread; an
+  in-process `TestClient` can't be navigated to by a browser), a real
+  static file server for `web/dist`, and `pytest-playwright` driving a
+  real Chromium. On this sandbox specifically, that browser is the
+  pre-installed one at a fixed path outside Playwright's own version-keyed
+  cache (see the repo's environment notes) -- `conftest.py`'s
+  `browser_type_launch_args` override only takes effect when that path
+  exists, so CI (which runs a real `playwright install --with-deps
+  chromium` step instead) and a normal dev machine both get Playwright's
+  own default resolution. 11 tests cover both features: the connect
+  screen, URL-config consumption, the missing-file error, all three
+  password-prompt states (needs one / wrong / correct), page count and
+  thumbnail count, next/prev, arrow keys, thumbnail-click navigation, and
+  zoom.
+- CI (`tests` job): added Node + `npm ci && npm run build` (in `web/`) and
+  `playwright install --with-deps chromium` ahead of the existing
+  `pytest --feature-results` step, so this evidence is produced in CI --
+  the same single pytest invocation the evidence gate already reads --
+  not only locally. Cost accepted deliberately: this runs once per OS ×
+  Python-version shard (6 times total) rather than once, since splitting
+  it into a separate job would put UI-01/UI-06's evidence in a
+  `feature_results.json` the `tests` job's own evidence-gate check never
+  sees.
+- **Also fixed, while verifying end to end**: this sandbox's bare `pip`
+  installs into a site-packages that this sandbox's bare `mypy`/`ruff`
+  binaries on `PATH` don't share (see the previous session entry) --
+  same root cause, newly relevant here because `pip install ".[dev]"` now
+  also has to make `playwright`/`pytest-playwright` visible to whichever
+  `pytest` actually runs; using `python3 -m <tool>` throughout stayed the
+  reliable fix.
+- 340 tests total (93.1% coverage); ruff, `python3 -m mypy` --strict,
+  bandit, pip-audit and `npm audit` (0 vulnerabilities on `web/`'s pinned
+  deps) all clean. UI-01 and UI-06 moved to "done" by the evidence gate
+  (45/161 total, 3/15 in P3).
+- Still open in P3: UI-02/03/04/05/08/09 (click-to-edit overlay,
+  inspector, history panel, before/after split view, keyboard shortcuts,
+  themes) and EDT-05/07/08/09/10/11 (block move/resize, format painter,
+  images, shapes, hyperlinks, spell-check). Per the checkpoint's own
+  ordering: UI-03 (inspector) and UI-02 (click-to-edit) next, since they
+  share the same per-span style data and nothing else in P3 needs new
+  frontend scaffolding the way those two still do.
 
 ### 2026-09-27 (cont. 11) — first real-document test: Form XObject fix, bundled Roboto
 

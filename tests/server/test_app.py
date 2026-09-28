@@ -42,6 +42,21 @@ def test_health_needs_no_auth(client: TestClient) -> None:
 
 
 @pytest.mark.feature("COR-11")
+def test_cors_allows_a_loopback_origin(client: TestClient) -> None:
+    """The browser UI (web/) is always a different origin from this API, even
+    on the same machine -- confirms the CORS policy actually grants it, not
+    just that it's configured with the right-looking regex."""
+    response = client.get("/health", headers={"Origin": "http://127.0.0.1:5173"})
+    assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
+
+
+@pytest.mark.feature("COR-11")
+def test_cors_does_not_allow_a_non_loopback_origin(client: TestClient) -> None:
+    response = client.get("/health", headers={"Origin": "https://evil.example.com"})
+    assert "access-control-allow-origin" not in response.headers
+
+
+@pytest.mark.feature("COR-11")
 def test_create_app_generates_a_random_token_by_default() -> None:
     first = create_app()
     second = create_app()
@@ -161,6 +176,145 @@ def test_render_page_returns_png_bytes(client: TestClient, simple_path: Path) ->
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+@pytest.mark.feature("UI-05")
+def test_render_original_page_matches_the_live_render_before_any_edit(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    live = client.get(f"/documents/{document_id}/pages/0/render", headers=AUTH)
+    original = client.get(f"/documents/{document_id}/pages/0/render/original", headers=AUTH)
+    assert original.status_code == 200
+    assert original.headers["content-type"] == "image/png"
+    assert original.content == live.content
+
+
+@pytest.mark.feature("UI-05")
+def test_render_original_page_stays_unchanged_after_an_edit(client: TestClient, simple_path: Path) -> None:
+    """UI-05's whole point: the "before" render must keep showing the
+    document as it was opened, even after an edit changes the live one --
+    and even after that edit is undone again."""
+    document_id = _open(client, simple_path)
+    original = client.get(f"/documents/{document_id}/pages/0/render/original", headers=AUTH)
+
+    client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "replace_text", "match": "PDFWorkerz", "replacement": "Something Else Entirely"},
+        headers=AUTH,
+    )
+    live_after_edit = client.get(f"/documents/{document_id}/pages/0/render", headers=AUTH)
+    assert live_after_edit.content != original.content
+
+    original_after_edit = client.get(f"/documents/{document_id}/pages/0/render/original", headers=AUTH)
+    assert original_after_edit.content == original.content
+
+    client.post(f"/documents/{document_id}/undo", headers=AUTH)
+    original_after_undo = client.get(f"/documents/{document_id}/pages/0/render/original", headers=AUTH)
+    assert original_after_undo.content == original.content
+
+
+@pytest.mark.feature("COR-11")
+def test_page_spans_route_returns_every_span(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.get(f"/documents/{document_id}/pages/0/spans", headers=AUTH)
+    assert response.status_code == 200
+    spans = response.json()
+    assert len(spans) == 1
+    assert spans[0]["style"]["text"] == "Hello, PDFWorkerz."
+    assert spans[0]["style"]["span_index"] == 0
+
+
+@pytest.mark.feature("COR-11")
+def test_preview_route_reports_an_exact_match(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.get(
+        f"/documents/{document_id}/pages/0/preview",
+        params={"span_index": 0, "needed_text": "Editor"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tier"] == "exact"
+    assert body["requires_approval"] is False
+
+
+@pytest.mark.feature("COR-11")
+def test_preview_route_with_an_out_of_range_span_index_returns_400(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.get(
+        f"/documents/{document_id}/pages/0/preview",
+        params={"span_index": 99, "needed_text": "x"},
+        headers=AUTH,
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.feature("COR-11")
+def test_preview_route_never_appears_in_history(client: TestClient, simple_path: Path) -> None:
+    """PreviewTextOp is read-only and must never be journaled -- confirms
+    it's actually wired to a direct apply() call, not the generic (and
+    journaled) POST .../ops endpoint."""
+    document_id = _open(client, simple_path)
+    client.get(
+        f"/documents/{document_id}/pages/0/preview",
+        params={"span_index": 0, "needed_text": "Editor"},
+        headers=AUTH,
+    )
+    history = client.get(f"/documents/{document_id}/history", headers=AUTH).json()
+    assert history["ops"] == []
+    assert history["can_undo"] is False
+
+
+@pytest.mark.feature("COR-11")
+def test_replace_span_text_op_via_the_generic_ops_endpoint(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "replace_span_text", "page_index": 0, "span_index": 0, "new_text": "Hello, Editor."},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert response.json()["tier"] == "exact"
+
+    history = client.get(f"/documents/{document_id}/history", headers=AUTH).json()
+    assert len(history["ops"]) == 1
+    assert history["can_undo"] is True
+
+
+@pytest.mark.feature("UI-04")
+def test_replace_span_text_op_round_trips_through_history_and_undo(client: TestClient, simple_path: Path) -> None:
+    """UI-04's history panel describes each entry from the Op's own fields
+    (web/src/history.ts's describeOp) -- so those fields, not just an op
+    count, need to actually be there. Also confirms undo/redo work for this
+    Op specifically, not just for the generic replace_text already covered
+    by test_undo_redo_round_trip_through_the_api."""
+    document_id = _open(client, simple_path)
+    client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "replace_span_text", "page_index": 0, "span_index": 0, "new_text": "Hello, Editor."},
+        headers=AUTH,
+    )
+
+    history = client.get(f"/documents/{document_id}/history", headers=AUTH).json()
+    assert history["ops"] == [
+        {
+            "op": "replace_span_text",
+            "page_index": 0,
+            "span_index": 0,
+            "new_text": "Hello, Editor.",
+            "require_tier": "approximate",
+            "fit": False,
+            "verify": True,
+        }
+    ]
+
+    undo_response = client.post(f"/documents/{document_id}/undo", headers=AUTH)
+    assert undo_response.status_code == 200
+    assert undo_response.json()["op"]["new_text"] == "Hello, Editor."
+    assert client.get(f"/documents/{document_id}/history", headers=AUTH).json()["can_redo"] is True
+
+    redo_response = client.post(f"/documents/{document_id}/redo", headers=AUTH)
+    assert redo_response.status_code == 200
+    assert redo_response.json()["op"]["new_text"] == "Hello, Editor."
 
 
 @pytest.mark.feature("COR-11")

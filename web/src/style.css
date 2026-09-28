@@ -1,0 +1,567 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --text: #1f2a44;
+  --text-muted: #5b6472;
+  --border: #d7dbe0;
+  --accent: #2f6feb;
+  --accent-text: #ffffff;
+  --danger: #b3261e;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+/* Passive OS-preference support (unchanged from before UI-09): followed
+ * only while no explicit choice has been made, i.e. `data-theme` isn't
+ * "light" -- an explicit "dark" choice would match this anyway, but an
+ * explicit "light" choice must be able to override a dark OS. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161a;
+    --panel: #1e2126;
+    --text: #e6e9ef;
+    --text-muted: #9aa3b2;
+    --border: #33373e;
+    --accent: #5b8dfa;
+    --accent-text: #0b0e14;
+    --danger: #ff6b64;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* UI-09: explicit overrides, set by theme.ts via a data-theme attribute
+ * on <html> and persisted in localStorage -- these win regardless of what
+ * the OS's own color-scheme preference says. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #14161a;
+  --panel: #1e2126;
+  --text: #e6e9ef;
+  --text-muted: #9aa3b2;
+  --border: #33373e;
+  --accent: #5b8dfa;
+  --accent-text: #0b0e14;
+  --danger: #ff6b64;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+}
+
+/* #pw-theme-toggle is a reserved strip above #app, not a floating overlay
+ * on top of it -- a fixed-position button was tried first and found (via
+ * a real Playwright failure, not by inspection) to intercept clicks on
+ * the viewer toolbar's rightmost buttons whenever the toolbar's own
+ * content happened to reach that corner. In-flow layout can't collide
+ * with anything below it, at any window width. */
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+#app {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+button {
+  font: inherit;
+}
+
+.pw-screen {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.pw-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 28px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.pw-card h1 {
+  font-size: 1.15rem;
+  margin: 0 0 4px;
+}
+
+.pw-card p.pw-subtitle {
+  margin: 0 0 20px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.pw-field {
+  margin-bottom: 14px;
+}
+
+.pw-field label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.pw-field input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.pw-field input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.pw-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.pw-button {
+  flex: 1;
+  padding: 9px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.pw-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.pw-button.pw-secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+  font-weight: 500;
+  flex: 0 0 auto;
+}
+
+.pw-error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: 10px 0 0;
+  min-height: 1.1em;
+}
+
+.pw-hint {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  margin-top: 16px;
+  line-height: 1.4;
+}
+
+/* -- viewer layout (UI-01) -- */
+
+.pw-viewer {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.pw-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.pw-toolbar .pw-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pw-toolbar button {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.pw-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pw-toolbar .pw-page-indicator {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  min-width: 5.5em;
+  text-align: center;
+}
+
+.pw-body {
+  display: grid;
+  grid-template-columns: 148px 1fr 220px;
+  min-height: 0;
+}
+
+.pw-thumbnails {
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  padding: 10px 0;
+}
+
+.pw-thumb {
+  display: block;
+  width: 100%;
+  padding: 0;
+  margin: 0 0 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: center;
+}
+
+.pw-thumb canvas {
+  display: block;
+  margin: 0 auto 4px;
+  border: 2px solid transparent;
+  box-shadow: var(--shadow);
+  background: #fff;
+}
+
+.pw-thumb.pw-active canvas {
+  border-color: var(--accent);
+}
+
+.pw-thumb .pw-thumb-number {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.pw-page-area {
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.pw-page-area canvas {
+  background: #fff;
+  box-shadow: var(--shadow);
+  height: fit-content;
+}
+
+/* -- UI-02: click-to-edit overlay -- */
+
+.pw-canvas-wrap {
+  position: relative;
+  height: fit-content;
+}
+
+.pw-edit-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.pw-span-box {
+  position: absolute;
+  pointer-events: auto;
+  cursor: text;
+  white-space: pre;
+  line-height: 1;
+  outline: 1px solid transparent;
+  border-radius: 2px;
+}
+
+.pw-span-box:hover {
+  outline-color: var(--accent);
+  background: rgba(47, 111, 235, 0.08);
+}
+
+.pw-span-box.pw-span-editing {
+  outline: 2px solid var(--accent);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  cursor: text;
+}
+
+/* -- UI-03: inspector panel -- */
+
+.pw-inspector {
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  padding: 14px;
+}
+
+.pw-inspector h2 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+}
+
+.pw-inspector-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.pw-inspector-label {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.pw-inspector-value {
+  text-align: right;
+  overflow-wrap: anywhere;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.pw-color-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.pw-match-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.pw-match-dot.pw-match-exact {
+  background: #2e9e4f;
+}
+
+.pw-match-dot.pw-match-approximate {
+  background: #d99a1b;
+}
+
+.pw-match-dot.pw-match-fallback {
+  background: var(--danger);
+}
+
+/* -- UI-04: history panel -- */
+
+.pw-history {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.pw-history-label {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.pw-history-list {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.pw-history-entry {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.pw-history-entry.pw-history-current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pw-history-separator {
+  color: var(--border);
+  flex: 0 0 auto;
+}
+
+.pw-history-empty {
+  color: var(--text-muted);
+}
+
+.pw-history button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.pw-history button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* -- UI-05: before/after split view -- */
+
+.pw-toolbar button.pw-active {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.pw-compare {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.pw-compare-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.pw-compare-diff-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.pw-compare-panes {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.pw-compare-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+
+.pw-compare-pane:last-child {
+  border-right: none;
+}
+
+.pw-compare-label {
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.pw-compare-scroll {
+  flex: 1 1 auto;
+  overflow: auto;
+  background: var(--bg);
+  padding: 12px;
+}
+
+.pw-compare-img {
+  display: block;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.pw-compare-after-stack {
+  position: relative;
+  display: inline-block;
+}
+
+.pw-compare-diff-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* -- UI-09: theme toggle -- */
+
+#pw-theme-toggle {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.pw-theme-toggle {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.82rem;
+}

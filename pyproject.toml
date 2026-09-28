@@ -38,6 +38,8 @@ dev = [
   "types-PyYAML",
   "reportlab==5.0.1",
   "httpx2==2.13.1",
+  "playwright==1.63.0",
+  "pytest-playwright==0.9.0",
 ]
 
 [tool.pytest.ini_options]

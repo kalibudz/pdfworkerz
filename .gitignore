@@ -15,6 +15,7 @@ build/
 node_modules/
 tracker/dist/
 tracker/dist-artifact/
+web/dist/
 
 # Test outputs and local PDFs
 tests/corpus/generated/

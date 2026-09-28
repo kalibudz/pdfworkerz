@@ -38,6 +38,7 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
@@ -56,8 +57,9 @@ from engine.errors import (
     RepairFailedError,
     WrongPasswordError,
 )
-from engine.ops.base import RenderPageOp, parse_op
+from engine.ops.base import PageSpansOp, RenderPageOp, parse_op
 from engine.ops.journal import UndoRedoJournal
+from engine.ops.text import PreviewTextOp
 
 _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
     DocumentNotFoundError: 404,
@@ -188,6 +190,36 @@ def render_page(document_id: str, page_index: int, journal: JournalDep, dpi: int
     return Response(content=png_bytes, media_type="image/png")
 
 
+@router.get("/documents/{document_id}/pages/{page_index}/render/original")
+def render_original_page(document_id: str, page_index: int, journal: JournalDep, dpi: int = 150) -> Response:
+    """UI-05's before/after split view: the page as it looked when first
+    opened, regardless of how many edits (or undos) have happened since.
+    Renders from a throwaway Document over journal.original_bytes -- never
+    the live one -- so this never shows up in, or is affected by, undo/redo."""
+    scratch = Document.from_bytes(journal.original_bytes)
+    try:
+        png_bytes = RenderPageOp(page_index=page_index, dpi=dpi).apply(scratch)
+    finally:
+        scratch.close()
+    return Response(content=png_bytes, media_type="image/png")
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/spans")
+def page_spans(document_id: str, page_index: int, journal: JournalDep) -> Any:
+    """UI-02's click-to-edit overlay and UI-03's inspector panel both read
+    this. Read-only (PageSpansOp), so -- like render_page above -- it's
+    applied directly rather than through the undo/redo journal."""
+    return _jsonable(PageSpansOp(page_index=page_index).apply(journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/preview")
+def preview_text(document_id: str, page_index: int, span_index: int, needed_text: str, journal: JournalDep) -> Any:
+    """UI-02's live "Match" preview as the user types, before anything is
+    committed. Read-only (PreviewTextOp), applied directly like page_spans."""
+    op = PreviewTextOp(page_index=page_index, span_index=span_index, needed_text=needed_text)
+    return _jsonable(op.apply(journal.document))
+
+
 @router.get("/documents/{document_id}/file")
 def document_file(document_id: str, journal: JournalDep) -> Response:
     """The document's current state (post-edit, pre-save) as raw PDF bytes --
@@ -223,6 +255,9 @@ def save(document_id: str, body: SaveRequest, journal: JournalDep) -> SaveRespon
     return SaveResponse(path=str(result.path), mode=result.mode, bytes_written=result.bytes_written)
 
 
+_LOOPBACK_ORIGIN = r"^https?://(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?$"
+
+
 def create_app(*, token: str | None = None) -> FastAPI:
     """Build the server. ``token`` is normally left as None (a fresh random
     token is generated); tests pass a known value so they can authenticate."""
@@ -230,6 +265,22 @@ def create_app(*, token: str | None = None) -> FastAPI:
     app.state.session_token = token or secrets.token_urlsafe(32)
     app.state.documents = {}
     app.include_router(router)
+    # The browser UI (web/) and this API are two different origins/ports even
+    # when both run on the same machine (SPEC.md section 4.2 rule 5: "local
+    # only" describes the *listening address*, not that UI and API must share
+    # one origin) -- without this, the browser's own CORS check blocks every
+    # request before it reaches verify_token at all. Scoped to loopback
+    # origins only, never a wildcard: authentication here is a header
+    # (X-Session-Token), which -- unlike a cookie -- a browser never attaches
+    # automatically, so a page on some other origin still can't act as this
+    # user without already knowing the random token; restricting the origin
+    # regex is a defense-in-depth boundary on top of that, not the primary one.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=_LOOPBACK_ORIGIN,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.exception_handler(PdfWorkerzError)
     def handle_engine_error(_request: Request, exc: PdfWorkerzError) -> JSONResponse:

@@ -73,6 +73,21 @@ def test_render_command_defaults_the_output_name(corpus: Corpus, work_dir: Path)
     assert expected.exists()
 
 
+@pytest.mark.feature("FNT-01")
+def test_spans_command_prints_every_span_as_json(corpus: Corpus) -> None:
+    result = runner.invoke(app, ["spans", str(corpus.simple), "0"])
+    assert result.exit_code == 0
+    traces = json.loads(result.stdout)
+    assert len(traces) == 1
+    assert traces[0]["style"]["text"] == "Hello, PDFWorkerz."
+
+
+@pytest.mark.feature("FNT-01")
+def test_spans_command_on_missing_file_fails_cleanly() -> None:
+    result = runner.invoke(app, ["spans", "no/such/file.pdf"])
+    assert result.exit_code != 0
+
+
 @pytest.mark.feature("COR-10")
 def test_repair_command_reports_whether_repair_was_needed(corpus: Corpus, work_dir: Path) -> None:
     clean_out = work_dir / "clean.pdf"

@@ -9,6 +9,11 @@ simple enough to verify completely now, before any of them exist.
 
 History is capped at ``max_history`` entries (oldest dropped first) so a
 long editing session cannot grow the journal without bound.
+
+Also holds the document's very first snapshot (``original_bytes``),
+independent of that cap -- UI-05's before/after split view compares the
+live document against this, not against whatever the undo stack's oldest
+surviving entry happens to be.
 """
 
 from __future__ import annotations
@@ -37,11 +42,21 @@ class UndoRedoJournal:
         self._max_history = max_history
         self._undo_stack: list[JournalEntry] = []
         self._redo_stack: list[JournalEntry] = []
+        self._original_bytes = document.to_bytes()
 
     @property
     def document(self) -> Document:
         """The current, live document. Reassigned in place by undo/redo, so always re-read this property."""
         return self._document
+
+    @property
+    def original_bytes(self) -> bytes:
+        """The document exactly as first opened, before any edit -- UI-05's
+        before/after split view's "before" side. Captured once here rather
+        than read off ``_undo_stack[0].before``, since the undo stack caps
+        at ``max_history`` and drops its oldest entries; this stays correct
+        even in a session with more edits than that cap."""
+        return self._original_bytes
 
     @property
     def can_undo(self) -> bool:

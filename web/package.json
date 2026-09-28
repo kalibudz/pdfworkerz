@@ -1,0 +1,19 @@
+{
+  "name": "pdfworkerz-web",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "PDFWorkerz browser UI: pdf.js canvas, click-to-edit overlay, inspector, command bar (SPEC.md section 8) talking to server/app.py over JSON HTTP.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.3.289"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "8.3.1"
+  }
+}
