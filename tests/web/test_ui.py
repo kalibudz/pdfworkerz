@@ -368,3 +368,68 @@ def test_redo_reapplies_the_content_and_updates_button_state(page: Page, app_url
     page.wait_for_selector(".pw-history-entry", timeout=5000)
     assert _undo_button_disabled(page) is False
     assert _redo_button_disabled(page) is True
+
+
+# -- UI-05 (before/after split view) --
+
+_COMPARE_STATUS_READY = (
+    "() => { const t = document.querySelector('.pw-compare-status')?.textContent;"
+    " return !!t && t !== 'Comparing…'; }"
+)
+
+
+def _toggle_compare(page: Page) -> None:
+    page.click(".pw-toolbar button:has-text('Compare')")
+    page.wait_for_function(_COMPARE_STATUS_READY, timeout=5000)
+
+
+@pytest.mark.feature("UI-05")
+def test_compare_toggle_shows_both_renders_and_reports_identical_before_any_edit(
+    page: Page, app_url: str, corpus: Corpus
+) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.simple))
+    _wait_viewer_ready(page)
+
+    _toggle_compare(page)
+    assert page.eval_on_selector_all(".pw-compare-img", "els => els.length") == 2
+    assert "identical" in (page.text_content(".pw-compare-status") or "")
+
+
+@pytest.mark.feature("UI-05")
+def test_compare_reports_differing_pages_after_a_committed_edit(page: Page, app_url: str, corpus: Corpus) -> None:
+    _commit_edit(page, app_url, str(corpus.simple), "Hello, Editor.")
+    _toggle_compare(page)
+    assert "differ" in (page.text_content(".pw-compare-status") or "")
+
+
+@pytest.mark.feature("UI-05")
+def test_diff_overlay_toggle_shows_and_hides_the_overlay_canvas(page: Page, app_url: str, corpus: Corpus) -> None:
+    _commit_edit(page, app_url, str(corpus.simple), "Hello, Editor.")
+    _toggle_compare(page)
+
+    diff_checkbox = page.locator(".pw-compare-diff-label input[type=checkbox]")
+    assert diff_checkbox.is_enabled()
+    assert page.eval_on_selector(".pw-compare-diff-overlay", "el => el.hidden") is True
+
+    diff_checkbox.check()
+    assert page.eval_on_selector(".pw-compare-diff-overlay", "el => el.hidden") is False
+
+    diff_checkbox.uncheck()
+    assert page.eval_on_selector(".pw-compare-diff-overlay", "el => el.hidden") is True
+
+
+@pytest.mark.feature("UI-05")
+def test_toggling_compare_off_returns_to_the_editable_canvas(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.simple))
+    _wait_viewer_ready(page)
+
+    _toggle_compare(page)
+    assert page.eval_on_selector_all(".pw-canvas-wrap", "els => els.length") == 0
+
+    page.click(".pw-toolbar button:has-text('Compare')")
+    page.wait_for_selector(".pw-canvas-wrap", timeout=5000)
+    assert page.eval_on_selector_all(".pw-compare", "els => els.length") == 0

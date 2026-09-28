@@ -2,11 +2,11 @@
 
 The browser UI (SPEC.md section 8): a pdf.js canvas with a thumbnail rail
 (UI-01), the password prompt for encrypted files (UI-06), a click-to-edit
-overlay (UI-02), an inspector panel (UI-03), and a history panel with
-undo/redo (UI-04) -- and, as later features land, the command bar and a
-before/after split view. It talks to `server/app.py` over plain JSON
-HTTP; nothing here runs on the server, and nothing in `server/` knows
-this directory exists.
+overlay (UI-02), an inspector panel (UI-03), a history panel with
+undo/redo (UI-04), and a before/after split view (UI-05) -- and, as later
+features land, the command bar. It talks to `server/app.py` over plain
+JSON HTTP; nothing here runs on the server, and nothing in `server/`
+knows this directory exists.
 
 ## Running it
 
@@ -84,6 +84,44 @@ each managing a partial refresh, which is also why the panel's undo/redo
 button handlers don't call `refresh()` themselves on success: `reloadDocument`
 already will. They still call `refresh()` on failure, to re-sync the
 buttons' disabled state if the undo/redo request itself was rejected.
+
+## UI-05's split view renders both sides on the server, deliberately not via pdf.js
+
+`src/compare.ts` fetches two PNGs from the server -- `GET .../render`
+(the live document) and `GET .../render/original` (the document exactly
+as first opened, from a new `UndoRedoJournal.original_bytes` snapshot
+captured once at open time, independent of the undo stack's history cap)
+-- rather than loading a second `PdfDocument` and rendering the "before"
+side with pdf.js like the main canvas does. The split view's whole point
+is comparing the exact render the document would produce if saved right
+now against the exact render it would have produced when opened, on both
+sides; pdf.js's own rendering is a reasonable approximation for the live,
+interactive canvas but not what a before/after comparison should be
+built on.
+
+The two panes scroll together (SPEC.md section 8.4's "synchronized
+scrolling"): each pane's `scroll` listener copies its `scrollTop`/
+`scrollLeft` onto the other, guarded by a `syncing` flag so the mirrored
+scroll event doesn't bounce back and re-trigger the first listener.
+
+The "diff overlay toggle" SPEC.md also asks for is computed entirely in
+the browser -- both PNGs are drawn to offscreen canvases, compared pixel
+by pixel with a small per-channel tolerance (PNG re-encoding and
+anti-aliasing introduce a little noise even between two genuinely
+identical renders), and painted as a translucent red overlay wherever
+they differ. This does *not* reuse `engine/verify.py`'s numpy-based
+pixel-diff harness -- that module is Python-only, built for FNT-12's
+per-edit verification and the P1 regression suite, and isn't reachable
+from the browser without a new endpoint; comparing two same-size PNGs is
+simple enough to do directly in JS. A status line ("Pages are identical"
+/ "Pages differ (X.X% of pixels changed)") is always shown, independent
+of whether the overlay itself is toggled visible.
+
+Comparing and editing are mutually exclusive in `viewer.ts`: the
+"Compare" toolbar toggle swaps `pageArea`'s content between the normal
+click-to-edit canvas and the compare panel rather than layering them, so
+`overlay.ts` and `compare.ts` never need to coordinate state neither
+otherwise needs to know about.
 
 ## The pdfjs-dist version pin and the `getOrInsertComputed` polyfill
 

@@ -188,6 +188,20 @@ def render_page(document_id: str, page_index: int, journal: JournalDep, dpi: int
     return Response(content=png_bytes, media_type="image/png")
 
 
+@router.get("/documents/{document_id}/pages/{page_index}/render/original")
+def render_original_page(document_id: str, page_index: int, journal: JournalDep, dpi: int = 150) -> Response:
+    """UI-05's before/after split view: the page as it looked when first
+    opened, regardless of how many edits (or undos) have happened since.
+    Renders from a throwaway Document over journal.original_bytes -- never
+    the live one -- so this never shows up in, or is affected by, undo/redo."""
+    scratch = Document.from_bytes(journal.original_bytes)
+    try:
+        png_bytes = RenderPageOp(page_index=page_index, dpi=dpi).apply(scratch)
+    finally:
+        scratch.close()
+    return Response(content=png_bytes, media_type="image/png")
+
+
 @router.get("/documents/{document_id}/pages/{page_index}/spans")
 def page_spans(document_id: str, page_index: int, journal: JournalDep) -> Any:
     """UI-02's click-to-edit overlay and UI-03's inspector panel both read

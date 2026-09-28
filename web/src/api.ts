@@ -174,6 +174,18 @@ export class Api {
     });
   }
 
+  /** UI-05's before/after split view: one page rendered server-side to PNG
+   * -- the live document (`original: false`, the default) or the document
+   * exactly as it was first opened (`original: true`), regardless of any
+   * edits or undo/redo since. Distinct from the pdf.js client-side render
+   * the main canvas uses: the split view wants the server's own
+   * authoritative render on both sides, not a second pdf.js instance. */
+  async renderPage(documentId: string, pageIndex: number, options: { original?: boolean } = {}): Promise<Blob> {
+    const suffix = options.original ? "/original" : "";
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/render${suffix}`);
+    return await response.blob();
+  }
+
   /** UI-04: the ops applied so far (oldest first), and whether there's
    * anything to undo/redo right now. */
   async history(documentId: string): Promise<HistoryState> {

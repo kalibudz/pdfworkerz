@@ -9,7 +9,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | First green GitHub Actions run: [run #17](https://github.com/kalibudz/pdfworkerz/actions/runs/36356246278), all 11 jobs, 2026-09-27 |
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P3 | Web UI with click-to-edit | 🔶 In progress: 6/15 features proven by tests | |
+| P3 | Web UI with click-to-edit | 🔶 In progress: 7/15 features proven by tests | |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,71 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-28 — UI-05: before/after split view
+
+- **Backend, one small addition**: `UndoRedoJournal` now captures
+  `original_bytes` once, at construction -- the document exactly as first
+  opened, independent of the undo stack (which caps at `max_history` and
+  drops its oldest entries, so `_undo_stack[0].before` stops being the true
+  original after enough edits in a long session). A new route,
+  `GET .../pages/{n}/render/original`, renders from a throwaway
+  `Document.from_bytes(journal.original_bytes)` using the *same*
+  `RenderPageOp` the existing `GET .../render` route already uses on the
+  live document -- no new Op type, just a second place to apply the one
+  that already exists. Never touches the journal's undo/redo state.
+- **Deliberately reuses the server's authoritative PNG render for both
+  sides, not a second pdf.js instance** -- unlike the main canvas (which
+  is pdf.js, client-side, for interactivity), a before/after comparison
+  should show the exact render the document would produce if saved right
+  now, on both sides, not the browser's own approximation of one of them.
+- **Frontend**: `src/compare.ts` builds two side-by-side scrollable panes
+  (before/after), fetches both PNGs via the new API method
+  (`Api.renderPage(id, page, {original})`, returning a `Blob` turned into
+  an object URL), and mirrors scroll position between the two panes
+  (SPEC.md 8.4's "synchronized scrolling") with a guard flag so the
+  mirrored scroll event doesn't bounce straight back. The "diff overlay
+  toggle" SPEC.md also asks for is computed client-side -- draw both PNGs
+  to canvases, compare pixels with a small per-channel tolerance (PNG
+  re-encoding and anti-aliasing introduce noise even between genuinely
+  identical renders), and paint a translucent red overlay only where they
+  differ -- rather than reusing `engine/verify.py`'s numpy-based pixel-diff
+  harness, which is Python-only (built for FNT-12's per-edit verification
+  and the P1 regression suite) and not reachable from the browser without
+  a new endpoint; a same-size image comparison is simple enough to do
+  directly in JS. A status line ("Pages are identical" / "Pages differ
+  (X.X% of pixels changed)") is always shown, independent of whether the
+  overlay itself is toggled on -- both a genuinely useful signal on its own
+  and what let the Playwright tests assert something concrete without
+  needing to inspect canvas pixel data through the DOM.
+- `viewer.ts` gained a "Compare" toolbar toggle. Comparing and editing are
+  mutually exclusive -- toggling swaps `pageArea`'s content between the
+  normal click-to-edit canvas and the compare panel, rather than layering
+  them, since SPEC.md's mockup doesn't ask for editing *while* comparing
+  and keeping them exclusive means `overlay.ts` and `compare.ts` never
+  need to coordinate shared state neither otherwise needs to know about.
+  `goToPage` and `reloadDocument` both refresh the compare view too, if
+  it's currently showing, so paging through the document or making
+  another edit while comparing doesn't leave it stale.
+- 8 new tests (377 total, 93.3% coverage): 2 engine (`original_bytes`'s
+  stability, including across history capping), 2 server (the new route
+  matches the live one before any edit, stays unchanged across an edit and
+  an undo), 4 Playwright (toggle shows both renders and reports identical
+  pre-edit; reports "differ" post-edit; the diff checkbox shows/hides the
+  overlay canvas; toggling off returns to the editable canvas). One test
+  needed a real fix, not a design change: comparing `to_bytes()` output
+  byte-for-byte for the *engine* test failed, because PyMuPDF regenerates
+  a random component of the PDF's `/ID` on every `tobytes()` call even
+  with nothing else changed (confirmed directly -- two back-to-back calls
+  on the same untouched document differ at one byte offset) -- fixed by
+  comparing actual text content instead, the same fix pattern already
+  used for a similar false assumption in the UI-02/UI-03 session's preview
+  test. ruff, `mypy --strict` (scoped to `engine cli tools server`,
+  matching CI), bandit, `ops.schema.json`/SPEC catalog sync (unchanged --
+  no new Op type) and `npm audit` all clean.
+- UI-05 moved to `done` (49/161 total, 7/15 in P3). Remaining in P3:
+  UI-08 (keyboard shortcuts beyond page nav), UI-09 (light/dark toggle +
+  persistence), and EDT-05/07/08/09/10/11.
 
 ### 2026-09-28 — UI-04: history panel with undo/redo
 

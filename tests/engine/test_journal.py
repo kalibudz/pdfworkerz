@@ -130,3 +130,52 @@ def test_history_is_capped_at_max_history() -> None:
         assert texts == ["line 2", "line 3", "line 4"]
     finally:
         small_journal.document.close()
+
+
+@pytest.mark.feature("UI-05")
+def test_original_bytes_is_the_document_exactly_as_opened(journal: UndoRedoJournal) -> None:
+    """Compares actual text content, not raw bytes -- PyMuPDF regenerates a
+    random component of the PDF's /ID on every to_bytes() call, even with
+    nothing else changed (confirmed directly: two back-to-back to_bytes()
+    calls on the very same untouched document differ), so byte-for-byte
+    equality isn't a meaningful assertion here."""
+    reopened = Document.from_bytes(journal.original_bytes)
+    try:
+        original_text = next(reopened.iter_pages()).get_text()
+    finally:
+        reopened.close()
+    assert original_text == next(journal.document.iter_pages()).get_text()
+
+    journal.record(_InsertLineOp(text="changed"))
+    assert "changed" not in original_text
+    assert "changed" in next(journal.document.iter_pages()).get_text()
+
+    still_reopened = Document.from_bytes(journal.original_bytes)
+    try:
+        assert next(still_reopened.iter_pages()).get_text() == original_text  # unaffected by the edit
+    finally:
+        still_reopened.close()
+
+
+@pytest.mark.feature("UI-05")
+def test_original_bytes_survives_undo_and_history_capping() -> None:
+    """The whole point of capturing this separately from the undo stack:
+    once more edits than max_history have been recorded, the oldest
+    surviving entry's `.before` is no longer the document's real original
+    state -- but `original_bytes` must still be."""
+    from tests.corpus.build_corpus import build_corpus
+
+    corpus = build_corpus()
+    doc = Document.open(corpus.simple)
+    small_journal = UndoRedoJournal(doc, max_history=2)
+    try:
+        original = small_journal.original_bytes
+        for i in range(5):
+            small_journal.record(_InsertLineOp(text=f"line {i}"))
+        assert small_journal.original_bytes == original
+        assert small_journal.original_bytes != small_journal.document.to_bytes()
+        small_journal.undo()
+        small_journal.undo()
+        assert small_journal.original_bytes == original  # still correct, even mid-undo
+    finally:
+        small_journal.document.close()

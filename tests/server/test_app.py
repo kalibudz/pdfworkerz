@@ -178,6 +178,42 @@ def test_render_page_returns_png_bytes(client: TestClient, simple_path: Path) ->
     assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
 
 
+@pytest.mark.feature("UI-05")
+def test_render_original_page_matches_the_live_render_before_any_edit(
+    client: TestClient, simple_path: Path
+) -> None:
+    document_id = _open(client, simple_path)
+    live = client.get(f"/documents/{document_id}/pages/0/render", headers=AUTH)
+    original = client.get(f"/documents/{document_id}/pages/0/render/original", headers=AUTH)
+    assert original.status_code == 200
+    assert original.headers["content-type"] == "image/png"
+    assert original.content == live.content
+
+
+@pytest.mark.feature("UI-05")
+def test_render_original_page_stays_unchanged_after_an_edit(client: TestClient, simple_path: Path) -> None:
+    """UI-05's whole point: the "before" render must keep showing the
+    document as it was opened, even after an edit changes the live one --
+    and even after that edit is undone again."""
+    document_id = _open(client, simple_path)
+    original = client.get(f"/documents/{document_id}/pages/0/render/original", headers=AUTH)
+
+    client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "replace_text", "match": "PDFWorkerz", "replacement": "Something Else Entirely"},
+        headers=AUTH,
+    )
+    live_after_edit = client.get(f"/documents/{document_id}/pages/0/render", headers=AUTH)
+    assert live_after_edit.content != original.content
+
+    original_after_edit = client.get(f"/documents/{document_id}/pages/0/render/original", headers=AUTH)
+    assert original_after_edit.content == original.content
+
+    client.post(f"/documents/{document_id}/undo", headers=AUTH)
+    original_after_undo = client.get(f"/documents/{document_id}/pages/0/render/original", headers=AUTH)
+    assert original_after_undo.content == original.content
+
+
 @pytest.mark.feature("COR-11")
 def test_page_spans_route_returns_every_span(client: TestClient, simple_path: Path) -> None:
     document_id = _open(client, simple_path)

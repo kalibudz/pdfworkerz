@@ -14,6 +14,7 @@
  */
 
 import type { Api } from "./api";
+import { createComparePanel } from "./compare";
 import { createHistoryPanel } from "./history";
 import { createInspector } from "./inspector";
 import { createOverlay } from "./overlay";
@@ -65,6 +66,11 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomInButton.type = "button";
   zoomInButton.textContent = "+";
   zoomInButton.title = "Zoom in";
+  const compareButton = document.createElement("button");
+  compareButton.type = "button";
+  compareButton.textContent = "Compare";
+  compareButton.title = "Before/after split view (UI-05)";
+  compareButton.setAttribute("aria-pressed", "false");
   toolbar.append(
     title,
     prevButton,
@@ -73,6 +79,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     zoomOutButton,
     zoomIndicator,
     zoomInButton,
+    compareButton,
   );
 
   // Disabled until the document has actually loaded below -- otherwise
@@ -87,6 +94,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   nextButton.disabled = true;
   zoomOutButton.disabled = true;
   zoomInButton.disabled = true;
+  compareButton.disabled = true;
 
   const body = document.createElement("div");
   body.className = "pw-body";
@@ -129,11 +137,13 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     documentId: options.documentId,
     onChanged: () => void reloadDocument(),
   });
+  const compare = createComparePanel({ api: options.api, documentId: options.documentId });
 
   const renderer = new PageRenderer();
   let pdf: PdfDocument | null = null;
   let currentPage = 1;
   let scale = 1;
+  let comparing = false;
   const thumbButtons: HTMLButtonElement[] = [];
 
   function updateToolbar(): void {
@@ -180,6 +190,9 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     buildThumbnailRail(thumbRail, pdf, options.pageCount, thumbButtons, (pageNumber) => void goToPage(pageNumber));
     await renderCurrentPage();
     await history.refresh();
+    if (comparing) {
+      await compare.show(currentPage - 1);
+    }
   }
 
   async function goToPage(pageNumber: number): Promise<void> {
@@ -192,6 +205,27 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     }
     currentPage = clamped;
     await renderCurrentPage();
+    if (comparing) {
+      await compare.show(currentPage - 1);
+    }
+  }
+
+  /** UI-05: toggles between the normal click-to-edit canvas and the
+   * before/after split view for whatever page is currently shown. The two
+   * are mutually exclusive rather than layered -- editing while comparing
+   * (or vice versa) isn't a combination SPEC.md's mockup asks for, and
+   * keeping them exclusive avoids overlay.ts and compare.ts having to
+   * coordinate shared state neither of them otherwise needs to know about. */
+  async function setComparing(next: boolean): Promise<void> {
+    comparing = next;
+    compareButton.classList.toggle("pw-active", comparing);
+    compareButton.setAttribute("aria-pressed", String(comparing));
+    if (comparing) {
+      pageArea.replaceChildren(compare.element);
+      await compare.show(currentPage - 1);
+    } else {
+      pageArea.replaceChildren(canvasWrap);
+    }
   }
 
   async function setScale(newScale: number): Promise<void> {
@@ -206,6 +240,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   nextButton.addEventListener("click", () => void goToPage(currentPage + 1));
   zoomOutButton.addEventListener("click", () => void setScale(scale / ZOOM_STEP));
   zoomInButton.addEventListener("click", () => void setScale(scale * ZOOM_STEP));
+  compareButton.addEventListener("click", () => void setComparing(!comparing));
 
   const keyHandler = (event: KeyboardEvent): void => {
     if (isTypingTarget(event.target)) {
@@ -227,6 +262,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   scale = await fitWidthScale(pdf, pageArea.clientWidth);
   zoomOutButton.disabled = false;
   zoomInButton.disabled = false;
+  compareButton.disabled = false;
 
   buildThumbnailRail(thumbRail, pdf, options.pageCount, thumbButtons, (pageNumber) => void goToPage(pageNumber));
 
