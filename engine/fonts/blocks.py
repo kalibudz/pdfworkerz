@@ -81,3 +81,51 @@ def find_block_containing(blocks: list[TextBlock], span: SpanTrace) -> TextBlock
         if any(line is span for line in block.lines):
             return block
     return None
+
+
+_ALIGN_TOLERANCE = 1.5
+
+
+def _center(span: SpanTrace) -> float:
+    return (span.style.bbox[0] + span.style.bbox[2]) / 2
+
+
+def detect_alignment(span: SpanTrace, page_spans: list[SpanTrace], page_width: float) -> str:
+    """How a single line is aligned -- "left", "right" or "center" -- so an
+    edit that changes its width can keep the edge (or center) that matters.
+
+    Found on a real statement: a replacement always kept the original's left
+    edge, so shorter text in a right-aligned header no longer ended at the
+    margin. The evidence, in order, from the other lines on the page:
+
+    1. starting at the page's text left margin, or sharing a left edge with
+       another line -> left (the common case, and a column of body text);
+    2. sharing a right edge with another line that starts elsewhere -> right;
+    3. sharing a center with another line that starts elsewhere, or sitting
+       on the page's center -> center;
+    4. ending at the page's text right margin -> right;
+    5. otherwise left. Rotated text is always treated as left.
+    """
+    if span.style.rotation_degrees != 0.0 or not span.style.text.strip():
+        return "left"
+    x0, _y0, x1, _y1 = span.style.bbox
+    baseline = span.style.chars[0].origin[1] if span.style.chars else span.style.bbox[3]
+    visible = [s for s in page_spans if s.style.text.strip() and s.style.rotation_degrees == 0.0]
+    others = [s for s in visible if s.style.chars and abs(s.style.chars[0].origin[1] - baseline) > _ALIGN_TOLERANCE]
+
+    def near(a: float, b: float) -> bool:
+        return abs(a - b) <= _ALIGN_TOLERANCE
+
+    left_margin = min(s.style.bbox[0] for s in visible) if visible else x0
+    right_margin = max(s.style.bbox[2] for s in visible) if visible else x1
+    if near(x0, left_margin) or any(near(x0, o.style.bbox[0]) for o in others):
+        return "left"
+    if any(near(x1, o.style.bbox[2]) and not near(x0, o.style.bbox[0]) for o in others):
+        return "right"
+    if near(_center(span), page_width / 2) or any(
+        near(_center(span), _center(o)) and not near(x0, o.style.bbox[0]) for o in others
+    ):
+        return "center"
+    if near(x1, right_margin):
+        return "right"
+    return "left"

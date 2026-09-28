@@ -39,7 +39,7 @@ from numpy.typing import NDArray
 
 from engine.document import Document
 from engine.errors import FontResourceNotFoundError, OpValidationError
-from engine.fonts.blocks import TextBlock
+from engine.fonts.blocks import TextBlock, detect_alignment
 from engine.fonts.classify import classify_font_xref, split_subset_tag
 from engine.fonts.fit import fit_to_width
 from engine.fonts.kerning import build_kern_pairs
@@ -278,6 +278,31 @@ def resolve_font_for_span(
     )
 
 
+def _drawn_width(resolution: FontResolution, text: str, font_size: float, text_state: TextState) -> float:
+    """How wide draw_styled_text will make `text` (kerning aside)."""
+    widths = _load_font(resolution).char_lengths(text, fontsize=font_size)
+    return sum(advance_for_char(width, char, text_state) for char, width in zip(text, widths, strict=True))
+
+
+def _aligned_origin(
+    document: Document,
+    page_index: int,
+    span: SpanTrace,
+    new_width: float,
+) -> tuple[tuple[float, float], str]:
+    """Where to start drawing a replacement so a right-aligned or centered
+    line keeps its right edge or center, not its left edge (detect_alignment)."""
+    origin = span.style.chars[0].origin
+    page = document.raw[page_index]
+    alignment = detect_alignment(span, extract_page_spans(document.raw, page_index), page.rect.width)
+    right = span.style.bbox[2]
+    if alignment == "right":
+        return (right - new_width, origin[1]), alignment
+    if alignment == "center":
+        return ((origin[0] + right) / 2 - new_width / 2, origin[1]), alignment
+    return origin, alignment
+
+
 def replace_span_text(
     document: Document,
     page_index: int,
@@ -321,13 +346,18 @@ def replace_span_text(
         fit_result = fit_to_width(_load_font(resolution), new_text, font_size, text_state, target_width)
         text_state = fit_result.text_state
 
+    origin, alignment = style.chars[0].origin, "left"
+    if new_text and fit_result is None:
+        new_width = _drawn_width(resolution, new_text, font_size, text_state)
+        origin, alignment = _aligned_origin(document, page_index, span, new_width)
+
     page.add_redact_annot(pymupdf.Rect(style.bbox))
     page.apply_redactions(**_REDACT_KWARGS)
 
     end_point = draw_styled_text(
         page,
         text=new_text,
-        origin=style.chars[0].origin,
+        origin=origin,
         font_size=font_size,
         color=color,
         text_state=text_state,
@@ -337,6 +367,8 @@ def replace_span_text(
 
     verification = _verify_edit(document, page_index, before, new_text) if before is not None else None
     note = resolution.note
+    if alignment != "left":
+        note += f"; kept the line's {alignment} alignment"
     if fit_result is not None and not fit_result.fits:
         note += (
             f"; fit-to-width could not match the original {fit_result.target_width:.1f}pt width "
