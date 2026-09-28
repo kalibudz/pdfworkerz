@@ -1,4 +1,4 @@
-"""EDT-01/02/03/04/06: style-faithful text editing.
+"""EDT-01/02/03/04/05/06/07: style-faithful text editing.
 
 Every edit here follows the same pipeline (SPEC.md section 5):
 
@@ -38,7 +38,7 @@ import pymupdf
 from numpy.typing import NDArray
 
 from engine.document import Document
-from engine.errors import FontResourceNotFoundError
+from engine.errors import FontResourceNotFoundError, OpValidationError
 from engine.fonts.blocks import TextBlock
 from engine.fonts.classify import classify_font_xref, split_subset_tag
 from engine.fonts.fit import fit_to_width
@@ -447,6 +447,97 @@ def insert_text_near(
         end_point=end_point,
         verification=verification,
     )
+
+
+def _line_pitch(block: TextBlock, font_size: float) -> float:
+    """Baseline-to-baseline distance for re-laid-out lines: the block's own
+    spacing when it has two or more lines, else the TL leading, else 1.2x."""
+    if len(block.lines) >= 2:
+        return block.lines[1].style.chars[0].origin[1] - block.lines[0].style.chars[0].origin[1]
+    leading = (block.lines[0].text_state or TextState()).leading
+    return leading if leading > 0 else font_size * 1.2
+
+
+def move_resize_block(
+    document: Document,
+    page_index: int,
+    block: TextBlock,
+    *,
+    dx: float = 0.0,
+    dy: float = 0.0,
+    width: float | None = None,
+    font_index: list[FontCandidate],
+    verify: bool = True,
+) -> list[EditResult]:
+    """EDT-05: move a text block by (`dx`, `dy`) page points (y-down, like
+    every MuPDF coordinate) and/or re-wrap it to a new `width`.
+
+    Unlike reflow_block, which must fit new text into the block's existing
+    lines, resizing may change the line count: a narrower block grows
+    downward, a wider one shrinks, at the block's own line spacing. The
+    block's text itself never changes. Every original line is redacted
+    before anything is drawn, so a short move never has its own new lines
+    removed by the redaction of an old one they overlap.
+    """
+    if not block.lines:
+        return []
+    page = document.raw[page_index]
+    reference = block.lines[0]
+    text_state = reference.text_state or TextState()
+    font_size = text_state.font_size or reference.style.size
+    resolution = resolve_font_for_span(document, page_index, reference, block.text, font_index=font_index)
+
+    first_x, first_y = reference.style.chars[0].origin
+    if width is None:
+        placed = [
+            (line.style.text, (line.style.chars[0].origin[0] + dx, line.style.chars[0].origin[1] + dy), line)
+            for line in block.lines
+        ]
+    else:
+        if reference.style.rotation_degrees != 0.0:
+            raise OpValidationError("resizing a rotated text block is not supported; move it instead")
+        wrapped = wrap_text(block.text, _load_font(resolution), font_size, width)
+        pitch = _line_pitch(block, font_size)
+        placed = [
+            (text, (first_x + dx, first_y + dy + i * pitch), block.lines[min(i, len(block.lines) - 1)])
+            for i, text in enumerate(wrapped)
+        ]
+
+    page_rect = page.rect
+    for _text, (x, y), _line in placed:
+        if not (page_rect.x0 <= x < page_rect.x1 and page_rect.y0 < y <= page_rect.y1):
+            raise OpValidationError(f"the block would be moved off the page (a line would start at {x:.0f}, {y:.0f})")
+
+    before = render_to_array(document.raw, page_index, dpi=VERIFY_DPI) if verify else None
+    for line in block.lines:
+        page.add_redact_annot(pymupdf.Rect(line.style.bbox))
+    page.apply_redactions(**_REDACT_KWARGS)
+
+    results: list[EditResult] = []
+    for text, origin, line in placed:
+        end_point = draw_styled_text(
+            page,
+            text=text,
+            origin=origin,
+            font_size=font_size,
+            color=line.style.color,
+            text_state=line.text_state or text_state,
+            rotation_degrees=line.style.rotation_degrees,
+            resolution=resolution,
+        )
+        results.append(
+            EditResult(
+                tier=resolution.tier,
+                confidence=resolution.confidence,
+                requires_approval=resolution.requires_approval,
+                note=resolution.note,
+                end_point=end_point,
+            )
+        )
+    if before is not None:
+        verification = _verify_edit(document, page_index, before, placed[0][0])
+        results[-1] = dataclasses.replace(results[-1], verification=verification)
+    return results
 
 
 def reflow_block(

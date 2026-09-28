@@ -23,6 +23,7 @@
 import type * as pdfjsLib from "pdfjs-dist";
 
 import type { Api, HistoryOp, LinkInfo, SpanTrace } from "./api";
+import { attachBlockHandles } from "./blockdrag";
 import type { InspectorHandle } from "./inspector";
 import { toHexColor } from "./inspector";
 
@@ -167,6 +168,54 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
   let painterSource: SpanRef | null = null;
   let pageLinks: LinkInfo[] = [];
   let currentPageIndex = 0;
+  let currentViewport: pdfjsLib.PageViewport | null = null;
+  let detachHandles: (() => void) | null = null;
+
+  function removeHandles(): void {
+    detachHandles?.();
+    detachHandles = null;
+  }
+
+  /** EDT-05: the handle drag is in layer pixels; the Op wants page points. */
+  async function moveBlock(span: SpanRef, fields: { dx?: number; dy?: number; width?: number }): Promise<void> {
+    try {
+      await options.api.applyOp(options.documentId, {
+        op: "move_text_block",
+        page_index: span.pageIndex,
+        span_index: span.spanIndex,
+        require_tier: "fallback",
+        ...fields,
+      });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The paragraph could not be moved.");
+      return;
+    }
+    options.onCommitted();
+  }
+
+  function attachHandlesFor(box: HTMLElement, span: SpanRef): void {
+    removeHandles();
+    detachHandles = attachBlockHandles(layer, box, {
+      onMove: (dxPx, dyPx) => {
+        const viewport = currentViewport;
+        if (!viewport) {
+          return;
+        }
+        const origin = { x: parseFloat(box.style.left), y: parseFloat(box.style.top) };
+        const [x0, y0] = viewportToMupdfPoint(viewport, origin.x, origin.y);
+        const [x1, y1] = viewportToMupdfPoint(viewport, origin.x + dxPx, origin.y + dyPx);
+        void moveBlock(span, { dx: x1 - x0, dy: y1 - y0 });
+      },
+      onResize: (rightEdgePx) => {
+        const viewport = currentViewport;
+        if (!viewport) {
+          return;
+        }
+        const [rightX] = viewportToMupdfPoint(viewport, rightEdgePx, parseFloat(box.style.top));
+        void moveBlock(span, { width: rightX - span.bbox[0] });
+      },
+    });
+  }
 
   async function applyLinkOp(op: HistoryOp): Promise<void> {
     try {
@@ -270,6 +319,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     const box = activeBox;
     activeBox = null;
     selected = null;
+    removeHandles();
     if (box) {
       box.contentEditable = "false";
       box.textContent = originalText;
@@ -333,6 +383,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     committing = false;
     activeBox = null;
     selected = null;
+    removeHandles();
     options.onCommitted();
   }
 
@@ -343,6 +394,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     activeBox = box;
     originalText = text;
     selected = { pageIndex, spanIndex, text, bbox: span.style.bbox };
+    attachHandlesFor(box, selected);
 
     box.contentEditable = "true";
     box.classList.add("pw-span-editing");
@@ -383,8 +435,10 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     links: LinkInfo[] = [],
   ): void {
     cancelEdit();
+    removeHandles();
     layer.innerHTML = "";
     currentPageIndex = pageIndex;
+    currentViewport = viewport;
     pageLinks = links;
 
     // EDT-10: link areas, drawn under the span boxes and never clickable

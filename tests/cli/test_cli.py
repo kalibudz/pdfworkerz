@@ -349,3 +349,28 @@ def test_add_link_command_refuses_an_unsafe_uri(corpus: Corpus, work_dir: Path) 
     )
     assert result.exit_code != 0
     assert "scheme" in result.output
+
+
+@pytest.mark.feature("EDT-05")
+def test_move_block_command(corpus: Corpus, work_dir: Path) -> None:
+    out = work_dir / "out.pdf"
+    result = runner.invoke(
+        app,
+        [
+            "move-block",
+            str(corpus.paragraph),
+            "--match",
+            "line two",
+            "--dy",
+            "250",
+            "--width",
+            "150",
+            "--out",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with Document.open(out) as document:
+        spans = extract_page_spans(document.raw, 0)
+    moved = [span for span in spans if span.style.chars[0].origin[1] > 300]
+    assert len(moved) > 3  # three lines, re-wrapped narrower, now lower on the page

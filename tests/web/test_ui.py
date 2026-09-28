@@ -731,3 +731,77 @@ def test_an_unsafe_link_is_refused_with_the_engines_message(page: Page, app_url:
         page.wait_for_timeout(100)
     assert messages and "scheme" in messages[0]
     assert page.query_selector(".pw-link-box") is None
+
+
+def _drag(page: Page, selector: str, dx: float, dy: float) -> None:
+    box = page.locator(selector).bounding_box()
+    assert box is not None
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + dx / 2, y + dy / 2)
+    page.mouse.move(x + dx, y + dy)
+    page.mouse.up()
+
+
+def _span_top(page: Page, text: str) -> float:
+    return float(
+        page.evaluate(
+            "t => parseFloat([...document.querySelectorAll('.pw-span-box')]"
+            ".find(b => b.textContent === t)?.style.top ?? 'NaN')",
+            text,
+        )
+    )
+
+
+@pytest.mark.feature("EDT-05")
+def test_dragging_the_move_handle_moves_the_whole_paragraph(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.paragraph))
+    _wait_overlay_ready(page)
+    line_three = "And this is line three, the last."
+    before = _span_top(page, line_three)
+
+    page.click(".pw-span-box:has-text('line one')")
+    page.wait_for_selector(".pw-move-handle", timeout=3000)
+    _drag(page, ".pw-move-handle", 0, 300)
+
+    page.wait_for_selector(".pw-history-entry:has-text('Move paragraph')", timeout=10000)
+    page.wait_for_function(
+        "([t, before]) => { const b = [...document.querySelectorAll('.pw-span-box')].find(x => x.textContent === t);"
+        " return b && parseFloat(b.style.top) > before + 250; }",
+        arg=[line_three, before],
+        timeout=5000,
+    )
+
+
+@pytest.mark.feature("EDT-05")
+def test_dragging_the_resize_handle_rewraps_the_paragraph(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.paragraph))
+    _wait_overlay_ready(page)
+    count_before = page.locator(".pw-span-box").count()
+
+    page.click(".pw-span-box:has-text('line one')")
+    page.wait_for_selector(".pw-resize-handle", timeout=3000)
+    handle_width = page.locator(".pw-span-box:has-text('line one')").bounding_box()
+    assert handle_width is not None
+    _drag(page, ".pw-resize-handle", -handle_width["width"] / 2, 0)
+
+    page.wait_for_selector(".pw-history-entry:has-text('Resize paragraph')", timeout=10000)
+    page.wait_for_function(f"() => document.querySelectorAll('.pw-span-box').length > {count_before}", timeout=5000)
+
+
+@pytest.mark.feature("EDT-05")
+def test_a_click_on_a_handle_without_dragging_changes_nothing(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.paragraph))
+    _wait_overlay_ready(page)
+    page.click(".pw-span-box:has-text('line one')")
+    page.click(".pw-move-handle")
+    page.wait_for_timeout(500)
+    assert page.query_selector(".pw-history-entry") is None
+    assert page.query_selector(".pw-span-box.pw-span-editing") is not None  # the edit survived the press

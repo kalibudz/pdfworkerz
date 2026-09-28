@@ -331,6 +331,23 @@ def test_an_unsafe_link_is_a_400_validation_error(client: TestClient, simple_pat
     assert "scheme" in response.json()["detail"]
 
 
+@pytest.mark.feature("EDT-05")
+def test_move_text_block_op_via_the_generic_ops_endpoint(client: TestClient, corpus: Corpus, work_dir: Path) -> None:
+    path = work_dir / "paragraph.pdf"
+    shutil.copy(corpus.paragraph, path)
+    document_id = _open(client, path)
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "move_text_block", "page_index": 0, "span_index": 0, "dy": 200},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+    assert len(response.json()) == 3  # one result per line of the paragraph
+    spans = client.get(f"/documents/{document_id}/pages/0/spans", headers=AUTH).json()
+    moved = next(s for s in spans if s["style"]["text"] == "This is line one of a paragraph.")
+    assert moved["style"]["bbox"][1] > 250
+
+
 @pytest.mark.feature("UI-04")
 def test_replace_span_text_op_round_trips_through_history_and_undo(client: TestClient, simple_path: Path) -> None:
     """UI-04's history panel describes each entry from the Op's own fields

@@ -85,6 +85,10 @@ function describeOp(op: HistoryOp): string {
       return `Edit link (${pageLabel(op)})`;
     case "remove_link":
       return `Remove link (${pageLabel(op)})`;
+    case "move_text_block":
+      return typeof op.width === "number"
+        ? `Resize paragraph to ${Math.round(op.width)}pt (${pageLabel(op)})`
+        : `Move paragraph (${pageLabel(op)})`;
     case "copy_style":
       return `Copy style onto text (${pageLabel({ op: op.op, page_index: op.target_page_index })})`;
     default:

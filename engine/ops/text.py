@@ -1,4 +1,4 @@
-"""EDT-01, EDT-02, EDT-03, EDT-04, EDT-06, EDT-07, FNT-11: typed text-editing Ops.
+"""EDT-01, EDT-02, EDT-03, EDT-04, EDT-05, EDT-06, EDT-07, FNT-11: typed text-editing Ops.
 
 Each Op finds its target span(s) with :func:`engine.fonts.style.extract_page_spans`
 and draws through :mod:`engine.edit`. A match is only supported when it lies
@@ -21,12 +21,13 @@ from engine.edit import (
     EditResult,
     copy_span_style,
     insert_text_near,
+    move_resize_block,
     reflow_block,
     replace_span_text,
     resolve_font_for_span,
 )
 from engine.errors import OpValidationError
-from engine.fonts.blocks import detect_blocks, find_block_containing
+from engine.fonts.blocks import TextBlock, detect_blocks, find_block_containing
 from engine.fonts.match import FontCandidate, build_font_index
 from engine.fonts.style import SpanTrace, extract_page_spans
 from engine.ops.base import Op, register_op
@@ -206,6 +207,61 @@ class CopyStyleOp(Op):
         )
         _check_tier(result, self.require_tier, where=type(self).__name__)
         return result
+
+
+def _block_at(document: Document, page_index: int, span_index: int) -> TextBlock:
+    """The block containing the span at `span_index`. detect_blocks needs its
+    lines consecutive; content-stream order gives that for freshly authored
+    pages but not after an edit (redrawn text is appended to the end of the
+    stream), while top-to-bottom order gives it after an edit but can
+    interleave side-by-side columns. Both are tried; the larger block wins."""
+    spans = extract_page_spans(document.raw, page_index)
+    _span_at(document, page_index, span_index)  # range check with the standard error message
+    target = spans[span_index]  # the same object detect_blocks sees: find_block_containing matches by identity
+    visual = sorted(
+        spans, key=lambda s: (round(s.style.chars[0].origin[1], 1) if s.style.chars else 0.0, s.style.bbox[0])
+    )
+    candidates = [find_block_containing(detect_blocks(order), target) for order in (spans, visual)]
+    blocks = [block for block in candidates if block is not None]
+    if not blocks:
+        raise OpValidationError("the span could not be placed in a text block")
+    return max(blocks, key=lambda block: len(block.lines))
+
+
+@register_op
+class MoveTextBlockOp(Op):
+    """EDT-05: move the text block containing the span at `span_index` by
+    (`dx`, `dy`) points (MuPDF page space: +x right, +y down), and/or
+    re-wrap it to `width` points. Its text and style are unchanged."""
+
+    op: Literal["move_text_block"] = "move_text_block"
+    page_index: int
+    span_index: int
+    dx: float = 0.0
+    dy: float = 0.0
+    width: float | None = None
+    require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
+    verify: bool = True
+
+    def apply(self, document: Document) -> list[EditResult]:
+        if self.width is not None and self.width <= 0:
+            raise OpValidationError("move_text_block: width must be positive")
+        if self.dx == 0 and self.dy == 0 and self.width is None:
+            raise OpValidationError("move_text_block: nothing to do (set dx/dy and/or width)")
+        block = _block_at(document, self.page_index, self.span_index)
+        results = move_resize_block(
+            document,
+            self.page_index,
+            block,
+            dx=self.dx,
+            dy=self.dy,
+            width=self.width,
+            font_index=_font_index(),
+            verify=self.verify,
+        )
+        for result in results:
+            _check_tier(result, self.require_tier, where=type(self).__name__)
+        return results
 
 
 class _FindReplaceOp(Op):

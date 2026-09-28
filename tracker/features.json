@@ -97,7 +97,7 @@
     {"id": "EDT-02", "category": "EDT", "name": "Find and replace (literal, regex, whole word, case sensitive)", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P2", "estTokens": "M", "status": "done"},
     {"id": "EDT-03", "category": "EDT", "name": "Add new text with 'match style of' or explicit style", "parity": ["iLovePDF", "Nitro"], "libs": ["PyMuPDF"], "phase": "P2", "estTokens": "M", "status": "done"},
     {"id": "EDT-04", "category": "EDT", "name": "Delete text", "parity": ["iLovePDF", "Nitro"], "libs": ["PyMuPDF"], "phase": "P2", "estTokens": "S", "status": "done"},
-    {"id": "EDT-05", "category": "EDT", "name": "Move and resize text blocks", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P3", "estTokens": "M", "status": "planned"},
+    {"id": "EDT-05", "category": "EDT", "name": "Move and resize text blocks", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P3", "estTokens": "M", "status": "done"},
     {"id": "EDT-06", "category": "EDT", "name": "Change font, size, color and weight of existing text", "parity": ["Nitro"], "libs": ["PyMuPDF", "fontTools"], "phase": "P2", "estTokens": "M", "status": "done"},
     {"id": "EDT-07", "category": "EDT", "name": "Format painter (copy style from one span to another)", "parity": ["Beyond"], "libs": ["PyMuPDF"], "phase": "P3", "estTokens": "S", "status": "done"},
     {"id": "EDT-08", "category": "EDT", "name": "Insert, replace, resize, crop and delete images", "parity": ["iLovePDF", "Nitro"], "libs": ["PyMuPDF", "Pillow"], "phase": "P3", "estTokens": "M", "status": "planned"},

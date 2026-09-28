@@ -627,3 +627,25 @@ button {
 .pw-add-link {
   width: 100%;
 }
+
+/* -- EDT-05: move/resize handles on the span being edited -- */
+
+.pw-move-handle,
+.pw-resize-handle {
+  position: absolute;
+  pointer-events: auto;
+  min-height: 12px;
+  background: var(--accent);
+  opacity: 0.85;
+  border-radius: 2px;
+}
+
+.pw-move-handle {
+  width: 12px;
+  cursor: move;
+}
+
+.pw-resize-handle {
+  width: 6px;
+  cursor: ew-resize;
+}

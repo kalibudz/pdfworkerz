@@ -388,6 +388,69 @@
     },
     {
       "additionalProperties": false,
+      "description": "EDT-05: move the text block containing the span at `span_index` by\n(`dx`, `dy`) points (MuPDF page space: +x right, +y down), and/or\nre-wrap it to `width` points. Its text and style are unchanged.",
+      "properties": {
+        "op": {
+          "const": "move_text_block",
+          "default": "move_text_block",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "span_index": {
+          "title": "Span Index",
+          "type": "integer"
+        },
+        "dx": {
+          "default": 0.0,
+          "title": "Dx",
+          "type": "number"
+        },
+        "dy": {
+          "default": 0.0,
+          "title": "Dy",
+          "type": "number"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_index",
+        "span_index"
+      ],
+      "title": "MoveTextBlockOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "EDT-02: find text (literal or regex) and replace it, matching the original style.",
       "properties": {
         "match": {

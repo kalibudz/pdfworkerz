@@ -26,6 +26,7 @@ from engine.ops.text import (
     CopyStyleOp,
     DeleteTextOp,
     InsertTextOp,
+    MoveTextBlockOp,
     ReplaceTextOp,
     RestyleTextOp,
     find_span_index,
@@ -305,6 +306,38 @@ def copy_style(
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
     _report([result])
+    typer.echo(f"saved -> {saved_to}")
+
+
+@app.command("move-block")
+def move_block(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    match: Annotated[str, typer.Option(help="Literal text found in any line of the block")],
+    dx: Annotated[float, typer.Option(help="Points to move right (negative: left)")] = 0.0,
+    dy: Annotated[float, typer.Option(help="Points to move down (negative: up)")] = 0.0,
+    width: Annotated[float | None, typer.Option(help="Re-wrap the block to this width, in points")] = None,
+    page: Annotated[int, typer.Option(help="0-based page index")] = 0,
+    require_tier: TierOption = "approximate",
+    out: Annotated[Path | None, typer.Option(help="Output path; defaults to a new <name>.edited.pdf")] = None,
+    overwrite: Annotated[bool, typer.Option(help="Write back to the original file instead")] = False,
+    password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
+) -> None:
+    """Move a paragraph and/or re-wrap it to a new width (EDT-05), keeping its text and style."""
+    try:
+        with Document.open(path, password=password) as document:
+            op = MoveTextBlockOp(
+                page_index=page,
+                span_index=find_span_index(document, page, match),
+                dx=dx,
+                dy=dy,
+                width=width,
+                require_tier=require_tier,
+            )
+            results = op.apply(document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    _report(results)
     typer.echo(f"saved -> {saved_to}")
 
 
