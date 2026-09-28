@@ -227,7 +227,6 @@ def test_inspector_match_field_populates_as_soon_as_a_span_is_selected(
 def test_typing_new_text_updates_the_live_preview(page: Page, app_url: str, corpus: Corpus) -> None:
     _open_and_click_first_span(page, app_url, str(corpus.simple))
     page.wait_for_function(_EXACT_DOT, timeout=3000)
-    page.keyboard.press("Control+A")
     page.keyboard.type("Some Completely Different Text")
     page.wait_for_function(_EXACT_DOT, timeout=3000)  # still findable in the bundled/standard font
     match_text = page.eval_on_selector(".pw-inspector-row:last-child .pw-inspector-value", "el => el.textContent")
@@ -238,7 +237,6 @@ def test_typing_new_text_updates_the_live_preview(page: Page, app_url: str, corp
 def test_escape_discards_the_edit(page: Page, app_url: str, corpus: Corpus) -> None:
     _open_and_click_first_span(page, app_url, str(corpus.simple))
     original = page.eval_on_selector(".pw-span-box", "el => el.textContent")
-    page.keyboard.press("Control+A")
     page.keyboard.type("Should Not Be Saved")
     page.keyboard.press("Escape")
     page.wait_for_function(_NOT_EDITING, timeout=3000)
@@ -256,7 +254,6 @@ def test_clicking_away_discards_the_edit(page: Page, app_url: str, corpus: Corpu
     original = page.eval_on_selector(".pw-span-box", "el => el.textContent")
     errors: list[str] = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))
-    page.keyboard.press("Control+A")
     page.keyboard.type("Should Not Be Saved Either")
     page.click(".pw-page-area", position={"x": 5, "y": 5})
     page.wait_for_function(_NOT_EDITING, timeout=3000)
@@ -270,7 +267,6 @@ def test_enter_commits_an_exact_match_without_a_confirmation_dialog(page: Page, 
     page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
     _open_and_click_first_span(page, app_url, str(corpus.simple))
     page.wait_for_function(_EXACT_DOT, timeout=3000)
-    page.keyboard.press("Control+A")
     page.keyboard.type("Hello, Editor.")
     page.wait_for_timeout(400)  # let the debounced preview resolve before committing
     page.keyboard.press("Enter")
@@ -285,7 +281,6 @@ def test_a_fallback_match_asks_for_confirmation_before_committing(page: Page, ap
     page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
     _open_and_click_first_span(page, app_url, str(corpus.type3))
     page.wait_for_function(_FALLBACK_DOT, timeout=3000)
-    page.keyboard.press("Control+A")
     page.keyboard.type("X")
     page.wait_for_timeout(400)
     page.keyboard.press("Enter")
@@ -299,7 +294,6 @@ def test_declining_the_confirmation_leaves_the_edit_uncommitted(page: Page, app_
     page.on("dialog", lambda dialog: dialog.dismiss())
     _open_and_click_first_span(page, app_url, str(corpus.type3))
     page.wait_for_function(_FALLBACK_DOT, timeout=3000)
-    page.keyboard.press("Control+A")
     page.keyboard.type("X")
     page.wait_for_timeout(400)
     page.keyboard.press("Enter")
