@@ -344,25 +344,40 @@ class Document:
                 self._doc.close()  # release the read handle on `target` before replacing it (required on Windows)
                 Path(tmp).replace(target)
                 self._reopen(target, user_password)
-            else:
+            elif writes_original:
                 self._doc.save(str(tmp), garbage=4, deflate=True, **save_kwargs)
                 if deterministic:
                     _pin_second_file_id(tmp)
                 Path(tmp).replace(target)
-                if writes_original:
-                    self._reopen(target, user_password)
+                self._reopen(target, user_password)
+            else:
+                # Save As: write from a detached copy. Measured on pymupdf 1.28.2, garbage>=3
+                # compacts the live document's xref table but leaves the catalog's /Metadata
+                # pointing at the old number, so the next save from it silently dropped the XMP.
+                copy = self._detached_copy(unsaved)
+                try:
+                    copy.save(str(tmp), garbage=4, deflate=True, **save_kwargs)
+                finally:
+                    copy.close()
+                if deterministic:
+                    _pin_second_file_id(tmp)
+                Path(tmp).replace(target)
         except (OSError, pymupdf.mupdf.FzErrorBase) as exc:
             tmp.unlink(missing_ok=True)
             if self._doc.is_closed:  # closed for the replace, which then failed: keep the edits
-                recovered = pymupdf.open(stream=unsaved, filetype="pdf")
-                if recovered.needs_pass:  # read before authenticate(), see _reopen
-                    recovered.authenticate(self._password_used or "")
-                remember_password(recovered, self._password_used)
-                self._doc = recovered
+                self._doc = self._detached_copy(unsaved)
                 self._file_backed = False
             raise SaveFailedError(f"could not write {target}: {exc}") from exc
 
         return SaveResult(path=target, mode=chosen_mode, bytes_written=target.stat().st_size, note=note)
+
+    def _detached_copy(self, data: bytes) -> pymupdf.Document:
+        """An in-memory copy of this document's snapshot bytes, logged in like this one."""
+        copy = pymupdf.open(stream=data, filetype="pdf")
+        if copy.needs_pass:  # read before authenticate(), see _reopen
+            copy.authenticate(self._password_used or "")
+        remember_password(copy, self._password_used)
+        return copy
 
     def _reopen(self, target: Path, new_user_password: str | None) -> None:
         """Keep this Document usable after replacing its file: read it back, logged in again."""

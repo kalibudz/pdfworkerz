@@ -37,6 +37,7 @@ start: replace | delete | insert | set | undo | redo
      | crop_pages | uncrop_pages | resize_pages | impose
      | number_pages | bates | header_footer | watermark | background | stamp
      | mark_text | add_note | flatten_annots | export_annots
+     | set_meta | add_bookmark | auto_bookmarks | contents_page | attach | remove_attachment
 
 replace: REPLACE target WITH STRING (option | scope)*
 delete: DELETE target (option | scope)*
@@ -71,6 +72,12 @@ mark_text: (HIGHLIGHT | UNDERLINE | STRIKEOUT | SQUIGGLE) target (scope | NOTE S
 add_note: NOTE STRING AT number ","? number ON PAGE NUMBER
 flatten_annots: FLATTEN ANNOTATIONS
 export_annots: EXPORT ANNOTATIONS TO STRING
+set_meta: SET METAFIELD TO? STRING
+add_bookmark: BOOKMARK PAGE NUMBER AS STRING
+auto_bookmarks: BOOKMARK HEADINGS
+contents_page: INSERT CONTENTS PAGE
+attach: ATTACH STRING
+remove_attachment: REMOVE ATTACHMENT STRING
 
 pageset: PAGE NUMBER            -> ps_one
        | PAGES ranges           -> ps_ranges
@@ -203,6 +210,12 @@ KEYWORDS: dict[str, tuple[str, ...]] = {
     "FLATTEN": ("flatten",),
     "ANNOTATIONS": ("annotations", "comments"),
     "EXPORT": ("export",),
+    "METAFIELD": ("title", "author", "subject", "keywords"),
+    "BOOKMARK": ("bookmark",),
+    "HEADINGS": ("headings",),
+    "CONTENTS": ("contents",),
+    "ATTACHMENT": ("attachment",),
+    "ATTACH": ("attach",),
 }
 GRAMMAR = GRAMMAR_TEMPLATE.replace(
     "{keywords}",
@@ -242,6 +255,8 @@ VERBS = [
     "note",
     "flatten",
     "export",
+    "bookmark",
+    "attach",
 ]
 EXAMPLES = [
     'replace "old" with "new" on all pages',
@@ -278,10 +293,14 @@ EXAMPLES = [
     'note "Is this right?" at 400, 90 on page 1',
     "flatten annotations",
     'export annotations to "comments.md"',
+    'set title "Annual Report"',
+    'bookmark page 3 as "Results"',
+    "bookmark headings",
+    "insert contents page",
+    'attach "data.csv"',
 ]
 # SPEC.md section 8.3's other actions, refused with the phase that brings them.
 LATER_ACTIONS = {
-    **dict.fromkeys(["bookmark", "attach", "label"], "P5 (document structure, next in this phase)"),
     **dict.fromkeys(["redact", "protect", "unlock", "sign", "fill", "flatten"], "P6 (forms, signatures, security)"),
     **dict.fromkeys(["ocr", "convert"], "P7 (OCR and conversions)"),
     **dict.fromkeys(["compress", "compare"], "P8 (optimize and compare)"),
@@ -291,6 +310,8 @@ SYNTAX_HINT = (
     "insert N blank pages, extract, split, merge, remove blank pages, crop, uncrop, resize, impose; "
     "page design: number pages, bates, header, footer, watermark, background, stamp; "
     "annotations: highlight, underline, strike out, squiggle, note, flatten annotations, export annotations; "
+    "document: set title/author/subject/keywords, bookmark page N as, bookmark headings, "
+    "insert contents page, attach, remove attachment; "
     "and undo, redo. "
     'Put text in "double quotes", '
     "a regular expression in /slashes/, and pages as: on page 3 | on pages 1-3,5 | on all pages | on odd pages."
@@ -994,6 +1015,46 @@ def _export_annots(source: str, children: list[Any], _page_count: int, _current:
     return CommandPlan(source, f'Export a summary of every annotation to "{out}" ({fmt})', [op])
 
 
+def _set_meta(source: str, children: list[Any], _page_count: int, _current: int) -> CommandPlan:
+    (field,) = [str(t).lower() for t in _tokens(children, "METAFIELD")]
+    (value,) = _strings(children)
+    op = {"op": "set_metadata", "fields": {field: value}}
+    return CommandPlan(
+        source, f'Set the document {field} to "{value}"' if value else f"Clear the document {field}", [op]
+    )
+
+
+def _add_bookmark(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    page = _target_page(children, page_count)
+    (title,) = _strings(children)
+    if not title.strip():
+        raise CommandError("give the bookmark a title")
+    op = {"op": "add_bookmark", "title": title, "page_index": page}
+    return CommandPlan(source, f'Add the bookmark "{title}" for page {page + 1} at the end of the outline', [op])
+
+
+def _auto_bookmarks(source: str, _children: list[Any], _page_count: int, _current: int) -> CommandPlan:
+    op = {"op": "auto_bookmarks"}
+    return CommandPlan(source, "Replace the bookmarks with one per heading (text set larger than the body)", [op])
+
+
+def _contents_page(source: str, _children: list[Any], _page_count: int, _current: int) -> CommandPlan:
+    op = {"op": "contents_page", "at": 0}
+    return CommandPlan(source, "Insert a linked contents page at the start, from the bookmarks or headings", [op])
+
+
+def _attach(source: str, children: list[Any], _page_count: int, _current: int) -> CommandPlan:
+    (path,) = _strings(children)
+    if not path:
+        raise CommandError("give the file to attach")
+    return CommandPlan(source, f'Attach "{path}" to the document', [{"op": "attach_file", "path": path}])
+
+
+def _remove_attachment(source: str, children: list[Any], _page_count: int, _current: int) -> CommandPlan:
+    (name,) = _strings(children)
+    return CommandPlan(source, f'Remove the attachment "{name}"', [{"op": "remove_attachment", "name": name}])
+
+
 _BUILDERS = {
     "replace": _replace,
     "delete": _delete,
@@ -1025,6 +1086,12 @@ _BUILDERS = {
     "add_note": _add_note,
     "flatten_annots": _flatten_annots,
     "export_annots": _export_annots,
+    "set_meta": _set_meta,
+    "add_bookmark": _add_bookmark,
+    "auto_bookmarks": _auto_bookmarks,
+    "contents_page": _contents_page,
+    "attach": _attach,
+    "remove_attachment": _remove_attachment,
 }
 
 

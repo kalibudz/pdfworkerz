@@ -4,7 +4,7 @@
   "step": "P5 slice 1 committed (e8757a2). A real-scenario run of the local web app (API server + built UI, driven by a browser) found and fixed a layout bug: the toolbar didn't wrap and the viewer grid gave its flexible row to the command bar (c3d3b45).",
   "branch": "main",
   "lastGreenCommit": "e8757a2 (local gate, Windows 11, Python 3.14.3, 14/14 steps, 754 tests)",
-  "nextAction": "Continue P5 (slices 1-4 done: ORG-01..13, UI-07, DES-01..06, ANN-01..06): 5) document structure DOC-01..05, COR-12; then FNT-17. Independent review at the end of P5. Gate before every commit; push only with approval.",
+  "nextAction": "Finish P5: FNT-17 (justified reflow, and moving later content when a paragraph grows), then the independent P5 review, fixes, sign-off in PROGRESS.md. Slices 1-5 done (ORG, UI-07, DES, ANN, DOC, COR-12). Gate before every commit; push only with approval.",
   "openQuestions": [
     {
       "phase": "P2",

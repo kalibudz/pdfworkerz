@@ -222,6 +222,8 @@ def test_actions_from_later_phases_say_when_they_arrive() -> None:
                 "note",
                 "flatten",
                 "export",
+                "bookmark",
+                "attach",
             },
         ),
         ("rep", {"replace"}),
@@ -583,7 +585,7 @@ def test_page_commands_parse_into_page_ops(command: str, expected: dict[str, obj
         ("move page 2 after page 2", "one of the pages being moved"),
         ("move page 1 below page 3", 'use "after" or "before"'),
         ("delete pages 3-12", "page 11 doesn't exist"),
-        ("bookmark page 1", "isn't available yet"),
+        ("compress", "isn't available yet"),
     ],
 )
 def test_page_commands_refuse_what_cannot_be_done(command: str, message: str) -> None:

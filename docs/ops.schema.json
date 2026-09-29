@@ -3610,6 +3610,505 @@
       ],
       "title": "CorrectWordOp",
       "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-01: Info fields and XMP properties. Read-only.",
+      "properties": {
+        "op": {
+          "const": "get_metadata",
+          "default": "get_metadata",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "title": "GetMetadataOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-01: change Info fields (kept in step with XMP) and further XMP properties.",
+      "properties": {
+        "op": {
+          "const": "set_metadata",
+          "default": "set_metadata",
+          "title": "Op",
+          "type": "string"
+        },
+        "fields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Fields",
+          "type": "object"
+        },
+        "xmp": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Xmp"
+        }
+      },
+      "title": "SetMetadataOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-02: the outline, flattened in order. Read-only.",
+      "properties": {
+        "op": {
+          "const": "list_bookmarks",
+          "default": "list_bookmarks",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "title": "ListBookmarksOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-02: replace the outline: [level, title, 0-based page] per bookmark.",
+      "properties": {
+        "op": {
+          "const": "set_bookmarks",
+          "default": "set_bookmarks",
+          "title": "Op",
+          "type": "string"
+        },
+        "entries": {
+          "items": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Entries",
+          "type": "array"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "title": "SetBookmarksOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-02: insert one bookmark at outline position `at` (default: the end).",
+      "properties": {
+        "op": {
+          "const": "add_bookmark",
+          "default": "add_bookmark",
+          "title": "Op",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "level": {
+          "default": 1,
+          "title": "Level",
+          "type": "integer"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        }
+      },
+      "required": [
+        "title",
+        "page_index"
+      ],
+      "title": "AddBookmarkOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-02: rename, retarget or re-level bookmark `index` (children move with it).",
+      "properties": {
+        "op": {
+          "const": "update_bookmark",
+          "default": "update_bookmark",
+          "title": "Op",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "target_page_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Page Index"
+        },
+        "level": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Level"
+        }
+      },
+      "required": [
+        "index"
+      ],
+      "title": "UpdateBookmarkOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-02: remove bookmark `index` and its children.",
+      "properties": {
+        "op": {
+          "const": "delete_bookmark",
+          "default": "delete_bookmark",
+          "title": "Op",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index"
+      ],
+      "title": "DeleteBookmarkOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-02: move bookmark `index` (with its children) to outline position `to`.",
+      "properties": {
+        "op": {
+          "const": "move_bookmark",
+          "default": "move_bookmark",
+          "title": "Op",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "to": {
+          "title": "To",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "to"
+      ],
+      "title": "MoveBookmarkOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-03: replace the outline with bookmarks for the headings found.",
+      "properties": {
+        "op": {
+          "const": "auto_bookmarks",
+          "default": "auto_bookmarks",
+          "title": "Op",
+          "type": "string"
+        },
+        "max_levels": {
+          "default": 3,
+          "title": "Max Levels",
+          "type": "integer"
+        },
+        "min_ratio": {
+          "default": 1.15,
+          "title": "Min Ratio",
+          "type": "number"
+        }
+      },
+      "title": "AutoBookmarksOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-03: insert a linked contents page at `at` from the outline (or headings).",
+      "properties": {
+        "op": {
+          "const": "contents_page",
+          "default": "contents_page",
+          "title": "Op",
+          "type": "string"
+        },
+        "at": {
+          "default": 0,
+          "title": "At",
+          "type": "integer"
+        },
+        "title": {
+          "default": "Contents",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "title": "ContentsPageOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-04: embedded files. Read-only.",
+      "properties": {
+        "op": {
+          "const": "list_attachments",
+          "default": "list_attachments",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "title": "ListAttachmentsOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-04: embed a file.",
+      "properties": {
+        "op": {
+          "const": "attach_file",
+          "default": "attach_file",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "AttachFileOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-04: save an embedded file to `out`. The document is unchanged.",
+      "properties": {
+        "op": {
+          "const": "extract_attachment",
+          "default": "extract_attachment",
+          "title": "Op",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "out": {
+          "title": "Out",
+          "type": "string"
+        },
+        "overwrite": {
+          "default": false,
+          "title": "Overwrite",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "out"
+      ],
+      "title": "ExtractAttachmentOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DOC-04: remove an embedded file.",
+      "properties": {
+        "op": {
+          "const": "remove_attachment",
+          "default": "remove_attachment",
+          "title": "Op",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "RemoveAttachmentOp",
+      "type": "object"
+    },
+    {
+      "$defs": {
+        "LabelRange": {
+          "description": "Labels from `start_page` (0-based) until the next range: `prefix` + a number in `style`\ncounting from `first`. Styles: decimal (1, 2), roman (i, ii), ROMAN (I, II), letters (a, b),\nLETTERS (A, B), none (prefix only).",
+          "properties": {
+            "start_page": {
+              "title": "Start Page",
+              "type": "integer"
+            },
+            "style": {
+              "default": "decimal",
+              "enum": [
+                "decimal",
+                "roman",
+                "ROMAN",
+                "letters",
+                "LETTERS",
+                "none"
+              ],
+              "title": "Style",
+              "type": "string"
+            },
+            "prefix": {
+              "default": "",
+              "title": "Prefix",
+              "type": "string"
+            },
+            "first": {
+              "default": 1,
+              "title": "First",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_page"
+          ],
+          "title": "LabelRange",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "DOC-05: replace the page labels (i, ii, 1, 2, A-1 ...); returns every page's label.",
+      "properties": {
+        "op": {
+          "const": "set_page_labels",
+          "default": "set_page_labels",
+          "title": "Op",
+          "type": "string"
+        },
+        "ranges": {
+          "items": {
+            "$ref": "#/$defs/LabelRange"
+          },
+          "title": "Ranges",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ranges"
+      ],
+      "title": "SetPageLabelsOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "COR-12: optional-content layers and whether each is shown. Read-only.",
+      "properties": {
+        "op": {
+          "const": "list_layers",
+          "default": "list_layers",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "title": "ListLayersOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "COR-12: show or hide layers (by xref) in the default view.",
+      "properties": {
+        "op": {
+          "const": "set_layer_visibility",
+          "default": "set_layer_visibility",
+          "title": "Op",
+          "type": "string"
+        },
+        "visibility": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "title": "Visibility",
+          "type": "object"
+        }
+      },
+      "required": [
+        "visibility"
+      ],
+      "title": "SetLayerVisibilityOp",
+      "type": "object"
     }
   ]
 }
