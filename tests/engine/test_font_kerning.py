@@ -71,8 +71,9 @@ def test_draw_styled_text_applies_kerning_when_using_the_per_character_path(vera
     resolution = FontResolution(
         tier="exact", confidence=1.0, fontname=None, font_bytes=vera_bytes, requires_approval=False, note="test"
     )
-    # A nonzero rise forces the per-character drawing path (see draw_styled_text).
-    text_state = TextState(rise=0.0001)
+    # Non-default spacing forces the per-character drawing path (see draw_styled_text); Tw
+    # only applies to spaces, so on "AV" it changes nothing else.
+    text_state = TextState(word_spacing=1.0)
 
     end_point = draw_styled_text(
         page,

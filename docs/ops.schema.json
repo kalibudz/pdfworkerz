@@ -1105,8 +1105,96 @@
     },
     {
       "additionalProperties": false,
-      "description": "EDT-06: change the size and/or color of text that already matches, leaving its\nwording unchanged.",
+      "description": "EDT-06: change the font, weight, slant, size and/or color of every span that\nmatches, leaving its wording unchanged.",
       "properties": {
+        "size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "font": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font"
+        },
+        "bold": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bold"
+        },
+        "italic": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Italic"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        },
         "op": {
           "const": "restyle_text",
           "default": "restyle_text",
@@ -1142,6 +1230,188 @@
           ],
           "default": null,
           "title": "Page Index"
+        }
+      },
+      "required": [
+        "match"
+      ],
+      "title": "RestyleTextOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "EDT-06 for the UI: restyle exactly the span the user selected, by index.",
+      "properties": {
+        "size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "font": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font"
+        },
+        "bold": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bold"
+        },
+        "italic": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Italic"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        },
+        "op": {
+          "const": "restyle_span",
+          "default": "restyle_span",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "span_index": {
+          "title": "Span Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_index",
+        "span_index"
+      ],
+      "title": "RestyleSpanOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "EDT-03: add new text at `position` (a baseline point), either matching the style of\nan existing span (`reference_match`) or in an explicit style (`font` and `size`, plus\noptional `color`, `bold`, `italic`). With both, the explicit fields override the\nmatched style. Nothing existing is touched.",
+      "properties": {
+        "op": {
+          "const": "insert_text",
+          "default": "insert_text",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "position": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Position",
+          "type": "array"
+        },
+        "reference_match": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference Match"
+        },
+        "reference_case_sensitive": {
+          "default": true,
+          "title": "Reference Case Sensitive",
+          "type": "boolean"
+        },
+        "font": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font"
         },
         "size": {
           "anyOf": [
@@ -1180,68 +1450,29 @@
           "default": null,
           "title": "Color"
         },
-        "require_tier": {
-          "default": "approximate",
-          "enum": [
-            "exact",
-            "approximate",
-            "fallback"
-          ],
-          "title": "Require Tier",
-          "type": "string"
-        },
-        "verify": {
-          "default": true,
-          "title": "Verify",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "match"
-      ],
-      "title": "RestyleTextOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "EDT-03: add new text near an existing span, matching its style (or an\nexplicit override) -- nothing existing is touched.",
-      "properties": {
-        "op": {
-          "const": "insert_text",
-          "default": "insert_text",
-          "title": "Op",
-          "type": "string"
-        },
-        "page_index": {
-          "title": "Page Index",
-          "type": "integer"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "position": {
-          "maxItems": 2,
-          "minItems": 2,
-          "prefixItems": [
+        "bold": {
+          "anyOf": [
             {
-              "type": "number"
+              "type": "boolean"
             },
             {
-              "type": "number"
+              "type": "null"
             }
           ],
-          "title": "Position",
-          "type": "array"
+          "default": null,
+          "title": "Bold"
         },
-        "reference_match": {
-          "title": "Reference Match",
-          "type": "string"
-        },
-        "reference_case_sensitive": {
-          "default": true,
-          "title": "Reference Case Sensitive",
-          "type": "boolean"
+        "italic": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Italic"
         },
         "require_tier": {
           "default": "approximate",
@@ -1262,8 +1493,7 @@
       "required": [
         "page_index",
         "text",
-        "position",
-        "reference_match"
+        "position"
       ],
       "title": "InsertTextOp",
       "type": "object"

@@ -7,9 +7,9 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | Phase | Scope | Status | Reviewer sign-off |
 |---|---|---|---|
 | P0 | Spec, tracker, CI workers, session protocol | ✅ Done: 5/5 features proven by tests | First green GitHub Actions run: [run #17](https://github.com/kalibudz/pdfworkerz/actions/runs/36356246278), all 11 jobs, 2026-09-27 |
-| P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Self-reviewed this session (see below); independent reviewer sign-off pending |
-| P3 | Web UI with click-to-edit | ✅ Done: 15/15 features proven by tests | Self-reviewed (see the 2026-09-28 P3 completion entry); independent reviewer sign-off pending |
+| P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes (see the 2026-09-28 review entry) |
+| P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes; FNT-11/FNT-14 re-scoped (FNT-17/18 planned) |
+| P3 | Web UI with click-to-edit | ✅ Done: 15/15 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes |
 | P4 | Command bar & recipes | Planned | |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
@@ -25,6 +25,32 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-28 (cont. 3) — independent review of P1-P3, fixes, sign-off; owner decisions
+
+- **Independent review.** A fresh reviewer sub-agent (which built none of
+  P1-P3) found 16 defects the green gate had missed. The worst: edits could
+  delete neighbouring lines or redraw text at the wrong size, a second edit
+  font drew in the first, find/replace could loop forever, and editing an
+  encrypted PDF saved it decrypted (a plain `tobytes()` strips pymupdf's
+  encryption state). All fixed in 7f4273e, each with a test that failed first.
+- **Re-review** found three more: R1, an encrypted overwrite reading blank
+  (pymupdf breaks decryption if `needs_pass` is read after `authenticate()`),
+  R2, Download saving decrypted bytes, and R3, rotated text redrawn upright;
+  plus verification letting overlapping/misplaced text pass. Fixed in 892c8fe.
+  A final check found one older minor bug (rise applied twice), also fixed.
+  **Verdict: P1, P2 and P3 signed off.**
+- **Owner decisions:**
+  - EDT-03 explicit style and EDT-06 font/weight changes are built: engine
+    (`engine/fonts/choose.py`, `RestyleSpanOp`, explicit-style `InsertTextOp`),
+    CLI (`--font/--bold/--italic`, `pdfworkerz fonts`), API (`GET /fonts`) and
+    UI ("Change style…" in the inspector, "Text…" tool).
+  - FNT-11 and FNT-14 renamed to what is proven; justified reflow (FNT-17)
+    and RTL/vertical editing (FNT-18) are planned features.
+  - Font matching: exact when possible, else the closest approximation, and
+    every non-exact font is recorded in a fonts-to-research list
+    (`engine/fonts/research.py`; `pdfworkerz fonts --research`,
+    `GET /fonts/research`) so it can be added to the bundled library.
 
 ### 2026-09-28 (cont. 2) — verification moves from GitHub Actions to a local gate; PR #1 merged locally
 

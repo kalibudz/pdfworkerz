@@ -21,6 +21,7 @@ from engine.document import Document
 from engine.edit import (
     EditResult,
     copy_span_style,
+    insert_styled_text,
     insert_text_near,
     move_resize_block,
     reflow_block,
@@ -29,6 +30,7 @@ from engine.edit import (
 )
 from engine.errors import OpValidationError
 from engine.fonts.blocks import TextBlock, detect_blocks, find_block_containing
+from engine.fonts.choose import family_of, is_bold_italic, resolve_chosen_font
 from engine.fonts.match import FontCandidate, build_font_index
 from engine.fonts.style import SpanTrace, dedupe_texttrace, extract_page_spans
 from engine.ops.base import Op, register_op
@@ -365,24 +367,64 @@ class DeleteTextOp(_FindReplaceOp):
         return ""
 
 
+class _StyleChange(Op):
+    """EDT-06: the style fields shared by RestyleTextOp and RestyleSpanOp. Any field left
+    unset keeps the text's current value."""
+
+    size: float | None = None
+    color: tuple[float, float, float] | None = None
+    font: str | None = None
+    """A font family to switch to (see GET /fonts or `pdfworkerz fonts` for the choices)."""
+    bold: bool | None = None
+    italic: bool | None = None
+    require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
+    verify: bool = True
+
+    def _check_something_changes(self) -> None:
+        if all(value is None for value in (self.size, self.color, self.font, self.bold, self.italic)):
+            raise OpValidationError(f"{type(self).__name__}: set at least one of size, color, font, bold or italic")
+
+    def _restyle(
+        self, document: Document, page_index: int, span: SpanTrace, font_index: list[FontCandidate]
+    ) -> EditResult:
+        chosen = None
+        if self.font is not None or self.bold is not None or self.italic is not None:
+            current_bold, current_italic = is_bold_italic(span.style.font, font_index)
+            chosen = resolve_chosen_font(
+                self.font or family_of(span.style.font, font_index),
+                bold=current_bold if self.bold is None else self.bold,
+                italic=current_italic if self.italic is None else self.italic,
+                text=span.style.text,
+                font_index=font_index,
+            )
+        result = replace_span_text(
+            document,
+            page_index,
+            span,
+            span.style.text,
+            font_index=font_index,
+            override_size=self.size,
+            override_color=self.color,
+            override_font=chosen,
+            verify=self.verify,
+        )
+        _check_tier(result, self.require_tier, where=type(self).__name__)
+        return result
+
+
 @register_op
-class RestyleTextOp(Op):
-    """EDT-06: change the size and/or color of text that already matches, leaving its
-    wording unchanged."""
+class RestyleTextOp(_StyleChange):
+    """EDT-06: change the font, weight, slant, size and/or color of every span that
+    matches, leaving its wording unchanged."""
 
     op: Literal["restyle_text"] = "restyle_text"
     match: str
     mode: Literal["literal", "regex"] = "literal"
     case_sensitive: bool = True
     page_index: int | None = None
-    size: float | None = None
-    color: tuple[float, float, float] | None = None
-    require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
-    verify: bool = True
 
     def apply(self, document: Document) -> list[EditResult]:
-        if self.size is None and self.color is None:
-            raise OpValidationError("restyle_text: at least one of size or color must be set")
+        self._check_something_changes()
         font_index = _font_index()
         pattern = _compile_pattern(self.match, self.mode, self.case_sensitive)
         results: list[EditResult] = []
@@ -390,47 +432,91 @@ class RestyleTextOp(Op):
         for page_index in _pages_to_search(document, self.page_index):
             if not _page_might_match(document, page_index, pattern):
                 continue
-            spans = extract_page_spans(document.raw, page_index)
-            targets = [span for span in spans if pattern.search(span.style.text)]
-            for span in targets:
-                result = replace_span_text(
-                    document,
-                    page_index,
-                    span,
-                    span.style.text,
-                    font_index=font_index,
-                    override_size=self.size,
-                    override_color=self.color,
-                    verify=self.verify,
-                )
-                _check_tier(result, self.require_tier, where=self.op)
-                results.append(result)
+            targets = [
+                (s.style.chars[0].origin, s.style.text)
+                for s in extract_page_spans(document.raw, page_index)
+                if s.style.chars and pattern.search(s.style.text)
+            ]
+            for origin, text in targets:
+                span = _span_by_origin(document, page_index, origin, text)
+                results.append(self._restyle(document, page_index, span, font_index))
         return results
 
 
 @register_op
+class RestyleSpanOp(_StyleChange):
+    """EDT-06 for the UI: restyle exactly the span the user selected, by index."""
+
+    op: Literal["restyle_span"] = "restyle_span"
+    page_index: int
+    span_index: int
+
+    def apply(self, document: Document) -> EditResult:
+        self._check_something_changes()
+        span = _span_at(document, self.page_index, self.span_index)
+        return self._restyle(document, self.page_index, span, _font_index())
+
+
+@register_op
 class InsertTextOp(Op):
-    """EDT-03: add new text near an existing span, matching its style (or an
-    explicit override) -- nothing existing is touched."""
+    """EDT-03: add new text at `position` (a baseline point), either matching the style of
+    an existing span (`reference_match`) or in an explicit style (`font` and `size`, plus
+    optional `color`, `bold`, `italic`). With both, the explicit fields override the
+    matched style. Nothing existing is touched."""
 
     op: Literal["insert_text"] = "insert_text"
     page_index: int
     text: str
     position: tuple[float, float]
-    reference_match: str
+    reference_match: str | None = None
     """A literal substring identifying the span whose style to copy."""
     reference_case_sensitive: bool = True
+    font: str | None = None
+    size: float | None = None
+    color: tuple[float, float, float] | None = None
+    bold: bool | None = None
+    italic: bool | None = None
     require_tier: Literal["exact", "approximate", "fallback"] = "approximate"
     verify: bool = True
 
     def apply(self, document: Document) -> EditResult:
         font_index = _font_index()
+        if self.size is not None and self.size <= 0:
+            raise OpValidationError("insert_text: size must be positive")
+        if self.reference_match is None:
+            if self.font is None or self.size is None:
+                raise OpValidationError("insert_text: give reference_match, or an explicit font and size")
+            chosen = resolve_chosen_font(
+                self.font, bold=bool(self.bold), italic=bool(self.italic), text=self.text, font_index=font_index
+            )
+            result = insert_styled_text(
+                document,
+                self.page_index,
+                self.text,
+                self.position,
+                font=chosen,
+                size=self.size,
+                color=self.color or (0.0, 0.0, 0.0),
+                verify=self.verify,
+            )
+            _check_tier(result, self.require_tier, where=self.op)
+            return result
+
         pattern = _compile_pattern(self.reference_match, "literal", self.reference_case_sensitive)
         found = _find_first_match(document, self.page_index, pattern)
         if found is None:
             raise OpValidationError(f"insert_text: no span matches reference text {self.reference_match!r}")
         reference_span, _match_obj = found
-
+        chosen_font = None
+        if self.font is not None or self.bold is not None or self.italic is not None:
+            current_bold, current_italic = is_bold_italic(reference_span.style.font, font_index)
+            chosen_font = resolve_chosen_font(
+                self.font or family_of(reference_span.style.font, font_index),
+                bold=current_bold if self.bold is None else self.bold,
+                italic=current_italic if self.italic is None else self.italic,
+                text=self.text,
+                font_index=font_index,
+            )
         result = insert_text_near(
             document,
             self.page_index,
@@ -439,6 +525,9 @@ class InsertTextOp(Op):
             self.position,
             font_index=font_index,
             verify=self.verify,
+            override_font=chosen_font,
+            override_size=self.size,
+            override_color=self.color,
         )
         _check_tier(result, self.require_tier, where=self.op)
         return result

@@ -183,6 +183,16 @@ export class Api {
     return await response.arrayBuffer();
   }
 
+  private families: Promise<string[]> | null = null;
+
+  /** EDT-03/EDT-06: the font families the user can choose (fetched once per session). */
+  async fonts(): Promise<string[]> {
+    this.families ??= this.request("/fonts")
+      .then((response) => response.json() as Promise<{ families: string[] }>)
+      .then((body) => body.families);
+    return await this.families;
+  }
+
   /** The edited document to hand to the user: keeps the original encryption, unlike documentFile. */
   async documentDownload(documentId: string): Promise<ArrayBuffer> {
     const response = await this.request(`/documents/${documentId}/download`);

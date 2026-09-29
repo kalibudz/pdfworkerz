@@ -847,3 +847,46 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* EDT-03 / EDT-06: the text style dialog (native modal <dialog>). */
+.pw-style-dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 20px 24px;
+  width: min(360px, calc(100vw - 32px));
+}
+.pw-style-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+.pw-style-dialog h2 {
+  margin: 0 0 14px;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+.pw-style-dialog form {
+  display: grid;
+  gap: 10px;
+}
+.pw-style-field {
+  display: grid;
+  grid-template-columns: 6.5em 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+.pw-style-field input[type="checkbox"] {
+  justify-self: start;
+}
+.pw-style-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.pw-canvas-wrap:has(.pw-adding-text),
+.pw-edit-layer.pw-adding-text * {
+  cursor: crosshair;
+}

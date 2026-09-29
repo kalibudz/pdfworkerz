@@ -26,6 +26,15 @@ def corpus() -> Corpus:
     return build_corpus()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Every test gets its own PDFWORKERZ_DATA_DIR, so nothing (e.g. the fonts-to-research
+    list) is ever written to the real user data folder."""
+    data = tmp_path / "pdfworkerz-data"
+    monkeypatch.setenv("PDFWORKERZ_DATA_DIR", str(data))
+    return data
+
+
 @pytest.fixture
 def work_dir(tmp_path: Path) -> Path:
     """A throwaway directory for tests that write files."""

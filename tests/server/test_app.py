@@ -608,3 +608,23 @@ def test_download_keeps_the_original_encryption(client: TestClient, corpus: Corp
     rendered = client.get(f"/documents/{document_id}/file", headers=AUTH).content
     with pymupdf.open(stream=rendered, filetype="pdf") as doc:
         assert not doc.needs_pass
+
+
+@pytest.mark.feature("EDT-06")
+def test_fonts_route_lists_families_and_restyle_span_applies_one(client: TestClient, simple_path: Path) -> None:
+    families = client.get("/fonts", headers=AUTH).json()["families"]
+    assert families[:3] == ["Helvetica", "Times", "Courier"]
+    document_id = _open(client, simple_path)
+    op = {"op": "restyle_span", "page_index": 0, "span_index": 0, "font": "Times", "bold": True}
+    assert client.post(f"/documents/{document_id}/ops", json=op, headers=AUTH).status_code == 200
+    (span,) = client.get(f"/documents/{document_id}/pages/0/spans", headers=AUTH).json()
+    assert span["style"]["font"] == "Times-Bold"
+
+
+@pytest.mark.feature("FNT-06")
+def test_fonts_research_route_returns_the_list(client: TestClient) -> None:
+    from engine.fonts import research
+
+    research.flag("MysteryGrotesk", tier="fallback", note="standard-font fallback", document="x.pdf")
+    (row,) = client.get("/fonts/research", headers=AUTH).json()
+    assert row["font"] == "MysteryGrotesk" and row["times_seen"] == 1

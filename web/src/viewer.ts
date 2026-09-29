@@ -18,7 +18,9 @@ import { createComparePanel } from "./compare";
 import { createHistoryPanel } from "./history";
 import { createImageTool } from "./images";
 import { createInspector } from "./inspector";
-import { createOverlay } from "./overlay";
+import { createOverlay, viewportToMupdfPoint } from "./overlay";
+import { applyWithApproval, confirmVerified } from "./approval";
+import { openStyleDialog } from "./styledialog";
 import { createShapeTool, type DrawKind } from "./shapes";
 import { createSpellTool } from "./spelling";
 import { loadPdf, PageRenderer, thumbnailViewport, type PdfDocument } from "./pdf";
@@ -90,6 +92,12 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   compareButton.textContent = "Compare";
   compareButton.title = "Before/after split view (c)";
   compareButton.setAttribute("aria-pressed", "false");
+  const addTextButton = document.createElement("button");
+  addTextButton.type = "button";
+  addTextButton.className = "pw-add-text";
+  addTextButton.textContent = "Text…";
+  addTextButton.title = "Add new text: click this, then click where the text should start";
+  addTextButton.setAttribute("aria-pressed", "false");
   const insertImageButton = document.createElement("button");
   insertImageButton.type = "button";
   insertImageButton.className = "pw-insert-image";
@@ -144,6 +152,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     zoomOutButton,
     zoomIndicator,
     zoomInButton,
+    addTextButton,
     insertImageButton,
     drawSelect,
     spellButton,
@@ -168,6 +177,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomInButton.disabled = true;
   compareButton.disabled = true;
   insertImageButton.disabled = true;
+  addTextButton.disabled = true;
   drawSelect.disabled = true;
   spellButton.disabled = true;
 
@@ -202,6 +212,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
 
   const inspector = createInspector(inspectorPanel, {
     onCopyStyle: () => overlay.armPainter(),
+    onChangeStyle: () => overlay.changeStyle(),
     onAddLink: () => overlay.addLink(),
     onEditLink: (link) => overlay.editLink(link),
     onRemoveLink: (link) => overlay.removeLink(link),
@@ -247,6 +258,8 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   let currentPage = 1;
   let scale = 1;
   let comparing = false;
+  let currentViewport: Awaited<ReturnType<PageRenderer["render"]>> = null;
+  let addingText = false;
   const thumbnails = createThumbnailRail(thumbRail, options.pageCount, (pageNumber) => void goToPage(pageNumber));
   const thumbButtons = thumbnails.buttons;
 
@@ -270,6 +283,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
       return;
     }
     const viewport = await renderer.render(pdf, currentPage, mainCanvas, scale);
+    currentViewport = viewport ?? currentViewport;
     updateToolbar();
     updateActiveThumbnail();
     if (viewport) {
@@ -364,6 +378,73 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   drawSelect.addEventListener("change", () => shapeTool.setDrawMode((drawSelect.value || null) as DrawKind | null));
   shortcutsButton.addEventListener("click", () => shortcutsDialog.showModal());
 
+  /** EDT-03: arm, then the next click on the page picks the new text's baseline start. */
+  function setAddingText(next: boolean): void {
+    addingText = next;
+    editLayer.classList.toggle("pw-adding-text", next);
+    addTextButton.classList.toggle("pw-active", next);
+    addTextButton.setAttribute("aria-pressed", String(next));
+  }
+
+  async function addTextAt(x: number, y: number): Promise<void> {
+    const viewport = currentViewport;
+    if (!viewport) {
+      return;
+    }
+    const [px, py] = viewportToMupdfPoint(viewport, x, y);
+    const choice = await openStyleDialog({
+      title: "Add text",
+      families: await options.api.fonts(),
+      initial: { font: "Helvetica", size: 12, color: [0, 0, 0], bold: false, italic: false },
+      withText: true,
+      submitLabel: "Add",
+    });
+    if (!choice || !choice.text) {
+      return;
+    }
+    try {
+      const applied = await applyWithApproval(options.api, options.documentId, {
+        op: "insert_text",
+        page_index: currentPage - 1,
+        text: choice.text,
+        position: [px, py],
+        font: choice.font,
+        size: choice.size,
+        color: choice.color,
+        bold: choice.bold,
+        italic: choice.italic,
+      });
+      if (!applied) {
+        return;
+      }
+      await confirmVerified(options.api, options.documentId, applied.result);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The text could not be added.");
+      return;
+    }
+    await reloadDocument();
+  }
+
+  addTextButton.addEventListener("click", () => setAddingText(!addingText));
+  // Capture phase: while armed, a click anywhere on the page places text instead of
+  // selecting whatever span, image or shape is underneath.
+  // On the wrapper, not the edit layer: the layer itself doesn't take pointer events (only
+  // the boxes inside it do), so a click on empty page area reaches the canvas beneath it.
+  canvasWrap.addEventListener(
+    "mousedown",
+    (event) => {
+      if (!addingText) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = editLayer.getBoundingClientRect();
+      setAddingText(false);
+      void addTextAt(event.clientX - rect.left, event.clientY - rect.top);
+    },
+    true,
+  );
+
   async function save(): Promise<void> {
     saveButton.disabled = true;
     saveStatus.textContent = "Saving…";
@@ -411,6 +492,10 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     if (event.key === "?") {
       event.preventDefault();
       shortcutsDialog.showModal();
+      return;
+    }
+    if (event.key === "Escape" && addingText) {
+      setAddingText(false);
       return;
     }
     if (event.key === "Escape" && drawSelect.value) {
@@ -465,6 +550,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   zoomInButton.disabled = false;
   compareButton.disabled = false;
   insertImageButton.disabled = false;
+  addTextButton.disabled = false;
   drawSelect.disabled = false;
   spellButton.disabled = false;
 

@@ -22,7 +22,7 @@ from engine.ops.images import (
 from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp, UpdateLinkOp
 from engine.ops.shapes import DeleteShapeOp, DrawShapeOp, EditShapeOp, PageShapesOp
 from engine.ops.spellcheck import CorrectWordOp, SpellCheckOp
-from engine.ops.text import DeleteTextOp, InsertTextOp, ReflowTextOp, ReplaceTextOp, RestyleTextOp
+from engine.ops.text import DeleteTextOp, InsertTextOp, ReflowTextOp, ReplaceTextOp, RestyleSpanOp, RestyleTextOp
 
 __all__ = [
     "AddLinkOp",
@@ -46,6 +46,7 @@ __all__ = [
     "RenderPageOp",
     "ReplaceImageOp",
     "ReplaceTextOp",
+    "RestyleSpanOp",
     "RestyleTextOp",
     "SpellCheckOp",
     "UpdateLinkOp",

@@ -1,16 +1,11 @@
 {
   "phase": "P4",
-  "taskId": "Independent P1-P3 review: 16 findings fixed (7f4273e); reviewer re-check pending",
-  "step": "An independent reviewer found 16 defects in P1-P3 that the green gate missed (silent content corruption in text edits, encrypted PDFs saved decrypted, no way to save from the UI, and more). All are fixed with regression tests; gate 14/14, 603 tests, 94.3% coverage. The same reviewer is re-checking the fixes before sign-off.",
+  "taskId": "P1-P3 independently reviewed and signed off; owner decisions applied. Next: P4 (command bar & recipes)",
+  "step": "The independent reviewer signed off P1, P2 and P3 after two rounds of fixes (16 findings, then R1-R3 and a minor double-rise bug). Owner decisions applied: EDT-03 explicit style and EDT-06 font/weight changes are built (engine, CLI, API, UI); FNT-11 and FNT-14 were split, with the unbuilt parts planned as FNT-17 and FNT-18; non-exact font matches are flagged in a fonts-to-research list (pdfworkerz fonts --research).",
   "branch": "main",
   "lastGreenCommit": "7f4273e (local gate, Windows 11, Python 3.14.3, 14/14 steps; Python 3.11 types+tests also pass)",
-  "nextAction": "1) Read the reviewer's re-check; fix anything it reopens; record P1-P3 sign-off in PROGRESS.md. 2) Owner decisions on the feature-scope gaps below. 3) Start P4 (CMD-01..08); run tools/session_budget.py first. Every session: python tools/gate.py before each commit; push only with the owner's approval.",
+  "nextAction": "Start P4 (CMD-01..08: plain-English command grammar and recipes); run tools/session_budget.py first. Review the fonts-to-research list from time to time and add fonts (with their licenses) to assets/fonts. Every session: python tools/gate.py before each commit; push only with the owner's approval.",
   "openQuestions": [
-    {
-      "phase": "P1",
-      "kind": "todo",
-      "text": "Independent reviewer re-check of the 16 review fixes (commit 7f4273e) is running; sign-off for P1-P3 follows it."
-    },
     {
       "phase": "P2",
       "kind": "limitation",
@@ -55,31 +50,6 @@
       "phase": "P9",
       "kind": "todo",
       "text": "Re-verify the iLovePDF / Nitro parity tags against the vendors' current feature pages before the first release."
-    },
-    {
-      "phase": "P2",
-      "kind": "decision",
-      "text": "EDT-03 is named 'match style of' or explicit style, but only 'match style of' exists. Build explicit style (font, size, color chosen by the user), or rename EDT-03 and add a planned feature for it?"
-    },
-    {
-      "phase": "P2",
-      "kind": "decision",
-      "text": "EDT-06 is named 'change font, size, color and weight', but only size and color can change. Build font and weight changes, or rename EDT-06 and add a planned feature?"
-    },
-    {
-      "phase": "P2",
-      "kind": "decision",
-      "text": "FNT-11 promises 'preserving justification'; justified text and shifting later lines when a paragraph grows are not done. Build them, or rename FNT-11 and plan them separately?"
-    },
-    {
-      "phase": "P2",
-      "kind": "decision",
-      "text": "FNT-14 is named 'CJK, right-to-left and vertical text support', but RTL and vertical editing are unsupported (CJK works). Split into a done CJK feature and a planned RTL/vertical one?"
-    },
-    {
-      "phase": "P2",
-      "kind": "decision",
-      "text": "The CLI/API default require_tier is 'approximate', so an approximate font match is applied without approval unless the caller asks for 'exact'. SPEC 5.3 says approximate and fallback need approval. Change the default to 'exact' (callers opt in to weaker matches)?"
     }
   ],
   "updated": "2026-09-28"

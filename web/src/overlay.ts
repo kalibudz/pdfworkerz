@@ -27,6 +27,7 @@ import { applyWithApproval, confirmVerified } from "./approval";
 import { attachBlockHandles } from "./blockdrag";
 import type { InspectorHandle } from "./inspector";
 import { toHexColor } from "./inspector";
+import { openStyleDialog, styleFromFontName } from "./styledialog";
 
 export interface OverlayOptions {
   api: Api;
@@ -55,6 +56,8 @@ export interface OverlayHandle {
   /** EDT-10: prompt for a new target for `link`. */
   editLink(link: LinkInfo): void;
   removeLink(link: LinkInfo): void;
+  /** EDT-06: ask for a new font, weight, slant, size or color for the selected span. */
+  changeStyle(): void;
 }
 
 interface SpanRef {
@@ -62,6 +65,7 @@ interface SpanRef {
   spanIndex: number;
   text: string;
   bbox: [number, number, number, number];
+  style: SpanTrace["style"];
 }
 
 type LinkTarget = { uri: string } | { target_page: number };
@@ -401,7 +405,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }
     activeBox = box;
     originalText = text;
-    selected = { pageIndex, spanIndex, text, bbox: span.style.bbox };
+    selected = { pageIndex, spanIndex, text, bbox: span.style.bbox, style: span.style };
     attachHandlesFor(box, selected);
 
     box.contentEditable = "true";
@@ -479,7 +483,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       box.textContent = span.style.text;
       box.addEventListener("click", () => {
         if (painterSource) {
-          void applyPainter({ pageIndex, spanIndex, text: span.style.text, bbox: span.style.bbox });
+          void applyPainter({ pageIndex, spanIndex, text: span.style.text, bbox: span.style.bbox, style: span.style });
         } else {
           startEdit(box, pageIndex, spanIndex, span.style.text, span);
         }
@@ -488,5 +492,53 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }
   }
 
-  return { update, armPainter, cancelPainter: disarmPainter, addLink, editLink, removeLink };
+  /** EDT-06: the dialog's choices become a restyle_span Op carrying only what changed. */
+  async function changeStyle(): Promise<void> {
+    const span = selected; // captured first: the dialog takes focus, which clears `selected`
+    if (!span) {
+      return;
+    }
+    const current = styleFromFontName(span.style.font);
+    const families = await options.api.fonts();
+    const choice = await openStyleDialog({
+      title: `Change style of “${span.text}”`,
+      families,
+      keepFontLabel: `Keep current font (${span.style.font.replace(/^[A-Z]{6}\+/, "")})`,
+      initial: { font: "", size: span.style.size, color: span.style.color, ...current },
+      submitLabel: "Apply",
+    });
+    if (!choice) {
+      return;
+    }
+    const op: HistoryOp = { op: "restyle_span", page_index: span.pageIndex, span_index: span.spanIndex };
+    if (choice.font) op.font = choice.font;
+    if (Math.abs(choice.size - span.style.size) > 0.05) op.size = choice.size;
+    if (toHexColor(choice.color) !== toHexColor(span.style.color)) op.color = choice.color;
+    if (choice.bold !== current.bold) op.bold = choice.bold;
+    if (choice.italic !== current.italic) op.italic = choice.italic;
+    if (Object.keys(op).length === 3) {
+      return; // nothing changed
+    }
+    try {
+      const applied = await applyWithApproval(options.api, options.documentId, op);
+      if (!applied) {
+        return;
+      }
+      await confirmVerified(options.api, options.documentId, applied.result);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The style could not be changed.");
+      return;
+    }
+    options.onCommitted();
+  }
+
+  return {
+    update,
+    armPainter,
+    cancelPainter: disarmPainter,
+    addLink,
+    editLink,
+    removeLink,
+    changeStyle: () => void changeStyle(),
+  };
 }

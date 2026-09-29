@@ -170,7 +170,7 @@ def test_restyle_text_op_changes_size(simple_doc: Document) -> None:
 
 @pytest.mark.feature("EDT-06")
 def test_restyle_text_op_requires_at_least_one_field(simple_doc: Document) -> None:
-    with pytest.raises(OpValidationError, match="at least one of size or color"):
+    with pytest.raises(OpValidationError, match="set at least one of size, color, font, bold or italic"):
         RestyleTextOp(match="PDFWorkerz").apply(simple_doc)
 
 

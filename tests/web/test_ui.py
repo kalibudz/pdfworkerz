@@ -1281,3 +1281,53 @@ def test_a_correction_that_cannot_use_the_exact_font_asks_first(
     page.click(".pw-misspelling[data-word='recieve']")
     page.click(".pw-spell-suggestion:has-text('receive')")
     page.wait_for_selector(".pw-history-entry:has-text('Correct')", timeout=10000)
+
+
+# -- EDT-06 change style / EDT-03 add text in an explicit style --
+
+
+@pytest.mark.feature("EDT-06")
+def test_change_style_makes_the_selected_text_bold(page: Page, app_url: str, simple_copy: Path) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(simple_copy))
+    _wait_overlay_ready(page)
+    page.click(".pw-span-box")
+    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    page.click(".pw-change-style")
+    page.wait_for_selector(".pw-style-dialog[open]", timeout=5000)
+    page.check("#pw-style-bold")
+    page.click(".pw-style-submit")
+    page.wait_for_selector(".pw-history-entry", timeout=10000)
+    page.wait_for_function(
+        "() => document.querySelector('.pw-span-box')?.textContent === 'Hello, PDFWorkerz.'", timeout=5000
+    )
+    page.click(".pw-span-box")
+    page.wait_for_function(
+        "() => (document.querySelector('.pw-inspector')?.textContent ?? '').includes('Helvetica-Bold')", timeout=5000
+    )
+
+
+@pytest.mark.feature("EDT-03")
+def test_add_text_places_new_text_in_the_chosen_style(page: Page, app_url: str, simple_copy: Path) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(simple_copy))
+    _wait_overlay_ready(page)
+    page.click(".pw-add-text")
+    layer = page.query_selector(".pw-edit-layer")
+    assert layer is not None
+    box = layer.bounding_box()
+    assert box is not None
+    page.mouse.click(box["x"] + box["width"] * 0.2, box["y"] + 200)  # within the visible part of the page
+    page.wait_for_selector(".pw-style-dialog[open]", timeout=5000)
+    page.fill("#pw-style-text", "APPROVED")
+    page.select_option("#pw-style-font", "Courier")
+    page.fill("#pw-style-size", "20")
+    page.click(".pw-style-submit")
+    page.wait_for_selector(".pw-span-box:has-text('APPROVED')", timeout=10000)
+    assert page.query_selector(".pw-history-entry") is not None
+    page.click(".pw-span-box:has-text('APPROVED')")
+    page.wait_for_function(
+        "() => (document.querySelector('.pw-inspector')?.textContent ?? '').includes('Courier')", timeout=5000
+    )

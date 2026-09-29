@@ -60,13 +60,15 @@ from engine.errors import (
     SaveNotPossibleError,
     WrongPasswordError,
 )
+from engine.fonts import research as font_research
+from engine.fonts.choose import available_families
 from engine.ops.base import MAX_RENDER_DPI, MIN_RENDER_DPI, Op, PageSpansOp, RenderPageOp, parse_op
 from engine.ops.images import PageImagesOp
 from engine.ops.journal import UndoRedoJournal
 from engine.ops.links import PageLinksOp
 from engine.ops.shapes import PageShapesOp
 from engine.ops.spellcheck import SpellCheckOp
-from engine.ops.text import PreviewTextOp
+from engine.ops.text import PreviewTextOp, _font_index
 
 _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
     DocumentNotFoundError: 404,
@@ -291,6 +293,18 @@ def document_file(document_id: str, journal: JournalDep) -> Response:
     UI-01's page canvas loads this into pdf.js for client-side rendering,
     rather than round-tripping every page through the PNG render route."""
     return Response(content=journal.document.to_bytes(), media_type="application/pdf")
+
+
+@router.get("/fonts")
+def fonts() -> dict[str, list[str]]:
+    """EDT-03/EDT-06: the font families the user can choose from."""
+    return {"families": available_families(_font_index())}
+
+
+@router.get("/fonts/research")
+def fonts_to_research() -> list[dict[str, Any]]:
+    """Fonts that edits could only approximate, to add to PDFWorkerz's own library later."""
+    return [dataclasses.asdict(row) for row in font_research.load()]
 
 
 @router.get("/documents/{document_id}/download")

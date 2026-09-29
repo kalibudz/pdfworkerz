@@ -497,3 +497,22 @@ def test_a_failed_replace_of_the_original_keeps_the_edits_and_the_original(
     with pymupdf.open(source) as saved:
         assert "Hello, Editor." in saved[0].get_text()
     doc.close()
+
+
+# -- Re-review minor: rise (Ts) is part of texttrace's origin already; it must not be added twice --
+
+
+@pytest.mark.feature("FNT-02")
+@pytest.mark.parametrize(
+    "content",
+    [b"BT /F1 12 Tf 4 Ts 72 700 Td (Raised) Tj ET", b"BT /F1 12 Tf 3 Ts 0 1 -1 0 300 300 Tm (Raised) Tj ET"],
+    ids=["upright", "rotated"],
+)
+def test_a_raised_span_is_redrawn_at_the_same_height(work_dir: Path, content: bytes) -> None:
+    doc = Document.open(_helvetica_pdf(work_dir / "rise.pdf", content))
+    before = extract_page_spans(doc.raw, 0)[0].style
+    ReplaceSpanTextOp(page_index=0, span_index=0, new_text="Raised", require_tier="exact").apply(doc)
+    after = extract_page_spans(doc.raw, 0)
+    assert "".join(s.style.text for s in after) == "Raised"
+    assert after[0].style.chars[0].origin == pytest.approx(before.chars[0].origin, abs=0.3)
+    doc.close()

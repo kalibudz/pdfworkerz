@@ -20,6 +20,8 @@ from engine import __version__
 from engine.document import Document
 from engine.edit import EditResult
 from engine.errors import PdfWorkerzError
+from engine.fonts import research as font_research
+from engine.fonts.choose import available_families
 from engine.fonts.style import extract_page_spans
 from engine.ops.base import InspectOp, Op, PageSpansOp, RenderPageOp
 from engine.ops.images import CropImageOp, DeleteImageOp, InsertImageOp, MoveImageOp, PageImagesOp, ReplaceImageOp
@@ -33,6 +35,7 @@ from engine.ops.text import (
     MoveTextBlockOp,
     ReplaceTextOp,
     RestyleTextOp,
+    _font_index,
     find_span_index,
 )
 from server.app import create_app, run_server
@@ -100,6 +103,9 @@ def _one_of(positional: str | None, option: str | None, name: str) -> str:
 MatchOption = Annotated[
     str | None, typer.Option("--match", help='Text to find, as an option -- for text starting with "-"')
 ]
+FontOption = Annotated[str | None, typer.Option(help="Font family (see `pdfworkerz fonts`)")]
+BoldOption = Annotated[bool | None, typer.Option("--bold/--no-bold", help="Bold on or off; default keeps it")]
+ItalicOption = Annotated[bool | None, typer.Option("--italic/--no-italic", help="Italic on or off; default keeps it")]
 WholeWordOption = Annotated[
     bool, typer.Option(help='Only match whole words ("cat" matches in "a cat" but not in "category")')
 ]
@@ -269,6 +275,9 @@ def restyle(
     match_option: MatchOption = None,
     size: Annotated[float | None, typer.Option(help="New font size in points")] = None,
     color: Annotated[str | None, typer.Option(help='New color as "r,g,b", each 0-1, e.g. "1,0,0" for red')] = None,
+    font: FontOption = None,
+    bold: BoldOption = None,
+    italic: ItalicOption = None,
     regex: Annotated[bool, typer.Option(help="Treat match as a regular expression")] = False,
     case_insensitive: Annotated[bool, typer.Option(help="Match regardless of case")] = False,
     page: Annotated[int | None, typer.Option(help="Only this 0-based page; default is every page")] = None,
@@ -277,7 +286,7 @@ def restyle(
     overwrite: Annotated[bool, typer.Option(help="Write back to the original file instead")] = False,
     password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
 ) -> None:
-    """Change the size and/or color of matching text (EDT-06), leaving its wording unchanged."""
+    """Change the font, weight, slant, size and/or color of matching text (EDT-06), keeping its wording."""
     find = _one_of(match, match_option, "match")
     parsed_color = _parse_color(color) if color is not None else None
     try:
@@ -286,6 +295,9 @@ def restyle(
                 match=find,
                 size=size,
                 color=parsed_color,
+                font=font,
+                bold=bold,
+                italic=italic,
                 mode="regex" if regex else "literal",
                 case_sensitive=not case_insensitive,
                 page_index=page,
@@ -304,14 +316,22 @@ def insert(
     path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
     text: Annotated[str, typer.Argument(help="Text to add")],
     position: Annotated[str, typer.Option(help='Baseline point to draw at, as "x,y"')],
-    reference: Annotated[str, typer.Option(help="Literal text of the span whose style to copy")],
+    reference: Annotated[
+        str | None, typer.Option(help="Literal text of the span whose style to copy (or give --font and --size)")
+    ] = None,
+    size: Annotated[float | None, typer.Option(help="Font size in points")] = None,
+    color: Annotated[str | None, typer.Option(help='Color as "r,g,b", each 0-1')] = None,
+    font: FontOption = None,
+    bold: BoldOption = None,
+    italic: ItalicOption = None,
     page: Annotated[int, typer.Option(help="0-based page index")] = 0,
     require_tier: TierOption = "approximate",
     out: Annotated[Path | None, typer.Option(help="Output path; defaults to a new <name>.edited.pdf")] = None,
     overwrite: Annotated[bool, typer.Option(help="Write back to the original file instead")] = False,
     password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
 ) -> None:
-    """Add new text near an existing span (EDT-03), matching its style. Nothing existing is touched."""
+    """Add new text (EDT-03) in the style of an existing span (--reference), in an explicit style
+    (--font and --size), or both (the explicit options override). Nothing existing is touched."""
     parsed_position = _parse_point(position)
     try:
         with Document.open(path, password=password) as document:
@@ -320,6 +340,11 @@ def insert(
                 text=text,
                 position=parsed_position,
                 reference_match=reference,
+                font=font,
+                size=size,
+                color=_parse_color(color) if color is not None else None,
+                bold=bold,
+                italic=italic,
                 require_tier=require_tier,
             )
             result = _run(op, document)
@@ -725,3 +750,29 @@ def version() -> None:
 
 if __name__ == "__main__":
     app()
+
+
+@app.command()
+def fonts(
+    research: Annotated[
+        bool, typer.Option("--research", help="Show fonts that edits could only approximate, to add later")
+    ] = False,
+    clear_research: Annotated[bool, typer.Option("--clear-research", help="Empty the fonts-to-research list")] = False,
+) -> None:
+    """List the font families you can choose (EDT-03/EDT-06), or the fonts to research."""
+    if clear_research:
+        font_research.clear()
+        typer.echo("fonts-to-research list cleared")
+        return
+    if research:
+        rows = font_research.load()
+        if not rows:
+            typer.echo("no fonts to research yet")
+        for row in rows:
+            typer.echo(
+                f"{row.font}  ({row.best_tier}, seen {row.times_seen}x, e.g. {row.example_document}): {row.note}"
+            )
+        typer.echo(f"list file: {font_research.research_file()}")
+        return
+    for family in available_families(_font_index()):
+        typer.echo(family)

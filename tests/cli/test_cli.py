@@ -541,3 +541,46 @@ def test_replace_whole_word_leaves_longer_words_alone(work_dir: Path) -> None:
     assert result.exit_code == 0, result.output
     with pymupdf.open(out) as saved:
         assert saved[0].get_text().strip() == "dog category dog."
+
+
+@pytest.mark.feature("EDT-06")
+def test_fonts_command_lists_choosable_families() -> None:
+    result = runner.invoke(app, ["fonts"])
+    assert result.exit_code == 0
+    assert result.output.splitlines()[:3] == ["Helvetica", "Times", "Courier"]
+
+
+@pytest.mark.feature("EDT-06")
+def test_restyle_command_can_make_text_bold(corpus: Corpus, work_dir: Path) -> None:
+    import pymupdf
+
+    out = work_dir / "bold.pdf"
+    result = runner.invoke(app, ["restyle", str(corpus.simple), "PDFWorkerz", "--bold", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    with pymupdf.open(out) as doc:
+        fonts = {span["font"] for span in doc[0].get_texttrace()}
+    assert fonts == {"Helvetica-Bold"}
+
+
+@pytest.mark.feature("EDT-03")
+def test_insert_command_with_an_explicit_style(corpus: Corpus, work_dir: Path) -> None:
+    import pymupdf
+
+    out = work_dir / "stamp.pdf"
+    args = ["insert", str(corpus.simple), "APPROVED", "--position", "72,200", "--font", "Courier", "--size", "20"]
+    result = runner.invoke(app, [*args, "--bold", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    with pymupdf.open(out) as doc:
+        added = [s for s in doc[0].get_texttrace() if "".join(chr(c[0]) for c in s["chars"]) == "APPROVED"]
+    assert added and added[0]["font"] == "Courier-Bold" and round(added[0]["size"]) == 20
+
+
+@pytest.mark.feature("FNT-06")
+def test_fonts_research_command_shows_and_clears_the_list() -> None:
+    from engine.fonts import research
+
+    research.flag("MysteryGrotesk", tier="fallback", note="standard-font fallback", document="x.pdf")
+    shown = runner.invoke(app, ["fonts", "--research"])
+    assert "MysteryGrotesk" in shown.output
+    assert runner.invoke(app, ["fonts", "--clear-research"]).exit_code == 0
+    assert "no fonts to research yet" in runner.invoke(app, ["fonts", "--research"]).output

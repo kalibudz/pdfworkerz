@@ -45,6 +45,8 @@ export type ImageAction = "replace" | "crop" | "delete";
 export interface InspectorOptions {
   /** EDT-07: the "Copy style" button was pressed for the shown span. */
   onCopyStyle?: () => void;
+  /** EDT-06: the "Change style…" button was pressed for the shown span. */
+  onChangeStyle?: () => void;
   /** EDT-10: add a link over the shown span. */
   onAddLink?: () => void;
   /** EDT-10: retarget, or remove, one of the shown span's links. */
@@ -163,7 +165,9 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   const actions = document.createElement("div");
   actions.className = "pw-inspector-actions";
   actions.hidden = true;
-  actions.appendChild(copyStyleButton);
+  const changeStyleButton = panelButton("Change style…", "pw-change-style", () => options.onChangeStyle?.());
+  changeStyleButton.title = "Change this text's font, weight, size or color";
+  actions.append(copyStyleButton, changeStyleButton);
 
   // EDT-10: links over the selected span.
   const linksHeading = document.createElement("h3");

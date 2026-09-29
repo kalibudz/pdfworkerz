@@ -40,13 +40,14 @@ from numpy.typing import NDArray
 
 from engine.document import Document
 from engine.errors import FontResourceNotFoundError, OpValidationError
+from engine.fonts import research as font_research
 from engine.fonts.blocks import TextBlock, detect_alignment
 from engine.fonts.classify import classify_font_xref, split_subset_tag
 from engine.fonts.fit import fit_to_width
 from engine.fonts.kerning import build_kern_pairs
 from engine.fonts.match import FontCandidate, normalize_font_name
 from engine.fonts.reflow import wrap_text
-from engine.fonts.resolve import FontResolution, resolve_font
+from engine.fonts.resolve import TIER_EXACT, FontResolution, resolve_font
 from engine.fonts.style import SpanTrace, TextState, advance_for_char, dedupe_texttrace, extract_page_spans
 from engine.geometry import page_bounds
 from engine.verify import DiffResult, changed_outside, pixel_diff, render_to_array
@@ -319,11 +320,11 @@ def draw_styled_text(
     spacing/scaling/rise/render mode and `rotation_degrees`, through the font
     `resolution` selected. Returns the baseline point just past the last character.
 
-    Text with default spacing (Tc=0, Tw=0, Tz=100%) and no rise is drawn with
-    a single call, so it stays one contiguous span for any edit that follows
+    Text with default spacing (Tc=0, Tw=0, Tz=100%) is drawn with a single call,
+    so it stays one contiguous span for any edit that follows
     (confirmed: per-character calls fragment texttrace's spans one character
     each, which then only a single-character search can find). Non-default
-    spacing or rise still needs per-character control, and accepts that
+    spacing still needs per-character control, and accepts that
     fragmentation as a known trade-off; the one upside is that the font's own
     kerning pairs (FNT-09) are applied there too, since PyMuPDF's own text
     insertion never applies any kerning at all, in either drawing path (also
@@ -347,7 +348,7 @@ def draw_styled_text(
     angle = math.radians(rotation_degrees)
     cos_a, sin_a = math.cos(angle), math.sin(angle)
 
-    if text_state.rise == 0.0 and _is_default_spacing(text_state):
+    if _is_default_spacing(text_state):
         page.insert_text(
             origin,
             text,
@@ -366,8 +367,9 @@ def draw_styled_text(
     # character positioning is already happening for another reason anyway.
     kern_pairs = build_kern_pairs(resolution.font_bytes) if resolution.font_bytes else {}
 
-    # Rise moves along the glyphs' "up": (sin, -cos) for a text direction (cos, sin) in y-down space.
-    rise_dx, rise_dy = text_state.rise * sin_a, -text_state.rise * cos_a
+    # No rise offset here: texttrace's origins already include the span's rise (Ts), so the
+    # origin a caller passes is already raised -- adding it again moved raised text twice.
+    rise_dx = rise_dy = 0.0
 
     x, y = origin
     previous_char: str | None = None
@@ -460,13 +462,19 @@ def resolve_font_for_span(
     original_bytes = document.raw.extract_font(xref)[3] or None
     already_used = _collect_font_usage(extract_page_spans(document.raw, page_index), style.font)
 
-    return resolve_font(
+    resolution = resolve_font(
         classification,
         original_font_bytes=original_bytes,
         already_rendered_text=already_used,
         needed_text=needed_text,
         font_index=font_index,
     )
+    if resolution.tier != TIER_EXACT:
+        # Owner's rule: fall back to the closest match, and flag the font so it can be added
+        # to PDFWorkerz's own library later (engine.fonts.research).
+        source = document.source_path.name if document.source_path else "(unsaved document)"
+        font_research.flag(style.font, tier=resolution.tier, note=resolution.note, document=source)
+    return resolution
 
 
 def _drawn_width(resolution: FontResolution, text: str, font_size: float, text_state: TextState) -> float:
@@ -503,6 +511,7 @@ def replace_span_text(
     font_index: list[FontCandidate],
     override_size: float | None = None,
     override_color: tuple[float, float, float] | None = None,
+    override_font: FontResolution | None = None,
     fit: bool = False,
     verify: bool = True,
 ) -> EditResult:
@@ -525,7 +534,7 @@ def replace_span_text(
     style = span.style
     natural_size, text_state = _drawing_metrics(span)
 
-    resolution = resolve_font_for_span(document, page_index, span, new_text, font_index=font_index)
+    resolution = override_font or resolve_font_for_span(document, page_index, span, new_text, font_index=font_index)
     before = _capture(document, page_index, verify)
 
     font_size = override_size if override_size is not None else natural_size
@@ -639,8 +648,12 @@ def insert_text_near(
     *,
     font_index: list[FontCandidate],
     verify: bool = True,
+    override_font: FontResolution | None = None,
+    override_size: float | None = None,
+    override_color: tuple[float, float, float] | None = None,
 ) -> EditResult:
-    """EDT-03: draw new `text` at `origin`, matching `reference_span`'s style.
+    """EDT-03: draw new `text` at `origin`, matching `reference_span`'s style, with any of its
+    font, size or color replaced by an explicit choice.
 
     Nothing is redacted -- this adds text near an existing span without
     touching it, for example a caption or a value beside a label.
@@ -648,8 +661,11 @@ def insert_text_near(
     page = document.raw[page_index]
     style = reference_span.style
     font_size, text_state = _drawing_metrics(reference_span)
+    font_size = override_size if override_size is not None else font_size
 
-    resolution = resolve_font_for_span(document, page_index, reference_span, text, font_index=font_index)
+    resolution = override_font or resolve_font_for_span(
+        document, page_index, reference_span, text, font_index=font_index
+    )
     before = _capture(document, page_index, verify)
 
     end_point = draw_styled_text(
@@ -657,7 +673,7 @@ def insert_text_near(
         text=text,
         origin=origin,
         font_size=font_size,
-        color=style.color,
+        color=override_color if override_color is not None else style.color,
         text_state=text_state,
         rotation_degrees=style.rotation_degrees,
         resolution=resolution,
@@ -670,6 +686,44 @@ def insert_text_near(
         confidence=resolution.confidence,
         requires_approval=resolution.requires_approval,
         note=resolution.note + _text_state_note(reference_span),
+        end_point=end_point,
+        verification=verification,
+    )
+
+
+def insert_styled_text(
+    document: Document,
+    page_index: int,
+    text: str,
+    origin: tuple[float, float],
+    *,
+    font: FontResolution,
+    size: float,
+    color: tuple[float, float, float],
+    verify: bool = True,
+) -> EditResult:
+    """EDT-03 with a fully explicit style: draw `text` at `origin` (baseline) in the chosen
+    `font`, `size` and `color`, copying nothing from existing text."""
+    if not text:
+        raise OpValidationError("there is no text to add")
+    before = _capture(document, page_index, verify)
+    end_point = draw_styled_text(
+        document.raw[page_index],
+        text=text,
+        origin=origin,
+        font_size=size,
+        color=color,
+        text_state=TextState(),
+        rotation_degrees=0.0,
+        resolution=font,
+    )
+    drawn = [(origin, end_point, size)]
+    verification = _verify_edit(document, page_index, before, text, [], drawn) if before is not None else None
+    return EditResult(
+        tier=font.tier,
+        confidence=font.confidence,
+        requires_approval=font.requires_approval,
+        note=font.note,
         end_point=end_point,
         verification=verification,
     )
