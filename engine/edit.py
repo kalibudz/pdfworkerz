@@ -41,7 +41,7 @@ from numpy.typing import NDArray
 from engine.document import Document
 from engine.errors import FontResourceNotFoundError, OpValidationError
 from engine.fonts import research as font_research
-from engine.fonts.blocks import TextBlock, detect_alignment
+from engine.fonts.blocks import TextBlock, detect_alignment, detect_blocks
 from engine.fonts.classify import classify_font_xref, split_subset_tag
 from engine.fonts.fit import fit_to_width
 from engine.fonts.kerning import build_kern_pairs
@@ -848,6 +848,8 @@ def reflow_block(
     *,
     font_index: list[FontCandidate],
     verify: bool = True,
+    align: str = "left",
+    grow: bool = False,
 ) -> list[EditResult]:
     """FNT-11: replace an entire block's text with `new_text`, re-wrapping it
     across the block's own existing lines -- see engine.fonts.reflow for why
@@ -855,9 +857,26 @@ def reflow_block(
     EditResult per line actually drawn (one per line of the block, in order);
     if `new_text` needed more lines than the block has, the last result's
     note says so and its `requires_approval` is set.
+
+    FNT-17: `align="justify"` spreads every line but the last to the block's
+    full width, and `grow=True` lets the paragraph take more lines, moving the
+    text below it in the same column down to make room (see reflow_paragraph).
     """
     if not block.lines:
         return []
+    if align not in ("left", "justify"):
+        raise OpValidationError(f"unknown alignment {align!r}: use left or justify")
+    if align == "justify" or grow:
+        return reflow_paragraph(
+            document,
+            page_index,
+            block,
+            new_text,
+            font_index=font_index,
+            verify=verify,
+            justify=align == "justify",
+            grow=grow,
+        )
 
     reference = block.lines[0]
     font_size, _text_state = _drawing_metrics(reference)
@@ -886,4 +905,193 @@ def reflow_block(
             f"this block has ({len(block.lines)}), not drawn"
         )
         results[-1] = dataclasses.replace(results[-1], requires_approval=True, note=note)
+    return results
+
+
+_JUSTIFY_MAX_GAP_RATIO = 1.5
+"""A justified gap wider than 1.5x the font size looks broken (a short line spread across the
+column), so such a line is left-aligned instead, as typesetters do with a paragraph's last line."""
+
+
+def _content_below(page: pymupdf.Page, top: float, left: float, right: float) -> list[str]:
+    """Non-text things between `top` and the page bottom that overlap the column [left, right]:
+    moving text past them would misalign them, and the editor can't move them with the text yet."""
+    found = []
+
+    def overlaps(rect: pymupdf.Rect) -> bool:
+        return rect.y1 > top and rect.x1 > left and rect.x0 < right
+
+    if any(overlaps(pymupdf.Rect(info["bbox"])) for info in page.get_image_info()):
+        found.append("images")
+    if any(overlaps(pymupdf.Rect(d["rect"])) for d in page.get_drawings()):
+        found.append("drawings")
+    if any(overlaps(pymupdf.Rect(link["from"])) for link in page.get_links()):
+        found.append("links")
+    return found
+
+
+def _draw_justified(
+    page: pymupdf.Page,
+    text: str,
+    origin: tuple[float, float],
+    width: float,
+    *,
+    font: pymupdf.Font,
+    font_size: float,
+    color: tuple[float, float, float],
+    text_state: TextState,
+    resolution: FontResolution,
+) -> tuple[float, float]:
+    """Draw `text` word by word so it spans exactly `width` (the gaps between words share the
+    slack). Word by word rather than with word spacing (Tw): each word stays one searchable span."""
+    words = text.split(" ")
+    natural = sum(font.text_length(word, fontsize=font_size) for word in words)
+    gap = (width - natural) / (len(words) - 1)
+    x, y = origin
+    end = origin
+    for word in words:
+        end = draw_styled_text(
+            page,
+            text=word,
+            origin=(x, y),
+            font_size=font_size,
+            color=color,
+            text_state=text_state,
+            rotation_degrees=0.0,
+            resolution=resolution,
+        )
+        x = end[0] + gap
+    return end
+
+
+def _stretches(text: str, width: float, font: pymupdf.Font, font_size: float) -> bool:
+    words = text.split(" ")
+    if len(words) < 2:
+        return False
+    natural = sum(font.text_length(word, fontsize=font_size) for word in words)
+    return (width - natural) / (len(words) - 1) <= font_size * _JUSTIFY_MAX_GAP_RATIO
+
+
+def reflow_paragraph(
+    document: Document,
+    page_index: int,
+    block: TextBlock,
+    new_text: str,
+    *,
+    font_index: list[FontCandidate],
+    verify: bool = True,
+    justify: bool = False,
+    grow: bool = False,
+) -> list[EditResult]:
+    """FNT-17: re-wrap `new_text` across the block's width, optionally justified, and, with
+    `grow`, on as many lines as it needs: the extra lines continue at the block's own line
+    spacing, and every text block below it in the same column moves down by the same amount.
+
+    Refused (nothing changes) when the moved text would run off the page, or when images,
+    drawings or links sit in the area that would move -- they'd be left behind, misaligned.
+    Without `grow`, text beyond the block's lines is reported as an overflow, as in FNT-11."""
+    page = document.raw[page_index]
+    reference = block.lines[0]
+    if any(line.style.rotation_degrees != 0.0 for line in block.lines):
+        raise OpValidationError("justifying or growing a rotated paragraph is not supported")
+    font_size, text_state = _drawing_metrics(reference)
+    resolution = resolve_font_for_span(document, page_index, reference, new_text, font_index=font_index)
+    font = _load_font(resolution)
+    left = reference.style.chars[0].origin[0]
+    width = max(line.style.bbox[2] - line.style.bbox[0] for line in block.lines)
+    wrapped = wrap_text(" ".join(new_text.split()), font, font_size, width)
+    pitch = _line_pitch(block, font_size)
+    last_baseline = block.lines[-1].style.chars[0].origin[1]
+    extra = max(0, len(wrapped) - len(block.lines))
+    drawn_lines = wrapped if grow else wrapped[: len(block.lines)]
+    baselines = [line.style.chars[0].origin[1] for line in block.lines]
+    baselines += [last_baseline + pitch * (i + 1) for i in range(extra)]
+
+    moved_note = ""
+    if grow and extra:
+        shift = pitch * extra
+        bottom = max(line.style.bbox[3] for line in block.lines)
+        right = left + width
+        own = {id(line) for line in block.lines}
+        below = [
+            span
+            for span in extract_page_spans(document.raw, page_index)
+            if id(span) not in own
+            and span.style.bbox[1] >= bottom - 0.5
+            and span.style.bbox[2] > left
+            and span.style.bbox[0] < right
+        ]
+        blocking = _content_below(page, bottom, left, right)
+        if blocking and below:
+            raise OpValidationError(
+                f"growing this paragraph would move text past {' and '.join(blocking)} below it, which "
+                "can't be moved with it yet; shorten the text, or allow overflow instead"
+            )
+        limit = page_bounds(page).y1
+        lowest = max([span.style.bbox[3] + shift for span in below] + [baselines[-1] + font_size * 0.25])
+        if lowest > limit:
+            raise OpValidationError(
+                f"growing this paragraph by {extra} line(s) would push text {lowest - limit:.0f} pt "
+                "off the bottom of the page"
+            )
+        # Bottom-up, so a block never lands on one that hasn't moved yet.
+        for later in sorted(detect_blocks(below), key=lambda b: -b.lines[0].style.chars[0].origin[1]):
+            move_resize_block(document, page_index, later, dy=shift, font_index=font_index, verify=False)
+        if below:
+            moved_note = f"; moved {len(below)} line(s) below it down {shift:.1f} pt"
+
+    before = _capture(document, page_index, verify)
+    _redact_spans(page, list(block.lines))
+    results: list[EditResult] = []
+    drawn: list[tuple[tuple[float, float], tuple[float, float], float]] = []
+    for i, text in enumerate(drawn_lines):
+        line = block.lines[min(i, len(block.lines) - 1)]
+        origin = (left, baselines[i])
+        state = _drawing_metrics(line)[1] if line.text_state else text_state
+        if justify and i < len(drawn_lines) - 1 and _stretches(text, width, font, font_size):
+            end_point = _draw_justified(
+                page,
+                text,
+                origin,
+                width,
+                font=font,
+                font_size=font_size,
+                color=line.style.color,
+                text_state=state,
+                resolution=resolution,
+            )
+        else:
+            end_point = draw_styled_text(
+                page,
+                text=text,
+                origin=origin,
+                font_size=font_size,
+                color=line.style.color,
+                text_state=state,
+                rotation_degrees=0.0,
+                resolution=resolution,
+            )
+        drawn.append((origin, end_point, font_size))
+        results.append(
+            EditResult(
+                tier=resolution.tier,
+                confidence=resolution.confidence,
+                requires_approval=resolution.requires_approval,
+                note=resolution.note + _text_state_note(reference),
+                end_point=end_point,
+            )
+        )
+    if not results:
+        return results
+    if before is not None:
+        verification = _verify_edit(document, page_index, before, drawn_lines[0], list(block.lines), drawn)
+        results[-1] = dataclasses.replace(results[-1], verification=verification)
+    if extra and not grow:
+        note = (
+            f"{results[-1].note}; overflow: {extra} more line(s) needed than "
+            f"this block has ({len(block.lines)}), not drawn"
+        )
+        results[-1] = dataclasses.replace(results[-1], requires_approval=True, note=note)
+    elif moved_note:
+        results[-1] = dataclasses.replace(results[-1], note=results[-1].note + moved_note)
     return results

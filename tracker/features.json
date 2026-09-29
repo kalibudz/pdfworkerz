@@ -93,7 +93,7 @@
     {"id": "FNT-14", "category": "FNT", "name": "CJK text editing (horizontal)", "parity": ["Nitro"], "libs": ["PyMuPDF", "fontTools"], "phase": "P2", "estTokens": "L", "status": "done"},
     {"id": "FNT-15", "category": "FNT", "name": "Type3 font handling (detect, reuse glyph procedures or fall back)", "parity": ["Beyond"], "libs": ["pikepdf"], "phase": "P2", "estTokens": "L", "status": "done"},
     {"id": "FNT-16", "category": "FNT", "name": "Scanned-text style estimation (font class, size, color)", "parity": ["Beyond"], "libs": ["Tesseract", "OpenCV"], "phase": "P7", "estTokens": "L", "status": "planned"},
-    {"id": "FNT-17", "category": "FNT", "name": "Justified reflow, and moving later content when a paragraph grows", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P5", "estTokens": "L", "status": "planned"},
+    {"id": "FNT-17", "category": "FNT", "name": "Justified reflow, and moving later content when a paragraph grows", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P5", "estTokens": "L", "status": "done"},
     {"id": "FNT-18", "category": "FNT", "name": "Right-to-left and vertical text editing", "parity": ["Nitro"], "libs": ["PyMuPDF", "fontTools"], "phase": "P8", "estTokens": "L", "status": "planned"},
     {"id": "EDT-01", "category": "EDT", "name": "Inline text edit that matches the original style", "parity": ["iLovePDF", "Nitro"], "libs": ["PyMuPDF", "fontTools"], "phase": "P2", "estTokens": "L", "status": "done"},
     {"id": "EDT-02", "category": "EDT", "name": "Find and replace (literal, regex, whole word, case sensitive)", "parity": ["Nitro"], "libs": ["PyMuPDF"], "phase": "P2", "estTokens": "M", "status": "done"},

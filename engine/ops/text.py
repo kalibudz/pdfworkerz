@@ -608,6 +608,11 @@ class ReflowTextOp(Op):
     "overflow" outcome) -- the same "never guess silently" principle require_tier
     implements for a weak font match, applied to an incomplete edit instead."""
     verify: bool = True
+    align: Literal["left", "justify"] = "left"
+    """FNT-17: "justify" spreads every line but the last to the paragraph's full width."""
+    grow: bool = False
+    """FNT-17: let the paragraph take more lines than it has, moving the text below it in the
+    same column down; refused if that text would leave the page or pass images/drawings/links."""
 
     def apply(self, document: Document) -> list[EditResult]:
         font_index = _font_index()
@@ -622,7 +627,14 @@ class ReflowTextOp(Op):
             raise OpValidationError("reflow_text: matched line could not be placed in a block")
 
         results = reflow_block(
-            document, self.page_index, block, self.new_text, font_index=font_index, verify=self.verify
+            document,
+            self.page_index,
+            block,
+            self.new_text,
+            font_index=font_index,
+            verify=self.verify,
+            align=self.align,
+            grow=self.grow,
         )
         # Report every problem at once: checking overflow first used to hide a weak font match behind it.
         problems = []
