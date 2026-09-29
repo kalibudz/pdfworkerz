@@ -34,6 +34,7 @@ GRAMMAR_TEMPLATE = r"""
 start: replace | delete | insert | set | undo | redo
      | delete_pages | rotate_pages | move_pages | duplicate_pages | insert_blank
      | extract_pages | split_doc | merge_doc | remove_blank
+     | crop_pages | uncrop_pages | resize_pages | impose
 
 replace: REPLACE target WITH STRING (option | scope)*
 delete: DELETE target (option | scope)*
@@ -53,6 +54,11 @@ split_doc: SPLIT EVERY number PAGES INTO STRING   -> split_every
          | SPLIT AT BOOKMARKS INTO STRING         -> split_bookmarks
 merge_doc: MERGE STRING (RELATION PAGE NUMBER)?
 remove_blank: REMOVE BLANK PAGES
+crop_pages: CROP pageset BY number
+uncrop_pages: UNCROP pageset
+resize_pages: RESIZE pageset TO SIZENAME LANDSCAPE? (WITHOUT SCALING)?
+impose: IMPOSE number UP (ON SIZENAME LANDSCAPE?)?   -> impose_n_up
+      | IMPOSE AS? BOOKLET (ON SIZENAME LANDSCAPE?)? -> impose_booklet
 
 pageset: PAGE NUMBER            -> ps_one
        | PAGES ranges           -> ps_ranges
@@ -152,6 +158,17 @@ KEYWORDS: dict[str, tuple[str, ...]] = {
     "BOOKMARKS": ("bookmarks",),
     "MERGE": ("merge",),
     "REMOVE": ("remove",),
+    "CROP": ("crop",),
+    "UNCROP": ("uncrop",),
+    "RESIZE": ("resize",),
+    "SIZENAME": ("a3", "a4", "a5", "letter", "legal"),
+    "LANDSCAPE": ("landscape",),
+    "WITHOUT": ("without",),
+    "SCALING": ("scaling",),
+    "IMPOSE": ("impose",),
+    "UP": ("up",),
+    "AS": ("as", "a"),
+    "BOOKLET": ("booklet",),
 }
 GRAMMAR = GRAMMAR_TEMPLATE.replace(
     "{keywords}",
@@ -173,6 +190,10 @@ VERBS = [
     "split",
     "merge",
     "remove",
+    "crop",
+    "uncrop",
+    "resize",
+    "impose",
 ]
 EXAMPLES = [
     'replace "old" with "new" on all pages',
@@ -193,10 +214,14 @@ EXAMPLES = [
     'split every 10 pages into "parts"',
     'merge "appendix.pdf" after page 4',
     "remove blank pages",
+    "crop pages 1-3 by 36",
+    "uncrop all pages",
+    "resize all pages to letter",
+    "impose 2 up",
+    "impose as booklet",
 ]
 # SPEC.md section 8.3's other actions, refused with the phase that brings them.
 LATER_ACTIONS = {
-    **dict.fromkeys(["crop", "resize", "impose"], "P5 (page geometry, next in this phase)"),
     **dict.fromkeys(["number", "bates", "watermark", "stamp", "header", "footer", "bookmark"], "P5 (page design)"),
     **dict.fromkeys(["redact", "protect", "unlock", "sign", "fill", "flatten"], "P6 (forms, signatures, security)"),
     **dict.fromkeys(["ocr", "convert"], "P7 (OCR and conversions)"),
@@ -721,6 +746,60 @@ def _remove_blank(source: str, _children: list[Any], _page_count: int, _current:
     return CommandPlan(source, "Remove blank pages (no text, nearly all white)", [{"op": "remove_blank_pages"}])
 
 
+def _sheet(children: list[Any], default: str) -> str:
+    names = _tokens(children, "SIZENAME")
+    if not names:
+        return default
+    return str(names[0]).lower() + ("-landscape" if _tokens(children, "LANDSCAPE") else "")
+
+
+def _crop_pages(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    pages = _pageset(children, page_count)
+    margin = _numbers(children)[-1]
+    op = {"op": "crop_pages", "page_indices": pages, "margins": [margin] * 4}
+    return CommandPlan(
+        source, f"Crop {margin:g} pt off every edge of page(s) {_page_list(pages)} (hidden, not deleted)", [op]
+    )
+
+
+def _uncrop_pages(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    pages = _pageset(children, page_count)
+    op = {"op": "uncrop_pages", "page_indices": pages}
+    return CommandPlan(source, f"Show the whole of page(s) {_page_list(pages)} again", [op])
+
+
+def _resize_pages(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    pages = _pageset(children, page_count)
+    size = _sheet(children, "a4")
+    scale = not _tokens(children, "WITHOUT")
+    op = {"op": "resize_pages", "page_indices": pages, "size": size, "scale": scale}
+    how = "scaling content to fit" if scale else "keeping content at its size"
+    return CommandPlan(source, f"Resize page(s) {_page_list(pages)} to {size}, {how}", [op])
+
+
+N_UP_GRIDS = {2: (2, 1), 4: (2, 2), 6: (3, 2), 8: (4, 2), 9: (3, 3), 16: (4, 4)}
+
+
+def _impose_n_up(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    count = _numbers(children)[0]
+    if count not in N_UP_GRIDS:
+        raise CommandError(f"impose {', '.join(map(str, N_UP_GRIDS))} up, not {count:g}")
+    cols, rows = N_UP_GRIDS[int(count)]
+    sheet = _sheet(children, "a4-landscape" if cols > rows else "a4")
+    op = {"op": "n_up", "cols": cols, "rows": rows, "sheet": sheet}
+    sheets = -(-page_count // (cols * rows))
+    return CommandPlan(source, f"Put {int(count)} pages on each {sheet} sheet ({sheets} sheet(s))", [op])
+
+
+def _impose_booklet(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    sheet = _sheet(children, "a4-landscape")
+    op = {"op": "booklet", "sheet": sheet}
+    sides = -(-page_count // 4) * 2
+    return CommandPlan(
+        source, f"Impose as a folded booklet on {sheet} ({sides} sheet sides, blanks added to fill)", [op]
+    )
+
+
 _BUILDERS = {
     "replace": _replace,
     "delete": _delete,
@@ -737,6 +816,11 @@ _BUILDERS = {
     "split_bookmarks": _split_bookmarks,
     "merge_doc": _merge_doc,
     "remove_blank": _remove_blank,
+    "crop_pages": _crop_pages,
+    "uncrop_pages": _uncrop_pages,
+    "resize_pages": _resize_pages,
+    "impose_n_up": _impose_n_up,
+    "impose_booklet": _impose_booklet,
 }
 
 

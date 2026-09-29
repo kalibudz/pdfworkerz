@@ -20,6 +20,7 @@ from engine.ops.images import (
     PageImagesOp,
     ReplaceImageOp,
 )
+from engine.ops.layout import BookletOp, CropPagesOp, NUpOp, ResizePagesOp, UncropPagesOp
 from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp, UpdateLinkOp
 from engine.ops.pages import (
     DeletePagesOp,
@@ -41,8 +42,10 @@ from engine.ops.text import DeleteTextOp, InsertTextOp, ReflowTextOp, ReplaceTex
 __all__ = [
     "AddLinkOp",
     "BatchOp",
+    "BookletOp",
     "CorrectWordOp",
     "CropImageOp",
+    "CropPagesOp",
     "DeleteImageOp",
     "DeletePagesOp",
     "DeleteShapeOp",
@@ -59,6 +62,7 @@ __all__ = [
     "MergeOp",
     "MoveImageOp",
     "MovePagesOp",
+    "NUpOp",
     "Op",
     "PageImagesOp",
     "PageLinksOp",
@@ -70,11 +74,13 @@ __all__ = [
     "ReorderPagesOp",
     "ReplaceImageOp",
     "ReplaceTextOp",
+    "ResizePagesOp",
     "RestyleSpanOp",
     "RestyleTextOp",
     "RotatePagesOp",
     "SpellCheckOp",
     "SplitOp",
+    "UncropPagesOp",
     "UpdateLinkOp",
     "op_registry",
     "parse_op",

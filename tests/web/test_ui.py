@@ -1469,3 +1469,49 @@ def test_deleting_pages_updates_the_page_count_and_thumbnails(
     )
     page.click(".pw-history button:has-text('Undo')")
     page.wait_for_function("() => document.querySelectorAll('.pw-thumb').length === 5", timeout=10000)
+
+
+def _thumb_is_landscape(page: Page, index: int) -> bool:
+    return bool(
+        page.eval_on_selector_all(
+            ".pw-thumb canvas", f"els => els[{index}] && els[{index}].height < els[{index}].width"
+        )
+    )
+
+
+@pytest.mark.feature("UI-07")
+def test_dragging_and_alt_arrows_reorder_pages(page: Page, app_url: str, tmp_path: Path) -> None:
+    import pymupdf
+
+    doc = pymupdf.open()
+    doc.new_page(width=842, height=595).insert_text((72, 72), "Wide page")  # only page 1 is landscape
+    for n in range(2, 5):
+        doc.new_page().insert_text((72, 72), f"Page {n}")
+    path = tmp_path / "organize.pdf"
+    doc.save(path)
+
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(path))
+    _wait_viewer_ready(page)
+    page.wait_for_function(
+        "() => { const c = document.querySelector('.pw-thumb canvas'); return c && c.height < c.width; }"
+    )
+
+    page.drag_and_drop(".pw-thumb:nth-child(1)", ".pw-thumb:nth-child(3)")
+    page.wait_for_function(
+        "() => document.querySelector('.pw-page-indicator')?.textContent?.trim() === '3 / 4'", timeout=5000
+    )
+    page.wait_for_function(
+        "() => { const c = document.querySelectorAll('.pw-thumb canvas')[2]; return c.height < c.width; }", timeout=5000
+    )
+    assert not _thumb_is_landscape(page, 0)
+
+    page.focus(".pw-thumb:nth-child(3)")
+    page.keyboard.press("Alt+ArrowDown")
+    page.wait_for_function(
+        "() => document.querySelector('.pw-page-indicator')?.textContent?.trim() === '4 / 4'", timeout=5000
+    )
+    page.wait_for_function(
+        "() => { const c = document.querySelectorAll('.pw-thumb canvas')[3]; return c.height < c.width; }", timeout=5000
+    )

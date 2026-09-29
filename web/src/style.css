@@ -957,3 +957,13 @@ button {
 .pw-command-suggestion {
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
+
+/* UI-07: page organizer drag feedback */
+.pw-thumb.pw-dragging {
+  opacity: 0.4;
+}
+
+.pw-thumb.pw-drop-target canvas {
+  outline: 3px dashed var(--accent);
+  outline-offset: 2px;
+}

@@ -319,6 +319,253 @@
     },
     {
       "additionalProperties": false,
+      "description": "ORG-09: show only `box` of each page, or trim `margins` (left, top, right, bottom).",
+      "properties": {
+        "op": {
+          "const": "crop_pages",
+          "default": "crop_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        },
+        "box": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Box"
+        },
+        "margins": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Margins"
+        }
+      },
+      "required": [
+        "page_indices"
+      ],
+      "title": "CropPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-09: show the whole page again.",
+      "properties": {
+        "op": {
+          "const": "uncrop_pages",
+          "default": "uncrop_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_indices"
+      ],
+      "title": "UncropPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-10: a new page size (\"a4\", \"letter-landscape\", ... or [width, height] points),\nscaling content to fit (or keeping its size, centered, with `scale` false).",
+      "properties": {
+        "op": {
+          "const": "resize_pages",
+          "default": "resize_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "title": "Size"
+        },
+        "scale": {
+          "default": true,
+          "title": "Scale",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_indices",
+        "size"
+      ],
+      "title": "ResizePagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-11: `cols` x `rows` pages per sheet, in reading order. Replaces every page.",
+      "properties": {
+        "op": {
+          "const": "n_up",
+          "default": "n_up",
+          "title": "Op",
+          "type": "string"
+        },
+        "cols": {
+          "default": 2,
+          "title": "Cols",
+          "type": "integer"
+        },
+        "rows": {
+          "default": 1,
+          "title": "Rows",
+          "type": "integer"
+        },
+        "sheet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "default": "a4-landscape",
+          "title": "Sheet"
+        },
+        "gap": {
+          "default": 12.0,
+          "title": "Gap",
+          "type": "number"
+        }
+      },
+      "title": "NUpOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-12: saddle-stitch booklet imposition, two pages per sheet side. Replaces every page.",
+      "properties": {
+        "op": {
+          "const": "booklet",
+          "default": "booklet",
+          "title": "Op",
+          "type": "string"
+        },
+        "sheet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "default": "a4-landscape",
+          "title": "Sheet"
+        },
+        "gap": {
+          "default": 0.0,
+          "title": "Gap",
+          "type": "number"
+        }
+      },
+      "title": "BookletOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "Every link on one page. Read-only, so -- like PageSpansOp -- it's\nnever journaled; server/app.py serves it from a dedicated GET route.",
       "properties": {
         "op": {

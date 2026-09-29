@@ -270,7 +270,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   let addingText = false;
   // Page operations (delete, insert, merge, ...) change the page count, so it is state, not an option.
   let pageCount = options.pageCount;
-  let thumbnails = createThumbnailRail(thumbRail, pageCount, (pageNumber) => void goToPage(pageNumber));
+  let thumbnails = createThumbnailRail(thumbRail, pageCount, (pageNumber) => void goToPage(pageNumber), movePage);
   let thumbButtons = thumbnails.buttons;
 
   function updateToolbar(): void {
@@ -328,7 +328,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
       pageCount = pdf.numPages;
       currentPage = Math.min(currentPage, pageCount);
       thumbRail.replaceChildren();
-      thumbnails = createThumbnailRail(thumbRail, pageCount, (pageNumber) => void goToPage(pageNumber));
+      thumbnails = createThumbnailRail(thumbRail, pageCount, (pageNumber) => void goToPage(pageNumber), movePage);
       thumbButtons = thumbnails.buttons;
     }
     thumbnails.setDocument(pdf);
@@ -337,6 +337,18 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     if (comparing) {
       await compare.show(currentPage - 1);
     }
+  }
+
+  /** UI-07: move one page (0-based `from`) so it ends up at 0-based position `to`, through the
+   * journaled move_pages op, so it undoes like any edit. The moved page stays selected. */
+  async function movePage(from: number, to: number): Promise<void> {
+    if (from === to || to < 0 || to >= pageCount) {
+      return;
+    }
+    await options.api.applyOp(options.documentId, { op: "move_pages", page_indices: [from], to });
+    currentPage = to + 1;
+    await reloadDocument();
+    thumbButtons[to]?.focus();
   }
 
   async function goToPage(pageNumber: number): Promise<void> {
@@ -636,6 +648,7 @@ function createThumbnailRail(
   rail: HTMLElement,
   pageCount: number,
   onSelect: (pageNumber: number) => void,
+  onMove: (from: number, to: number) => Promise<void>,
 ): ThumbnailRail {
   const buttons: HTMLButtonElement[] = [];
   let observer: IntersectionObserver | null = null;
@@ -655,6 +668,35 @@ function createThumbnailRail(
     button.append(canvas, numberLabel);
 
     button.addEventListener("click", () => onSelect(pageNumber));
+    // UI-07: drag a thumbnail onto another to move the page there; Alt+Up/Down does the same by keyboard.
+    button.draggable = true;
+    button.title = `Page ${pageNumber}: drag, or Alt+Up/Down, to move it`;
+    button.addEventListener("dragstart", (event) => {
+      event.dataTransfer?.setData("application/x-pw-page", String(pageNumber - 1));
+      button.classList.add("pw-dragging");
+    });
+    button.addEventListener("dragend", () => button.classList.remove("pw-dragging"));
+    button.addEventListener("dragover", (event) => {
+      if (event.dataTransfer?.types.includes("application/x-pw-page")) {
+        event.preventDefault();
+        button.classList.add("pw-drop-target");
+      }
+    });
+    button.addEventListener("dragleave", () => button.classList.remove("pw-drop-target"));
+    button.addEventListener("drop", (event) => {
+      event.preventDefault();
+      button.classList.remove("pw-drop-target");
+      const from = Number(event.dataTransfer?.getData("application/x-pw-page"));
+      if (Number.isInteger(from)) {
+        void onMove(from, pageNumber - 1); // the dragged page takes this page's place
+      }
+    });
+    button.addEventListener("keydown", (event) => {
+      if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+        event.preventDefault();
+        void onMove(pageNumber - 1, pageNumber - 1 + (event.key === "ArrowUp" ? -1 : 1));
+      }
+    });
     rail.appendChild(button);
     buttons.push(button);
   }
