@@ -708,3 +708,16 @@ def test_recipe_and_preview_errors_are_400s_and_dry_runs_chain(client: TestClien
     )
     dry = client.post(f"/documents/{document_id}/recipe", json={"text": chained, "dry_run": True}, headers=AUTH)
     assert dry.json()["matches"] == 2 and dry.json()["warnings"] == []
+
+
+@pytest.mark.feature("ORG-04")
+def test_page_ops_over_the_api_and_undo(client: TestClient, corpus: Corpus, work_dir: Path) -> None:
+    path = work_dir / "multi.pdf"
+    shutil.copy(corpus.multi_page, path)
+    document_id = _open(client, path)
+    base = f"/documents/{document_id}"
+    assert client.post(f"{base}/commands/apply", json={"text": "delete pages 1-2"}, headers=AUTH).status_code == 200
+    spans = client.get(f"{base}/pages/0/spans", headers=AUTH).json()
+    assert spans[0]["style"]["text"] == "Page 3 of 5"
+    client.post(f"{base}/undo", headers=AUTH)
+    assert client.get(f"{base}/pages/0/spans", headers=AUTH).json()[0]["style"]["text"] == "Page 1 of 5"

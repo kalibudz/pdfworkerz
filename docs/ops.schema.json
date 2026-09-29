@@ -508,6 +508,409 @@
     },
     {
       "additionalProperties": false,
+      "description": "ORG-01: add every page of another PDF, at the end or before page index `at`.",
+      "properties": {
+        "op": {
+          "const": "merge",
+          "default": "merge",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Password"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "MergeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-07: insert blank pages, or pages from another PDF, before page index `at`.",
+      "properties": {
+        "op": {
+          "const": "insert_pages",
+          "default": "insert_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "at": {
+          "title": "At",
+          "type": "integer"
+        },
+        "count": {
+          "default": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "size": {
+          "default": "same",
+          "enum": [
+            "a4",
+            "letter",
+            "legal",
+            "a3",
+            "a5",
+            "same"
+          ],
+          "title": "Size",
+          "type": "string"
+        },
+        "from_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Path"
+        },
+        "from_pages": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Pages"
+        },
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Password"
+        }
+      },
+      "required": [
+        "at"
+      ],
+      "title": "InsertPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-03: move pages so they start at position `to` among the other pages.",
+      "properties": {
+        "op": {
+          "const": "move_pages",
+          "default": "move_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        },
+        "to": {
+          "title": "To",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_indices",
+        "to"
+      ],
+      "title": "MovePagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-03 / UI-07: put every page in a new order (the organizer's drag-and-drop result).",
+      "properties": {
+        "op": {
+          "const": "reorder_pages",
+          "default": "reorder_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "order": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Order",
+          "type": "array"
+        }
+      },
+      "required": [
+        "order"
+      ],
+      "title": "ReorderPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-04: turn pages clockwise by a multiple of 90 degrees.",
+      "properties": {
+        "op": {
+          "const": "rotate_pages",
+          "default": "rotate_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        },
+        "degrees": {
+          "default": 90,
+          "title": "Degrees",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_indices"
+      ],
+      "title": "RotatePagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-05: remove pages (at least one must remain).",
+      "properties": {
+        "op": {
+          "const": "delete_pages",
+          "default": "delete_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_indices"
+      ],
+      "title": "DeletePagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-08: insert copies of pages right after each one.",
+      "properties": {
+        "op": {
+          "const": "duplicate_pages",
+          "default": "duplicate_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        },
+        "copies": {
+          "default": 1,
+          "title": "Copies",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_indices"
+      ],
+      "title": "DuplicatePagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-06: write pages to a new PDF; the document itself is unchanged.",
+      "properties": {
+        "op": {
+          "const": "extract_pages",
+          "default": "extract_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        },
+        "out": {
+          "title": "Out",
+          "type": "string"
+        },
+        "overwrite": {
+          "default": false,
+          "title": "Overwrite",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_indices",
+        "out"
+      ],
+      "title": "ExtractPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-02: write the document out as several PDFs -- every N pages, by page ranges, by a\nmaximum file size, or at each top-level bookmark. The document itself is unchanged.",
+      "properties": {
+        "op": {
+          "const": "split",
+          "default": "split",
+          "title": "Op",
+          "type": "string"
+        },
+        "out_dir": {
+          "title": "Out Dir",
+          "type": "string"
+        },
+        "every": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Every"
+        },
+        "ranges": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ranges"
+        },
+        "max_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Bytes"
+        },
+        "by_bookmarks": {
+          "default": false,
+          "title": "By Bookmarks",
+          "type": "boolean"
+        },
+        "overwrite": {
+          "default": false,
+          "title": "Overwrite",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "out_dir"
+      ],
+      "title": "SplitOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-13: list pages that are blank (no text, nearly all white). Changes nothing.",
+      "properties": {
+        "op": {
+          "const": "find_blank_pages",
+          "default": "find_blank_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "threshold": {
+          "default": 0.999,
+          "title": "Threshold",
+          "type": "number"
+        }
+      },
+      "title": "FindBlankPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-13: delete every blank page (never the last remaining page). Returns those removed.",
+      "properties": {
+        "op": {
+          "const": "remove_blank_pages",
+          "default": "remove_blank_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "threshold": {
+          "default": 0.999,
+          "title": "Threshold",
+          "type": "number"
+        }
+      },
+      "title": "RemoveBlankPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "Every vector path on one page. Read-only, so -- like PageSpansOp --\nnever journaled; server/app.py serves it from a GET route.",
       "properties": {
         "op": {

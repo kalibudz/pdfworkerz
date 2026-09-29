@@ -1446,3 +1446,26 @@ def test_the_viewer_fits_the_window_without_sideways_scrolling(
     area = page.eval_on_selector(".pw-page-area", "el => el.getBoundingClientRect().height")
     assert area > toolbar * 3  # the page area, not the command bar, takes the spare height
     page.close()
+
+
+@pytest.mark.feature("ORG-05")
+def test_deleting_pages_updates_the_page_count_and_thumbnails(
+    page: Page, app_url: str, corpus: Corpus, tmp_path: Path
+) -> None:
+    import shutil
+
+    path = tmp_path / "multi.pdf"
+    shutil.copy(corpus.multi_page, path)
+    _open_for_commands(page, app_url, path)
+    assert page.eval_on_selector_all(".pw-thumb", "els => els.length") == 5
+    page.click("#pw-command")
+    page.keyboard.type("delete pages 2-3")
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".pw-command-summary:has-text('Delete page(s) 2, 3')", timeout=5000)
+    page.click(".pw-command-apply")
+    page.wait_for_function("() => document.querySelectorAll('.pw-thumb').length === 3", timeout=10000)
+    page.wait_for_function(
+        "() => document.querySelector('.pw-page-indicator')?.textContent?.trim() === '1 / 3'", timeout=5000
+    )
+    page.click(".pw-history button:has-text('Undo')")
+    page.wait_for_function("() => document.querySelectorAll('.pw-thumb').length === 5", timeout=10000)

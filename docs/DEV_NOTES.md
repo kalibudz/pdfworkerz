@@ -37,6 +37,7 @@ Known limitations and genuinely open work stay in the checkpoint's `openQuestion
 ## Tooling and dependencies
 
 - **Run checks through `tools/gate.py`.** It runs ruff check and ruff format (two separate checks), and mypy scoped to `engine cli tools server`. The test files aren't strictly typed, so mypy over the whole tree shows about 240 errors. Python tools run as `sys.executable -m <tool>`, never from PATH.
+- **Stop any `vite preview` or `vite dev` server before running the gate.** On Windows, a running Vite process keeps `web/node_modules` binaries open, so the gate's `npm ci` fails with EPERM. Stopping the shell that started it can leave the `node` child running; check for leftover `vite` processes.
 - **Check the oldest supported Python.** `python tools/gate.py --python .venv311/Scripts/python.exe --job types --job tests` runs mypy and the suite under Python 3.11. `.venv311` is created with `uv` (see README).
 - **pdfjs-dist is pinned to 6.3.289** (`web/package.json`). Versions from 5.6.83 up to, but not including, 6.2.108 have a public high-severity CVE. The gate's `npm audit` step re-checks the pin on every run.
 

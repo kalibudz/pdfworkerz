@@ -32,6 +32,8 @@ from engine.errors import PdfWorkerzError
 
 GRAMMAR_TEMPLATE = r"""
 start: replace | delete | insert | set | undo | redo
+     | delete_pages | rotate_pages | move_pages | duplicate_pages | insert_blank
+     | extract_pages | split_doc | merge_doc | remove_blank
 
 replace: REPLACE target WITH STRING (option | scope)*
 delete: DELETE target (option | scope)*
@@ -39,6 +41,24 @@ insert: INSERT STRING placement (style | scope)*
 set: SET style+ FOR target (option | scope)*
 undo: UNDO
 redo: REDO
+
+delete_pages: DELETE pageset
+rotate_pages: ROTATE pageset (BY number)? (CLOCKWISE | COUNTERCLOCKWISE)?
+move_pages: MOVE pageset RELATION PAGE NUMBER   -> move_relative
+          | MOVE pageset TO THE? (START | END)   -> move_edge
+duplicate_pages: DUPLICATE pageset (number TIMES)?
+insert_blank: INSERT number BLANK (PAGE | PAGES) RELATION PAGE NUMBER
+extract_pages: EXTRACT pageset TO STRING
+split_doc: SPLIT EVERY number PAGES INTO STRING   -> split_every
+         | SPLIT AT BOOKMARKS INTO STRING         -> split_bookmarks
+merge_doc: MERGE STRING (RELATION PAGE NUMBER)?
+remove_blank: REMOVE BLANK PAGES
+
+pageset: PAGE NUMBER            -> ps_one
+       | PAGES ranges           -> ps_ranges
+       | ALL PAGES              -> ps_all
+       | ODD PAGES              -> ps_odd
+       | EVEN PAGES             -> ps_even
 
 target: STRING   -> literal
       | REGEX    -> regex
@@ -113,6 +133,25 @@ KEYWORDS: dict[str, tuple[str, ...]] = {
     "COLOR": ("color", "colour"),
     "FONT": ("font",),
     "COLORNAME": ("black", "white", "red", "green", "blue", "gray", "grey"),
+    "ROTATE": ("rotate",),
+    "BY": ("by",),
+    "COUNTERCLOCKWISE": ("counterclockwise", "anticlockwise"),
+    "CLOCKWISE": ("clockwise",),
+    "MOVE": ("move",),
+    "TO": ("to",),
+    "THE": ("the",),
+    "START": ("start", "beginning", "front"),
+    "END": ("end",),
+    "DUPLICATE": ("duplicate",),
+    "TIMES": ("times",),
+    "BLANK": ("blank",),
+    "EXTRACT": ("extract",),
+    "SPLIT": ("split",),
+    "EVERY": ("every",),
+    "INTO": ("into",),
+    "BOOKMARKS": ("bookmarks",),
+    "MERGE": ("merge",),
+    "REMOVE": ("remove",),
 }
 GRAMMAR = GRAMMAR_TEMPLATE.replace(
     "{keywords}",
@@ -120,7 +159,21 @@ GRAMMAR = GRAMMAR_TEMPLATE.replace(
 )
 _PARSER = Lark(GRAMMAR, parser="lalr", lexer="basic", maybe_placeholders=False)
 
-VERBS = ["replace", "delete", "insert", "set", "undo", "redo"]
+VERBS = [
+    "replace",
+    "delete",
+    "insert",
+    "set",
+    "undo",
+    "redo",
+    "rotate",
+    "move",
+    "duplicate",
+    "extract",
+    "split",
+    "merge",
+    "remove",
+]
 EXAMPLES = [
     'replace "old" with "new" on all pages',
     'replace /Rev\\s+[A-C]/ with "Rev D" on pages 1-3',
@@ -131,17 +184,28 @@ EXAMPLES = [
     'set font "Times" color #cc0000 for "Total"',
     "undo",
     "redo",
+    "delete pages 7, 9-10",
+    "move pages 5-6 after page 1",
+    "rotate pages 2-3 by 90",
+    "duplicate page 1 2 times",
+    "insert 1 blank page after page 3",
+    'extract pages 1-2 to "part.pdf"',
+    'split every 10 pages into "parts"',
+    'merge "appendix.pdf" after page 4',
+    "remove blank pages",
 ]
 # SPEC.md section 8.3's other actions, refused with the phase that brings them.
 LATER_ACTIONS = {
-    **dict.fromkeys(["move", "rotate", "crop", "resize", "merge", "split", "extract"], "P5 (organize pages)"),
+    **dict.fromkeys(["crop", "resize", "impose"], "P5 (page geometry, next in this phase)"),
     **dict.fromkeys(["number", "bates", "watermark", "stamp", "header", "footer", "bookmark"], "P5 (page design)"),
     **dict.fromkeys(["redact", "protect", "unlock", "sign", "fill", "flatten"], "P6 (forms, signatures, security)"),
     **dict.fromkeys(["ocr", "convert"], "P7 (OCR and conversions)"),
     **dict.fromkeys(["compress", "compare"], "P8 (optimize and compare)"),
 }
 SYNTAX_HINT = (
-    'Commands start with replace, delete, insert, set, undo or redo. Put text in "double quotes", '
+    "Text commands: replace, delete, insert, set; page commands: delete pages, rotate, move, duplicate, "
+    "insert N blank pages, extract, split, merge, remove blank pages; and undo, redo. "
+    'Put text in "double quotes", '
     "a regular expression in /slashes/, and pages as: on page 3 | on pages 1-3,5 | on all pages | on odd pages."
 )
 _NAMED_COLORS = {
@@ -245,6 +309,21 @@ class _Build(Transformer[Token, Any]):
 
     def number(self, token: Token) -> float:
         return float(token)
+
+    def ps_one(self, _page: Token, number: Token) -> tuple[str, Any]:
+        return ("pageset", ("pages", [_page_number(number)]))
+
+    def ps_ranges(self, _pages: Token, pages: list[int]) -> tuple[str, Any]:
+        return ("pageset", ("pages", pages))
+
+    def ps_all(self, *_tokens: Token) -> tuple[str, Any]:
+        return ("pageset", ("all", None))
+
+    def ps_odd(self, *_tokens: Token) -> tuple[str, Any]:
+        return ("pageset", ("odd", None))
+
+    def ps_even(self, *_tokens: Token) -> tuple[str, Any]:
+        return ("pageset", ("even", None))
 
     def one_page(self, _on: Token, _page: Token, number: Token) -> tuple[str, Any]:
         return ("scope", ("pages", [_page_number(number)]))
@@ -504,7 +583,161 @@ def _describe_style(key: str, value: Any) -> str:
     return f"{key} {value:g}"
 
 
-_BUILDERS = {"replace": _replace, "delete": _delete, "insert": _insert, "set": _set}
+def _pageset(children: list[Any], page_count: int) -> list[int]:
+    (pageset,) = _parts(children, "pageset")
+    pages = _pages(pageset, page_count)
+    return list(range(page_count)) if pages is None else pages
+
+
+def _tokens(children: list[Any], kind: str) -> list[Token]:
+    return [c for c in children if isinstance(c, Token) and c.type == kind]
+
+
+def _numbers(children: list[Any]) -> list[float]:
+    return [c for c in children if isinstance(c, float)]
+
+
+def _page_list(pages: list[int]) -> str:
+    return ", ".join(str(p + 1) for p in pages)
+
+
+def _relation(children: list[Any], allowed: tuple[str, ...] = ("after", "before")) -> str:
+    (token,) = _tokens(children, "RELATION")
+    relation = str(token).lower()
+    if relation not in allowed:
+        raise CommandError(f'use "after" or "before" a page here, not "{relation}"')
+    return relation
+
+
+def _target_page(children: list[Any], page_count: int) -> int:
+    number = _page_number(_tokens(children, "NUMBER")[-1])
+    if not 1 <= number <= page_count:
+        raise CommandError(f"page {number} doesn't exist: the document has {page_count} page(s)")
+    return number - 1
+
+
+def _delete_pages(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    pages = _pageset(children, page_count)
+    if len(pages) == page_count:
+        raise CommandError("can't delete every page: a PDF needs at least one")
+    return CommandPlan(source, f"Delete page(s) {_page_list(pages)}", [{"op": "delete_pages", "page_indices": pages}])
+
+
+def _rotate_pages(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    pages = _pageset(children, page_count)
+    numbers = _numbers(children)
+    degrees = numbers[0] if numbers else 90.0
+    if degrees != int(degrees) or int(degrees) % 90:
+        raise CommandError(f"pages turn by multiples of 90 degrees, not {degrees:g}")
+    turn = int(degrees) % 360
+    direction = "clockwise"
+    if _tokens(children, "COUNTERCLOCKWISE"):
+        turn, direction = (360 - turn) % 360, "counterclockwise"
+    op = {"op": "rotate_pages", "page_indices": pages, "degrees": turn}
+    return CommandPlan(source, f"Rotate page(s) {_page_list(pages)} {int(degrees)} degrees {direction}", [op])
+
+
+def _move_relative(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    pages = _pageset(children, page_count)
+    relation = _relation(children)
+    anchor = _target_page(children, page_count)
+    if anchor in pages:
+        raise CommandError(f"page {anchor + 1} is one of the pages being moved")
+    rest = [p for p in range(page_count) if p not in set(pages)]
+    to = rest.index(anchor) + (1 if relation == "after" else 0)
+    op = {"op": "move_pages", "page_indices": pages, "to": to}
+    return CommandPlan(source, f"Move page(s) {_page_list(pages)} {relation} page {anchor + 1}", [op])
+
+
+def _move_edge(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    pages = _pageset(children, page_count)
+    to_end = bool(_tokens(children, "END"))
+    rest = page_count - len(set(pages))
+    op = {"op": "move_pages", "page_indices": pages, "to": rest if to_end else 0}
+    where = "to the end" if to_end else "to the start"
+    return CommandPlan(source, f"Move page(s) {_page_list(pages)} {where}", [op])
+
+
+def _duplicate_pages(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    pages = _pageset(children, page_count)
+    numbers = _numbers(children)
+    copies = numbers[0] if numbers else 1.0
+    if copies != int(copies) or not 1 <= copies <= 100:
+        raise CommandError(f"copies must be a whole number from 1 to 100, not {copies:g}")
+    op = {"op": "duplicate_pages", "page_indices": pages, "copies": int(copies)}
+    times = "" if copies == 1 else f" {int(copies)} times"
+    return CommandPlan(source, f"Duplicate page(s) {_page_list(pages)}{times}", [op])
+
+
+def _insert_blank(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    count = _numbers(children)[0]
+    if count != int(count) or not 1 <= count <= 1000:
+        raise CommandError(f"the number of pages must be a whole number from 1 to 1000, not {count:g}")
+    relation = _relation(children)
+    anchor = _target_page(children, page_count)
+    at = anchor + 1 if relation == "after" else anchor
+    op = {"op": "insert_pages", "at": at, "count": int(count)}
+    return CommandPlan(source, f"Insert {int(count)} blank page(s) {relation} page {anchor + 1}", [op])
+
+
+def _extract_pages(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    pages = _pageset(children, page_count)
+    (out,) = _strings(children)
+    if not out:
+        raise CommandError("give the file to extract to")
+    op = {"op": "extract_pages", "page_indices": pages, "out": out}
+    return CommandPlan(source, f'Extract page(s) {_page_list(pages)} to "{out}" (this document is unchanged)', [op])
+
+
+def _split_every(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    every = _numbers(children)[0]
+    if every != int(every) or every < 1:
+        raise CommandError(f"split every whole number of pages, not {every:g}")
+    (folder,) = _strings(children)
+    op = {"op": "split", "out_dir": folder, "every": int(every)}
+    parts = -(-page_count // int(every))
+    return CommandPlan(source, f'Split into {parts} file(s) of {int(every)} page(s) in "{folder}"', [op])
+
+
+def _split_bookmarks(source: str, children: list[Any], _page_count: int, _current: int) -> CommandPlan:
+    (folder,) = _strings(children)
+    op = {"op": "split", "out_dir": folder, "by_bookmarks": True}
+    return CommandPlan(source, f'Split at each top-level bookmark into files in "{folder}"', [op])
+
+
+def _merge_doc(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    (path,) = _strings(children)
+    op: dict[str, Any] = {"op": "merge", "path": path}
+    where = "at the end"
+    if _tokens(children, "RELATION"):
+        relation = _relation(children)
+        anchor = _target_page(children, page_count)
+        op["at"] = anchor + 1 if relation == "after" else anchor
+        where = f"{relation} page {anchor + 1}"
+    return CommandPlan(source, f'Merge "{path}" {where}', [op])
+
+
+def _remove_blank(source: str, _children: list[Any], _page_count: int, _current: int) -> CommandPlan:
+    return CommandPlan(source, "Remove blank pages (no text, nearly all white)", [{"op": "remove_blank_pages"}])
+
+
+_BUILDERS = {
+    "replace": _replace,
+    "delete": _delete,
+    "insert": _insert,
+    "set": _set,
+    "delete_pages": _delete_pages,
+    "rotate_pages": _rotate_pages,
+    "move_relative": _move_relative,
+    "move_edge": _move_edge,
+    "duplicate_pages": _duplicate_pages,
+    "insert_blank": _insert_blank,
+    "extract_pages": _extract_pages,
+    "split_every": _split_every,
+    "split_bookmarks": _split_bookmarks,
+    "merge_doc": _merge_doc,
+    "remove_blank": _remove_blank,
+}
 
 
 def _explain(source: str, exc: UnexpectedInput) -> str:

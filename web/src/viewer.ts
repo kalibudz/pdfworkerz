@@ -268,14 +268,16 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   let comparing = false;
   let currentViewport: Awaited<ReturnType<PageRenderer["render"]>> = null;
   let addingText = false;
-  const thumbnails = createThumbnailRail(thumbRail, options.pageCount, (pageNumber) => void goToPage(pageNumber));
-  const thumbButtons = thumbnails.buttons;
+  // Page operations (delete, insert, merge, ...) change the page count, so it is state, not an option.
+  let pageCount = options.pageCount;
+  let thumbnails = createThumbnailRail(thumbRail, pageCount, (pageNumber) => void goToPage(pageNumber));
+  let thumbButtons = thumbnails.buttons;
 
   function updateToolbar(): void {
-    pageIndicator.textContent = `${currentPage} / ${options.pageCount}`;
+    pageIndicator.textContent = `${currentPage} / ${pageCount}`;
     zoomIndicator.textContent = `${Math.round(scale * 100)}%`;
     prevButton.disabled = currentPage <= 1;
-    nextButton.disabled = currentPage >= options.pageCount;
+    nextButton.disabled = currentPage >= pageCount;
   }
 
   function updateActiveThumbnail(): void {
@@ -322,6 +324,13 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     overlay.cancelPainter();
     const bytes = await options.api.documentFile(options.documentId);
     pdf = await loadPdf(bytes);
+    if (pdf.numPages !== pageCount) {
+      pageCount = pdf.numPages;
+      currentPage = Math.min(currentPage, pageCount);
+      thumbRail.replaceChildren();
+      thumbnails = createThumbnailRail(thumbRail, pageCount, (pageNumber) => void goToPage(pageNumber));
+      thumbButtons = thumbnails.buttons;
+    }
     thumbnails.setDocument(pdf);
     await renderCurrentPage();
     await history.refresh();
@@ -334,7 +343,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     if (!pdf) {
       return;
     }
-    const clamped = Math.min(Math.max(pageNumber, 1), options.pageCount);
+    const clamped = Math.min(Math.max(pageNumber, 1), pageCount);
     if (clamped === currentPage) {
       return;
     }
@@ -541,7 +550,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
       void goToPage(1);
     } else if (event.key === "End") {
       event.preventDefault();
-      void goToPage(options.pageCount);
+      void goToPage(pageCount);
     } else if (event.key === "+" || event.key === "=") {
       event.preventDefault();
       void setScale(scale * ZOOM_STEP);

@@ -188,7 +188,24 @@ def test_actions_from_later_phases_say_when_they_arrive() -> None:
 @pytest.mark.parametrize(
     "typed, expected",
     [
-        ("", {"replace", "delete", "insert", "set", "undo", "redo"}),
+        (
+            "",
+            {
+                "replace",
+                "delete",
+                "insert",
+                "set",
+                "undo",
+                "redo",
+                "rotate",
+                "move",
+                "duplicate",
+                "extract",
+                "split",
+                "merge",
+                "remove",
+            },
+        ),
         ("rep", {"replace"}),
         ('replace "a" ', {"with"}),
         ('replace "a" with "b" on ', {"page", "pages", "all", "odd", "even"}),
@@ -508,3 +525,60 @@ def test_a_deterministic_incremental_save_says_it_is_not_reproducible(corpus: ob
     result = doc.save(overwrite=True, deterministic=True)
     assert result.mode == "incremental" and "not byte-for-byte reproducible" in result.note
     doc.close()
+
+
+# -- P5 slice 1: page commands --
+
+
+@pytest.mark.feature("ORG-03")
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        ("delete pages 7, 9-10", {"op": "delete_pages", "page_indices": [6, 8, 9]}),
+        ("move pages 5-6 after page 1", {"op": "move_pages", "page_indices": [4, 5], "to": 1}),
+        ("move page 2 before page 1", {"op": "move_pages", "page_indices": [1], "to": 0}),
+        ("move page 1 to the end", {"op": "move_pages", "page_indices": [0], "to": 9}),
+        ("rotate pages 2-3", {"op": "rotate_pages", "page_indices": [1, 2], "degrees": 90}),
+        ("rotate page 1 by 90 counterclockwise", {"op": "rotate_pages", "page_indices": [0], "degrees": 270}),
+        ("rotate odd pages by 180", {"op": "rotate_pages", "page_indices": [0, 2, 4, 6, 8], "degrees": 180}),
+        ("duplicate page 1 2 times", {"op": "duplicate_pages", "page_indices": [0], "copies": 2}),
+        ("insert 2 blank pages before page 3", {"op": "insert_pages", "at": 2, "count": 2}),
+        ('extract pages 1-2 to "a.pdf"', {"op": "extract_pages", "page_indices": [0, 1], "out": "a.pdf"}),
+        ('split every 4 pages into "parts"', {"op": "split", "out_dir": "parts", "every": 4}),
+        ('split at bookmarks into "parts"', {"op": "split", "out_dir": "parts", "by_bookmarks": True}),
+        ('merge "b.pdf" after page 4', {"op": "merge", "path": "b.pdf", "at": 4}),
+        ("remove blank pages", {"op": "remove_blank_pages"}),
+    ],
+)
+def test_page_commands_parse_into_page_ops(command: str, expected: dict[str, object]) -> None:
+    plan = parse_command(command, page_count=10)
+    assert plan.op() == expected
+    parse_op(plan.op())
+
+
+@pytest.mark.feature("ORG-05")
+@pytest.mark.parametrize(
+    "command, message",
+    [
+        ("delete all pages", "at least one"),
+        ("rotate page 1 by 45", "multiples of 90"),
+        ("move page 2 after page 2", "one of the pages being moved"),
+        ("move page 1 below page 3", 'use "after" or "before"'),
+        ("delete pages 3-12", "page 11 doesn't exist"),
+        ("crop page 1", "isn't available yet"),
+    ],
+)
+def test_page_commands_refuse_what_cannot_be_done(command: str, message: str) -> None:
+    with pytest.raises(CommandError, match=message):
+        parse_command(command, page_count=10)
+
+
+@pytest.mark.feature("ORG-03")
+def test_a_page_command_applies_through_the_journal(tmp_path: Path) -> None:
+    doc = Document.open(_doc(tmp_path / "p.pdf", [["One"], ["Two"], ["Three"]]))
+    journal = UndoRedoJournal(doc)
+    journal.record(parse_op(parse_command("move page 3 to the start", page_count=3).op()))
+    assert [journal.document.raw[i].get_text().strip() for i in range(3)] == ["Three", "One", "Two"]
+    journal.undo()
+    assert journal.document.raw[0].get_text().strip() == "One"
+    journal.document.close()

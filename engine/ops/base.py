@@ -57,10 +57,14 @@ class Op(BaseModel):
         an out-of-range page otherwise surfaced as pymupdf's raw IndexError."""
         for name in type(self).model_fields:
             value = getattr(self, name)
-            if name.endswith("page_index") and isinstance(value, int) and not 0 <= value < document.page_count:
-                raise OpValidationError(
-                    f"{name} {value} is out of range: the document has {document.page_count} page(s) (0-based)"
-                )
+            values = value if name.endswith("page_indices") and isinstance(value, list) else [value]
+            if not (name.endswith("page_index") or name.endswith("page_indices")):
+                continue
+            for item in values:
+                if isinstance(item, int) and not 0 <= item < document.page_count:
+                    raise OpValidationError(
+                        f"{name} {item} is out of range: the document has {document.page_count} page(s) (0-based)"
+                    )
 
 
 def register_op(cls: type[Op]) -> type[Op]:

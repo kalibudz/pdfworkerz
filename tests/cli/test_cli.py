@@ -686,3 +686,37 @@ def test_edit_with_a_page_that_does_not_exist_is_refused(corpus: Corpus) -> None
         app, ["edit", str(corpus.simple), "--do", 'insert "x" below "Hello"', "--page", "0", "--dry-run"]
     )
     assert result.exit_code == 2 and "doesn't exist" in result.output
+
+
+@pytest.mark.feature("ORG-05")
+def test_page_commands_through_the_cli(corpus: Corpus, work_dir: Path) -> None:
+    import pymupdf
+
+    out = work_dir / "trimmed.pdf"
+    result = runner.invoke(
+        app,
+        ["edit", str(corpus.multi_page), "--do", "delete pages 2-3", "--do", "rotate page 1", "--out", str(out)],
+    )
+    assert result.exit_code == 0, result.output
+    with pymupdf.open(out) as doc:
+        assert [page.get_text().strip() for page in doc] == ["Page 1 of 5", "Page 4 of 5", "Page 5 of 5"]
+        assert doc[0].rotation == 90
+
+
+@pytest.mark.feature("ORG-02")
+def test_split_command_writes_the_parts(corpus: Corpus, work_dir: Path) -> None:
+    parts = work_dir / "parts"
+    parts.mkdir()
+    result = runner.invoke(
+        app,
+        [
+            "edit",
+            str(corpus.multi_page),
+            "--do",
+            f'split every 2 pages into "{parts.as_posix()}"',
+            "--out",
+            str(work_dir / "unchanged.pdf"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert sorted(p.name for p in parts.iterdir()) == [f"multi_page.part{n}.pdf" for n in (1, 2, 3)]
