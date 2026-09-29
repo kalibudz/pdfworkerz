@@ -345,7 +345,12 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     if (from === to || to < 0 || to >= pageCount) {
       return;
     }
-    await options.api.applyOp(options.documentId, { op: "move_pages", page_indices: [from], to });
+    try {
+      await options.api.applyOp(options.documentId, { op: "move_pages", page_indices: [from], to });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The page could not be moved.");
+      return;
+    }
     currentPage = to + 1;
     await reloadDocument();
     thumbButtons[to]?.focus();

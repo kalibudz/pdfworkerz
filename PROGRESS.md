@@ -11,7 +11,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes; FNT-11/FNT-14 re-scoped (FNT-17/18 planned) |
 | P3 | Web UI with click-to-edit | ✅ Done: 15/15 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes |
 | P4 | Command bar & recipes | ✅ Done: 8/8 features proven by tests | Independent reviewer: signed off 2026-09-29 after two rounds of fixes |
-| P5 | Organize, page design, annotate, document structure | Planned | |
+| P5 | Organize, page design, annotate, document structure | ✅ Done: 33/33 features proven by tests | Independent reviewer: signed off 2026-09-29 after two rounds of fixes |
 | P6 | Forms, signatures, security, redaction | Planned | |
 | P7 | OCR, scans, conversions | Planned | |
 | P8 | Optimize, compare, accessibility, batch, extras | Planned | |
@@ -25,6 +25,34 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-29 — P5: organize, page design, annotate, document structure
+
+- **Slice 1 (ORG-01..08, ORG-13):** merge, insert, move/reorder, rotate, delete,
+  duplicate, extract, split (every N, ranges, size, bookmarks), blank-page removal.
+- **Slice 2 (ORG-09..12, UI-07):** crop/uncrop, resize, N-up, saddle-stitch booklet;
+  drag-and-drop (and Alt+Up/Down) page moves in the thumbnail rail.
+- **Slice 3 (DES-01..06):** page numbers, Bates, headers/footers, text and image
+  watermarks, backgrounds, stamps; upright on rotated and cropped pages.
+- **Slice 4 (ANN-01..06):** markup, notes and comments, shape/ink annotations,
+  flatten, summary export (markdown/CSV/JSON), edit/delete by xref.
+- **Slice 5 (DOC-01..05, COR-12):** metadata with XMP kept in step, bookmark editor,
+  bookmarks and a linked contents page from headings, attachments, page labels, layers.
+- **FNT-17:** justified reflow, and growing a paragraph moves later text in its column down.
+- Every feature also has a command-bar form where it makes sense.
+- **Found while testing:** a garbage-collecting Save As left the live document's
+  /Metadata stale, so the next save dropped the XMP. Save As now writes from a copy.
+- **Review round 1** (read-only; the reviewer's sandbox couldn't run code): extract and
+  split wrote encrypted pages out decrypted; resize dropped the outline and links;
+  N-up/booklet dropped links and annotations silently (now refused unless
+  `drop_interactive` / "dropping annotations"; bookmarks remapped to sheets);
+  NaN geometry accepted (Op base now `allow_inf_nan=False`). All fixed, with tests.
+- **Review round 2** (reproduced by running code): links between several resized pages
+  lost; preset stamps and background images sideways on rotated pages; FNT-17 grow drew
+  over images/drawings; the annotation summary could overwrite the open PDF; the contents
+  page stopped after one page; UI-07 move errors not shown. All fixed with regression tests;
+  the reviewer re-ran every repro and **signed off** (598 engine tests passing).
+- Local gate green; 98/163 features done.
 
 ### 2026-09-29 — P4: command bar and recipes (CMD-01..CMD-08)
 

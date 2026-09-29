@@ -138,6 +138,7 @@ def resize(
 
     toc = document.raw.get_toc(simple=False)
     saved_links = [document.raw[i].get_links() for i in range(document.page_count)]
+    matrices: dict[int, pymupdf.Matrix] = {}
     source = _source_copy(document)
     try:
         for index in chosen:
@@ -153,22 +154,24 @@ def resize(
                 page.show_pdf_page(target & page.rect, source, index, clip=_clip_for(target, page.rect, old))
                 matrix = pymupdf.Matrix(1, 0, 0, 1, x0, y0)
             document.raw.delete_page(index + 1)
-            page = document.raw[index]  # deleting a page invalidates page objects already loaded
-            if index not in rotated:
-                for link in saved_links[index]:
-                    moved = (pymupdf.Rect(link["from"]) * matrix) & page.rect
-                    if not moved.is_empty:
-                        page.insert_link({**link, "from": moved})
+            matrices[index] = matrix
     finally:
         source.close()
-    # Deleting the old pages also removed the bookmarks and the links elsewhere that pointed at them.
+    # Deleting old pages also removed the bookmarks and links that pointed at them -- including
+    # links on pages rebuilt earlier in the loop -- so every link is restored only once all
+    # pages are rebuilt: moved and scaled on resized pages, as they were everywhere else.
     document.raw.set_toc(toc)
     for index in range(document.page_count):
-        if index in chosen:
+        if index in rotated:
             continue
         page = document.raw[index]
         present = {_link_key(link) for link in page.get_links()}
         for link in saved_links[index]:
+            if index in matrices:
+                moved = (pymupdf.Rect(link["from"]) * matrices[index]) & page.rect
+                if moved.is_empty:
+                    continue
+                link = {**link, "from": moved}
             if _link_key(link) not in present:
                 page.insert_link(link)
 

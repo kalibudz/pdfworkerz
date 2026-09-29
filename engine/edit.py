@@ -913,13 +913,16 @@ _JUSTIFY_MAX_GAP_RATIO = 1.5
 column), so such a line is left-aligned instead, as typesetters do with a paragraph's last line."""
 
 
-def _content_below(page: pymupdf.Page, top: float, left: float, right: float) -> list[str]:
-    """Non-text things between `top` and the page bottom that overlap the column [left, right]:
-    moving text past them would misalign them, and the editor can't move them with the text yet."""
+def _content_below(
+    page: pymupdf.Page, top: float, left: float, right: float, *, until: float | None = None
+) -> list[str]:
+    """Non-text things between `top` and `until` (default: the page bottom) that overlap the
+    column [left, right]: moving text past them would misalign them, and the editor can't move
+    them with the text yet."""
     found = []
 
     def overlaps(rect: pymupdf.Rect) -> bool:
-        return rect.y1 > top and rect.x1 > left and rect.x0 < right
+        return rect.y1 > top and (until is None or rect.y0 < until) and rect.x1 > left and rect.x0 < right
 
     if any(overlaps(pymupdf.Rect(info["bbox"])) for info in page.get_image_info()):
         found.append("images")
@@ -1022,6 +1025,12 @@ def reflow_paragraph(
             and span.style.bbox[0] < right
         ]
         blocking = _content_below(page, bottom, left, right)
+        in_band = _content_below(page, bottom, left, right, until=bottom + shift)
+        if in_band:
+            raise OpValidationError(
+                f"growing this paragraph would draw its new lines over {' and '.join(in_band)} below it; "
+                "shorten the text, or allow overflow instead"
+            )
         if blocking and below:
             raise OpValidationError(
                 f"growing this paragraph would move text past {' and '.join(blocking)} below it, which "

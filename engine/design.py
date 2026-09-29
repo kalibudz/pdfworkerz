@@ -319,7 +319,7 @@ def background(
         if color is not None:
             page.draw_rect(area, color=None, fill=_color(color), overlay=False)
         else:
-            page.insert_image(area, filename=image, overlay=False, keep_proportion=False)
+            page.insert_image(area, filename=image, overlay=False, keep_proportion=False, rotate=page.rotation)
     return len(chosen)
 
 
@@ -361,13 +361,17 @@ def stamp(
         page = document.raw[index]
         visible = page.rect
         box = _box_at(visible, width, height, position, margin)
-        if text is None:
+        if text is None and not page.rotation:
             page.add_stamp_annot(box * page.derotation_matrix, stamp=STAMPS[name.lower()])
             continue
+        # Measured on pymupdf 1.28.2: a stamp annotation's appearance is always drawn along the
+        # unrotated x-axis, so on a rotated page it came out sideways or upside down. There the
+        # preset is drawn as page content instead, upright, like a custom stamp.
+        label = text if text is not None else name.upper()
         rgb = _color(color)
         page.draw_rect(box * page.derotation_matrix, color=rgb, width=3, radius=0.15)
-        size = min(height * 0.5, (width - 16) / max(1.0, pymupdf.get_text_length(text, "hebo", 1)))
-        place_text_in_box(page, text, box, size=size, color=rgb)
+        size = min(height * 0.5, (width - 16) / max(1.0, pymupdf.get_text_length(label, "hebo", 1)))
+        place_text_in_box(page, label, box, size=size, color=rgb)
     return len(chosen)
 
 

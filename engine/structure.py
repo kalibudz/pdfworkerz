@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict
 
 from engine.document import Document
 from engine.errors import OpValidationError, OverwriteRefusedError
-from engine.pages import _check_indices
+from engine.pages import _check_indices, refuse_own_file
 from engine.pdfbytes import plain_bytes
 
 # -- DOC-01 metadata --
@@ -255,23 +255,28 @@ def auto_bookmarks(document: Document, *, max_levels: int = 3, min_ratio: float 
 
 def contents_page(document: Document, *, at: int = 0, title: str = "Contents") -> int:
     """Insert a contents page (from the outline, or from headings when there is none) at `at`,
-    each entry linked to its page. Returns how many entries it lists (up to one page's worth)."""
+    each entry linked to its page, continuing onto more pages when needed. Returns how many
+    entries it lists."""
     if not 0 <= at <= document.page_count:
         raise OpValidationError(f"position {at} is outside the document (0-{document.page_count})")
     entries = _entries(document) or find_headings(document)
     if not entries:
         raise OpValidationError("no bookmarks or headings to list")
     first = document.raw[0].rect if document.page_count else pymupdf.paper_rect("a4")
-    page = document.raw.new_page(at, width=first.width, height=first.height)
+    listed_entries = [entry for entry in entries if entry[2] >= 0]
+    per_page = int((first.height - 60 - 130) // 18) + 1
+    added = -(-len(listed_entries) // per_page)  # contents pages needed; later pages move on by this
+    for n in range(added):  # all of them first, so every link's target page already exists
+        document.raw.new_page(at + n, width=first.width, height=first.height)
+    page = document.raw[at]
     page.insert_text((72, 90), title, fontsize=20, fontname="hebo")
     y = 130.0
     listed = 0
-    for level, text, target in entries:
+    for level, text, target in listed_entries:
         if y > first.height - 60:
-            break
-        if target < 0:
-            continue
-        shown = target + 1 if target < at else target + 2  # the new page pushes later pages on by one
+            page = document.raw[at + listed // per_page]
+            y = 130.0  # the same rows on every page, so `added` counted them right
+        shown = target + 1 if target < at else target + 1 + added
         indent = 72 + 18 * (level - 1)
         label = text if len(text) <= 70 else text[:67] + "..."
         page.insert_text((indent, y), label, fontsize=11)
@@ -341,6 +346,7 @@ def extract_attachment(document: Document, name: str, out: str, *, overwrite: bo
     """Save one attachment to `out`; returns its size in bytes. The document is unchanged."""
     _check_attachment(document, name)
     target = Path(out)
+    refuse_own_file(document, target)
     if target.exists() and not overwrite:
         raise OverwriteRefusedError(f"{target} already exists; pass overwrite to replace it")
     if not target.parent.is_dir():

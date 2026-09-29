@@ -327,3 +327,13 @@ def test_structure_commands_plan_and_run(tmp_path: Path) -> None:
             _apply(doc, op)
     assert doc.raw.metadata["author"] == "Kim" and doc.page_count == 4
     assert doc.raw.embfile_names() == ["a.csv"]
+
+
+@pytest.mark.feature("DOC-03")
+def test_long_outline_continues_onto_more_contents_pages(tmp_path: Path) -> None:
+    doc = _doc(tmp_path, 3)
+    _apply(doc, {"op": "set_bookmarks", "entries": [(1, f"Entry {n}", n % 3) for n in range(120)]})
+    assert _apply(doc, {"op": "contents_page"}) == 120
+    assert doc.page_count == 7  # four contents pages
+    links = [link for i in range(4) for link in doc.raw[i].get_links()]
+    assert len(links) == 120 and {link["page"] for link in links} == {4, 5, 6}

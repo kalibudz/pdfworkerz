@@ -247,3 +247,17 @@ def test_nan_and_negative_geometry_are_refused(tmp_path: Path) -> None:
         parse_op({"op": "crop_pages", "page_indices": [0], "box": (0, 0, float("nan"), 100)})
     with pytest.raises(OpValidationError, match="can't be negative"):
         _apply(doc, {"op": "n_up", "cols": 2, "rows": 1, "gap": -5})
+
+
+@pytest.mark.feature("ORG-10")
+def test_resizing_several_pages_keeps_links_between_them(tmp_path: Path) -> None:
+    source = pymupdf.open()
+    for n in range(1, 4):
+        source.new_page().insert_text((72, 72), f"Page {n}")
+    source[0].insert_link({"kind": pymupdf.LINK_GOTO, "from": pymupdf.Rect(72, 60, 150, 80), "page": 2})
+    source[2].insert_link({"kind": pymupdf.LINK_GOTO, "from": pymupdf.Rect(72, 60, 150, 80), "page": 0})
+    source.save(tmp_path / "x.pdf")
+    doc = Document.open(tmp_path / "x.pdf")
+    _apply(doc, {"op": "resize_pages", "page_indices": [0, 1, 2], "size": "a5"})
+    targets = [(i, link["page"]) for i in range(3) for link in doc.raw[i].get_links()]
+    assert targets == [(0, 2), (2, 0)]

@@ -23,7 +23,7 @@ from engine.design import Color, _color
 from engine.document import Document
 from engine.errors import OpValidationError, OverwriteRefusedError
 from engine.geometry import page_bounds
-from engine.pages import _check_indices
+from engine.pages import _check_indices, refuse_own_file
 
 Rect = tuple[float, float, float, float]
 Point = tuple[float, float]
@@ -356,6 +356,7 @@ def summary(
     """Write every annotation (page, kind, author, comment, marked text) to `out`. The document
     is unchanged. Returns how many were listed."""
     target = Path(out)
+    refuse_own_file(document, target)
     if target.exists() and not overwrite:
         raise OverwriteRefusedError(f"{target} already exists; pass overwrite to replace it")
     if not target.parent.is_dir():

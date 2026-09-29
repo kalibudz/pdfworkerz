@@ -163,6 +163,17 @@ def test_flatten_draws_annotations_into_the_page(tmp_path: Path) -> None:
     assert _apply(doc, {"op": "flatten_annotations"}) == 0
 
 
+@pytest.mark.feature("ANN-04")
+def test_flatten_leaves_links_clickable(tmp_path: Path) -> None:
+    doc = _doc(tmp_path)
+    doc.raw[0].insert_link(
+        {"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(72, 90, 200, 104), "uri": "https://example.com"}
+    )
+    _apply(doc, {"op": "add_note", "page_index": 0, "point": (400, 90), "text": "flatten me"})
+    assert _apply(doc, {"op": "flatten_annotations"}) == 1
+    assert [link["uri"] for link in doc.raw[0].get_links()] == ["https://example.com"]
+
+
 # -- ANN-05 summary --
 
 
@@ -284,3 +295,13 @@ def test_annotation_commands_plan_and_run(tmp_path: Path) -> None:
         for op in parse_command(command, page_count=2).ops:
             _apply(doc, op)
     assert out.read_text(encoding="utf-8").count("\n") == 6  # header + 4 underlines + 1 note
+
+
+@pytest.mark.feature("ANN-05")
+def test_summary_never_replaces_the_open_document(tmp_path: Path) -> None:
+    doc = _doc(tmp_path)
+    with pytest.raises(OpValidationError, match="the open document itself"):
+        _apply(doc, {"op": "annotation_summary", "out": str(tmp_path / "a.pdf"), "overwrite": True})
+    with pytest.raises(OpValidationError, match="is a folder"):
+        _apply(doc, {"op": "annotation_summary", "out": str(tmp_path), "overwrite": True})
+    assert (tmp_path / "a.pdf").read_bytes().startswith(b"%PDF")

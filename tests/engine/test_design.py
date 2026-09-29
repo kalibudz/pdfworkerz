@@ -286,3 +286,31 @@ def test_design_commands_plan_the_matching_ops(tmp_path: Path) -> None:
     for command in ["number pages", 'bates "X-"', 'header "Top"', 'watermark "W"', "background grey", 'stamp "draft"']:
         for op in parse_command(command, page_count=4).ops:
             _apply(doc, op)
+
+
+@pytest.mark.feature("DES-06")
+@pytest.mark.parametrize("rotation", [90, 180, 270])
+def test_preset_stamp_reads_upright_on_rotated_pages(tmp_path: Path, rotation: int) -> None:
+    doc = _doc(tmp_path, 1, rotations=(rotation,))
+    _apply(doc, {"op": "stamp", "name": "approved"})
+    page = doc.raw[0]
+    box = _visible_words(page)["APPROVED"]
+    assert box in page.rect and box.x1 > page.rect.width - 60 and box.y0 < 100  # top right as seen
+    line = next(
+        ln for b in page.get_text("dict")["blocks"] for ln in b.get("lines", []) if "APPROVED" in ln["spans"][0]["text"]
+    )
+    direction = pymupdf.Point(line["dir"]) * page.rotation_matrix - pymupdf.Point(0, 0) * page.rotation_matrix
+    assert direction.x > 0.99
+
+
+@pytest.mark.feature("DES-05")
+def test_background_image_is_upright_on_a_rotated_page(tmp_path: Path) -> None:
+    image = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 20), False)
+    image.set_rect(image.irect, (255, 255, 255))
+    image.set_rect(pymupdf.IRect(0, 0, 8, 20), (255, 0, 0))  # red down the left edge
+    image.save(tmp_path / "edge.png")
+    doc = _doc(tmp_path, 1, rotations=(90,))
+    _apply(doc, {"op": "background", "image": str(tmp_path / "edge.png")})
+    pix = doc.raw[0].get_pixmap(dpi=36)
+    assert pix.pixel(2, pix.height // 2)[1] < 50  # red at the left as the reader sees it
+    assert pix.pixel(pix.width // 2, 2)[1] > 200  # not along the top

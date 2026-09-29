@@ -157,3 +157,18 @@ def test_grown_paragraph_undoes_in_one_step(corpus: Corpus, tmp_path: Path) -> N
     journal.undo()
     assert journal.document.raw[0].get_text() == before
     journal.document.close()
+
+
+@pytest.mark.feature("FNT-17")
+def test_growing_is_refused_when_new_lines_would_cover_an_image(tmp_path: Path) -> None:
+    doc = pymupdf.open()
+    page = doc.new_page()
+    for i, line in enumerate(
+        ["The first line of a paragraph that", "spans three lines at the left", "margin of the page."]
+    ):
+        page.insert_text((72, 100 + i * 14.4), line, fontsize=12, fontname="helv")
+    page.draw_rect(pymupdf.Rect(72, 140, 300, 200), color=(1, 0, 0), fill=(1, 0, 0))  # nothing else below
+    doc.save(tmp_path / "img.pdf")
+    document = Document.open(tmp_path / "img.pdf")
+    with pytest.raises(OpValidationError, match="over drawings"):
+        _reflow(document, new_text=LONG, grow=True)

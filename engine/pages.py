@@ -43,6 +43,15 @@ def _open_other(path: str | Path, password: str | None) -> pymupdf.Document:
     return other
 
 
+def refuse_own_file(document: Document, target: Path) -> None:
+    """An output file may never be the open document's own PDF: overwrite or not, that would
+    replace the file a later save (and an incremental save especially) still reads from."""
+    if document.source_path is not None and target.resolve() == document.source_path.resolve():
+        raise OpValidationError(f"{target} is the open document itself; write to a different file")
+    if target.is_dir():
+        raise OpValidationError(f"{target} is a folder; give a file name")
+
+
 def _refuse_overwrite(target: Path, overwrite: bool) -> None:
     if target.exists() and not overwrite:
         raise OverwriteRefusedError(f"{target} already exists; pass overwrite to replace it")
@@ -160,6 +169,7 @@ def extract_pages(document: Document, pages: list[int], out: str | Path, *, over
     is unchanged. An encrypted document's pages are written encrypted, with its passwords."""
     _check_indices(document, pages)
     target = Path(out)
+    refuse_own_file(document, target)
     _refuse_overwrite(target, overwrite)
     new = _selected(document, pages)
     try:
@@ -239,6 +249,7 @@ def split(
         raise OpValidationError(f"{directory} is not a folder")
     targets = [directory / f"{stem}.part{n}.pdf" for n in range(1, len(parts) + 1)]
     for target in targets:
+        refuse_own_file(document, target)
         _refuse_overwrite(target, overwrite)
     return [
         SplitPart(extract_pages(document, pages, target, overwrite=True), pages)
