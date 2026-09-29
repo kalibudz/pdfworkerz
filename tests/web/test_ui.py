@@ -1427,3 +1427,22 @@ def test_apply_uses_the_page_that_was_previewed(page: Page, app_url: str, corpus
     assert page.query_selector(".pw-span-box:has-text('Checked')") is None  # not on page 2
     page.click(".pw-toolbar button:has-text('Prev')")
     page.wait_for_selector(".pw-span-box:has-text('Checked')", timeout=10000)
+
+
+@pytest.mark.feature("UI-01")
+@pytest.mark.parametrize("width", [1400, 1000])
+def test_the_viewer_fits_the_window_without_sideways_scrolling(
+    browser: object, app_url: str, corpus: Corpus, width: int
+) -> None:
+    """Found in a real-scenario run: the toolbar didn't wrap, so new buttons pushed the page
+    wider than the window, and the grid gave its flexible row to the command bar."""
+    page = browser.new_page(viewport={"width": width, "height": 850})  # type: ignore[attr-defined]
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.simple))
+    _wait_overlay_ready(page)
+    assert page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth") <= 0
+    toolbar = page.eval_on_selector(".pw-toolbar", "el => el.getBoundingClientRect().height")
+    area = page.eval_on_selector(".pw-page-area", "el => el.getBoundingClientRect().height")
+    assert area > toolbar * 3  # the page area, not the command bar, takes the spare height
+    page.close()

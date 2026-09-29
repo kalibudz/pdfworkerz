@@ -193,13 +193,20 @@ button {
 .pw-viewer {
   height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  /* toolbar, command bar, page area (the flexible row), history */
+  grid-template-rows: auto auto 1fr auto;
+  min-width: 0;
+}
+
+.pw-viewer > * {
+  min-width: 0;
 }
 
 .pw-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px 10px;
   padding: 8px 14px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
