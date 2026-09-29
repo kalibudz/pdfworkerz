@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from engine.ops.base import InspectOp, Op, RenderPageOp, op_registry, parse_op
 from engine.ops.batch import BatchOp
+from engine.ops.design import BackgroundOp, BatesOp, HeaderFooterOp, PageNumbersOp, StampOp, WatermarkOp
 from engine.ops.images import (
     CropImageOp,
     DeleteImageOp,
@@ -41,7 +42,9 @@ from engine.ops.text import DeleteTextOp, InsertTextOp, ReflowTextOp, ReplaceTex
 
 __all__ = [
     "AddLinkOp",
+    "BackgroundOp",
     "BatchOp",
+    "BatesOp",
     "BookletOp",
     "CorrectWordOp",
     "CropImageOp",
@@ -55,6 +58,7 @@ __all__ = [
     "EditShapeOp",
     "ExtractPagesOp",
     "FindBlankPagesOp",
+    "HeaderFooterOp",
     "InsertImageOp",
     "InsertPagesOp",
     "InsertTextOp",
@@ -66,6 +70,7 @@ __all__ = [
     "Op",
     "PageImagesOp",
     "PageLinksOp",
+    "PageNumbersOp",
     "PageShapesOp",
     "ReflowTextOp",
     "RemoveBlankPagesOp",
@@ -80,8 +85,10 @@ __all__ = [
     "RotatePagesOp",
     "SpellCheckOp",
     "SplitOp",
+    "StampOp",
     "UncropPagesOp",
     "UpdateLinkOp",
+    "WatermarkOp",
     "op_registry",
     "parse_op",
 ]

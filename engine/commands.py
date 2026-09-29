@@ -35,6 +35,7 @@ start: replace | delete | insert | set | undo | redo
      | delete_pages | rotate_pages | move_pages | duplicate_pages | insert_blank
      | extract_pages | split_doc | merge_doc | remove_blank
      | crop_pages | uncrop_pages | resize_pages | impose
+     | number_pages | bates | header_footer | watermark | background | stamp
 
 replace: REPLACE target WITH STRING (option | scope)*
 delete: DELETE target (option | scope)*
@@ -59,6 +60,12 @@ uncrop_pages: UNCROP pageset
 resize_pages: RESIZE pageset TO SIZENAME LANDSCAPE? (WITHOUT SCALING)?
 impose: IMPOSE number UP (ON SIZENAME LANDSCAPE?)?   -> impose_n_up
       | IMPOSE AS? BOOKLET (ON SIZENAME LANDSCAPE?)? -> impose_booklet
+number_pages: NUMBERVERB PAGES? (FROM number)? (EXCEPT pageset)? (AT (POSNAME | CENTER))? (AS STRING)?
+bates: BATES STRING? (FROM number)?
+header_footer: (HEADER | FOOTER) STRING (LEFT | CENTER | RIGHT)? scope?
+watermark: WATERMARK STRING (BEHIND | scope)*
+background: BACKGROUND (HEXCOLOR | COLORNAME) scope?
+stamp: STAMP STRING (AT (POSNAME | CENTER) | scope)*
 
 pageset: PAGE NUMBER            -> ps_one
        | PAGES ranges           -> ps_ranges
@@ -169,6 +176,20 @@ KEYWORDS: dict[str, tuple[str, ...]] = {
     "UP": ("up",),
     "AS": ("as", "a"),
     "BOOKLET": ("booklet",),
+    "NUMBERVERB": ("number",),
+    "FROM": ("from",),
+    "EXCEPT": ("except", "skipping", "skip"),
+    "POSNAME": ("top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"),
+    "CENTER": ("center", "centre"),
+    "LEFT": ("left",),
+    "RIGHT": ("right",),
+    "BATES": ("bates",),
+    "HEADER": ("header",),
+    "FOOTER": ("footer",),
+    "WATERMARK": ("watermark",),
+    "BEHIND": ("behind",),
+    "BACKGROUND": ("background",),
+    "STAMP": ("stamp",),
 }
 GRAMMAR = GRAMMAR_TEMPLATE.replace(
     "{keywords}",
@@ -194,6 +215,13 @@ VERBS = [
     "uncrop",
     "resize",
     "impose",
+    "number",
+    "bates",
+    "header",
+    "footer",
+    "watermark",
+    "background",
+    "stamp",
 ]
 EXAMPLES = [
     'replace "old" with "new" on all pages',
@@ -219,17 +247,24 @@ EXAMPLES = [
     "resize all pages to letter",
     "impose 2 up",
     "impose as booklet",
+    'number pages from 1 except page 1 at bottom-right as "Page {n} of {total}"',
+    'bates "ACME-" from 1',
+    'footer "Confidential" left on all pages',
+    'watermark "DRAFT" behind',
+    "background #fff8e0 on page 1",
+    'stamp "approved" at top-right on page 1',
 ]
 # SPEC.md section 8.3's other actions, refused with the phase that brings them.
 LATER_ACTIONS = {
-    **dict.fromkeys(["number", "bates", "watermark", "stamp", "header", "footer", "bookmark"], "P5 (page design)"),
+    **dict.fromkeys(["bookmark", "attach", "label"], "P5 (document structure, next in this phase)"),
     **dict.fromkeys(["redact", "protect", "unlock", "sign", "fill", "flatten"], "P6 (forms, signatures, security)"),
     **dict.fromkeys(["ocr", "convert"], "P7 (OCR and conversions)"),
     **dict.fromkeys(["compress", "compare"], "P8 (optimize and compare)"),
 }
 SYNTAX_HINT = (
     "Text commands: replace, delete, insert, set; page commands: delete pages, rotate, move, duplicate, "
-    "insert N blank pages, extract, split, merge, remove blank pages; and undo, redo. "
+    "insert N blank pages, extract, split, merge, remove blank pages, crop, uncrop, resize, impose; "
+    "page design: number pages, bates, header, footer, watermark, background, stamp; and undo, redo. "
     'Put text in "double quotes", '
     "a regular expression in /slashes/, and pages as: on page 3 | on pages 1-3,5 | on all pages | on odd pages."
 )
@@ -800,6 +835,94 @@ def _impose_booklet(source: str, children: list[Any], page_count: int, _current:
     )
 
 
+def _position(children: list[Any], default: str) -> str:
+    named = _tokens(children, "POSNAME") + _tokens(children, "CENTER")
+    return str(named[0]).lower().replace("centre", "center") if named else default
+
+
+def _number_pages(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    numbers = _numbers(children)
+    start = numbers[0] if numbers else 1.0
+    if start != int(start):
+        raise CommandError(f"start numbering at a whole number, not {start:g}")
+    op: dict[str, Any] = {"op": "page_numbers", "start": int(start), "position": _position(children, "bottom-center")}
+    skip = _pageset(children, page_count) if _parts(children, "pageset") else []
+    if skip:
+        op["skip_page_indices"] = skip
+    templates = _strings(children)
+    if templates:
+        op["template"] = templates[0]
+    skipping = f", skipping page(s) {_page_list(skip)}" if skip else ""
+    return CommandPlan(source, f"Number pages from {int(start)} at the {op['position']}{skipping}", [op])
+
+
+def _bates(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    prefixes = _strings(children)
+    numbers = _numbers(children)
+    start = numbers[0] if numbers else 1.0
+    if start != int(start) or start < 0:
+        raise CommandError(f"Bates numbers start at a whole number, not {start:g}")
+    prefix = prefixes[0] if prefixes else ""
+    op = {"op": "bates", "prefix": prefix, "start": int(start)}
+    last = int(start) + page_count - 1
+    return CommandPlan(source, f"Bates-number every page, {prefix}{int(start):06d} to {prefix}{last:06d}", [op])
+
+
+def _header_footer(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    (text,) = _strings(children)
+    where = "footer" if _tokens(children, "FOOTER") else "header"
+    sides = _tokens(children, "LEFT") + _tokens(children, "RIGHT")
+    column = str(sides[0]).lower() if sides else "center"
+    fields = ["", "", ""]
+    fields[["left", "center", "right"].index(column)] = text
+    pages = _pages(_scope(children), page_count)
+    op: dict[str, Any] = {"op": "header_footer", where: fields}
+    if pages is not None:
+        op["page_indices"] = pages
+    return CommandPlan(source, f'Add "{text}" to the {column} of the {where} {_describe_pages(pages)}', [op])
+
+
+def _watermark(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    (text,) = _strings(children)
+    if not text:
+        raise CommandError("give the watermark text")
+    behind = bool(_tokens(children, "BEHIND"))
+    pages = _pages(_scope(children), page_count)
+    op: dict[str, Any] = {"op": "watermark", "text": text, "behind": behind}
+    if pages is not None:
+        op["page_indices"] = pages
+    layer = "behind" if behind else "over"
+    return CommandPlan(source, f'Watermark "{text}" {layer} the content {_describe_pages(pages)}', [op])
+
+
+def _background(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    (value,) = [str(t).lower() for t in _tokens(children, "HEXCOLOR") + _tokens(children, "COLORNAME")]
+    pages = _pages(_scope(children), page_count)
+    op: dict[str, Any] = {"op": "background", "color": value}
+    if pages is not None:
+        op["page_indices"] = pages
+    return CommandPlan(source, f"Put a {value} background {_describe_pages(pages)}", [op])
+
+
+def _stamp(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    from engine.design import STAMPS
+
+    (text,) = _strings(children)
+    pages = _pages(_scope(children), page_count)
+    op: dict[str, Any] = {"op": "stamp", "position": _position(children, "top-right")}
+    if text.lower() in STAMPS:
+        op["name"] = text.lower()
+        kind = f'the "{text.lower()}" stamp'
+    elif text:
+        op["text"] = text
+        kind = f'a "{text}" stamp'
+    else:
+        raise CommandError("give the stamp: " + ", ".join(STAMPS) + ", or your own text")
+    if pages is not None:
+        op["page_indices"] = pages
+    return CommandPlan(source, f"Put {kind} at the {op['position']} {_describe_pages(pages)}", [op])
+
+
 _BUILDERS = {
     "replace": _replace,
     "delete": _delete,
@@ -821,6 +944,12 @@ _BUILDERS = {
     "resize_pages": _resize_pages,
     "impose_n_up": _impose_n_up,
     "impose_booklet": _impose_booklet,
+    "number_pages": _number_pages,
+    "bates": _bates,
+    "header_footer": _header_footer,
+    "watermark": _watermark,
+    "background": _background,
+    "stamp": _stamp,
 }
 
 

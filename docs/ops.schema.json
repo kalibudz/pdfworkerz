@@ -97,6 +97,557 @@
     },
     {
       "additionalProperties": false,
+      "description": "DES-01: number pages; `template` uses {n} and {total}.",
+      "properties": {
+        "op": {
+          "const": "page_numbers",
+          "default": "page_numbers",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Indices"
+        },
+        "skip_page_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skip Page Indices"
+        },
+        "template": {
+          "default": "{n}",
+          "title": "Template",
+          "type": "string"
+        },
+        "start": {
+          "default": 1,
+          "title": "Start",
+          "type": "integer"
+        },
+        "position": {
+          "default": "bottom-center",
+          "title": "Position",
+          "type": "string"
+        },
+        "size": {
+          "default": 10.0,
+          "title": "Size",
+          "type": "number"
+        },
+        "margin": {
+          "default": 30.0,
+          "title": "Margin",
+          "type": "number"
+        },
+        "font": {
+          "default": "helvetica",
+          "title": "Font",
+          "type": "string"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "default": "black",
+          "title": "Color"
+        }
+      },
+      "title": "PageNumbersOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DES-02: sequential Bates identifiers on every page; returns the first and last.",
+      "properties": {
+        "op": {
+          "const": "bates",
+          "default": "bates",
+          "title": "Op",
+          "type": "string"
+        },
+        "prefix": {
+          "default": "",
+          "title": "Prefix",
+          "type": "string"
+        },
+        "suffix": {
+          "default": "",
+          "title": "Suffix",
+          "type": "string"
+        },
+        "start": {
+          "default": 1,
+          "title": "Start",
+          "type": "integer"
+        },
+        "digits": {
+          "default": 6,
+          "title": "Digits",
+          "type": "integer"
+        },
+        "position": {
+          "default": "bottom-right",
+          "title": "Position",
+          "type": "string"
+        },
+        "size": {
+          "default": 9.0,
+          "title": "Size",
+          "type": "number"
+        },
+        "margin": {
+          "default": 20.0,
+          "title": "Margin",
+          "type": "number"
+        }
+      },
+      "title": "BatesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DES-03: left/center/right header and footer; {page}, {total}, {title}, {file}, {date}.",
+      "properties": {
+        "op": {
+          "const": "header_footer",
+          "default": "header_footer",
+          "title": "Op",
+          "type": "string"
+        },
+        "header": {
+          "default": [
+            "",
+            "",
+            ""
+          ],
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Header",
+          "type": "array"
+        },
+        "footer": {
+          "default": [
+            "",
+            "",
+            ""
+          ],
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Footer",
+          "type": "array"
+        },
+        "page_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Indices"
+        },
+        "skip_page_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skip Page Indices"
+        },
+        "size": {
+          "default": 9.0,
+          "title": "Size",
+          "type": "number"
+        },
+        "margin": {
+          "default": 30.0,
+          "title": "Margin",
+          "type": "number"
+        },
+        "font": {
+          "default": "helvetica",
+          "title": "Font",
+          "type": "string"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "default": "black",
+          "title": "Color"
+        },
+        "date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Date"
+        }
+      },
+      "title": "HeaderFooterOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DES-04: a text or image watermark, with opacity, rotation, and over or behind content.",
+      "properties": {
+        "op": {
+          "const": "watermark",
+          "default": "watermark",
+          "title": "Op",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "page_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Indices"
+        },
+        "size": {
+          "default": 60.0,
+          "title": "Size",
+          "type": "number"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "default": "gray",
+          "title": "Color"
+        },
+        "opacity": {
+          "default": 0.3,
+          "title": "Opacity",
+          "type": "number"
+        },
+        "rotation": {
+          "default": 45.0,
+          "title": "Rotation",
+          "type": "number"
+        },
+        "behind": {
+          "default": false,
+          "title": "Behind",
+          "type": "boolean"
+        },
+        "font": {
+          "default": "helvetica-bold",
+          "title": "Font",
+          "type": "string"
+        },
+        "scale": {
+          "default": 0.5,
+          "title": "Scale",
+          "type": "number"
+        }
+      },
+      "title": "WatermarkOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DES-05: a background color or image behind each page's content.",
+      "properties": {
+        "op": {
+          "const": "background",
+          "default": "background",
+          "title": "Op",
+          "type": "string"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "page_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Indices"
+        }
+      },
+      "title": "BackgroundOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "DES-06: a preset stamp annotation (\"approved\", \"draft\", ...) or a custom text stamp.",
+      "properties": {
+        "op": {
+          "const": "stamp",
+          "default": "stamp",
+          "title": "Op",
+          "type": "string"
+        },
+        "name": {
+          "default": "approved",
+          "title": "Name",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "page_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Indices"
+        },
+        "position": {
+          "default": "top-right",
+          "title": "Position",
+          "type": "string"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "default": "red",
+          "title": "Color"
+        },
+        "width": {
+          "default": 180.0,
+          "title": "Width",
+          "type": "number"
+        },
+        "margin": {
+          "default": 36.0,
+          "title": "Margin",
+          "type": "number"
+        }
+      },
+      "title": "StampOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "Every image placement on one page. Read-only, so -- like\nPageSpansOp -- never journaled; server/app.py serves it from a GET route.",
       "properties": {
         "op": {
