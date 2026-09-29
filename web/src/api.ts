@@ -183,6 +183,12 @@ export class Api {
     return await response.arrayBuffer();
   }
 
+  /** The edited document to hand to the user: keeps the original encryption, unlike documentFile. */
+  async documentDownload(documentId: string): Promise<ArrayBuffer> {
+    const response = await this.request(`/documents/${documentId}/download`);
+    return await response.arrayBuffer();
+  }
+
   /** UI-02/UI-03: every text span on one page, with its style and text state. */
   async pageSpans(documentId: string, pageIndex: number): Promise<SpanTrace[]> {
     const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/spans`);

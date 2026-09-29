@@ -56,6 +56,7 @@ from engine.errors import (
     PasswordRequiredError,
     PdfWorkerzError,
     RepairFailedError,
+    SaveFailedError,
     SaveNotPossibleError,
     WrongPasswordError,
 )
@@ -76,6 +77,7 @@ _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
     RepairFailedError: 422,
     OverwriteRefusedError: 409,
     SaveNotPossibleError: 409,
+    SaveFailedError: 409,
     EncryptionLostError: 422,
     NothingToUndoError: 409,
     OpValidationError: 400,
@@ -289,6 +291,13 @@ def document_file(document_id: str, journal: JournalDep) -> Response:
     UI-01's page canvas loads this into pdf.js for client-side rendering,
     rather than round-tripping every page through the PNG render route."""
     return Response(content=journal.document.to_bytes(), media_type="application/pdf")
+
+
+@router.get("/documents/{document_id}/download")
+def document_download(document_id: str, journal: JournalDep) -> Response:
+    """The document's current state for the user to keep: unlike .../file (decrypted, for
+    pdf.js to render), this keeps the original encryption and passwords (SEC-03)."""
+    return Response(content=journal.document.snapshot(), media_type="application/pdf")
 
 
 @router.post("/documents/{document_id}/undo", response_model=UndoRedoResponse)

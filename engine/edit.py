@@ -58,6 +58,7 @@ _MIN_CONTAINMENT_MATCH_LENGTH = 6  # see _find_font_entry's fallback pass
 _REDACT_HALF = 0.2  # half-size (pt) of the per-glyph redaction square, see _redact_spans
 _AA_MARGIN_PX = 2  # anti-aliasing spill around an edited box, at VERIFY_DPI
 _OUTSIDE_TOLERANCE = 1e-5  # fraction of page pixels; a few stray pixels at most
+_OVERLAP_MIN_PT = 1.0  # adjacent spans' boxes touch, and kerning can nudge them together
 # Verified at runtime (pymupdf 1.28.2); missing from pymupdf's stub like PDF_ENCRYPT_KEEP
 # (see engine/document.py's note on the same class of gap).
 _REDACT_KWARGS: dict[str, int] = {
@@ -79,12 +80,19 @@ class VerificationResult:
     outside_changed_fraction: float = 0.0
     """Fraction of the page's pixels that changed *outside* the edited area (the removed
     text's boxes plus the newly drawn text's): SPEC.md 5.6's collateral-damage check."""
+    overlaps_other_text: bool = False
+    """New text was drawn on top of text the edit didn't touch (e.g. a longer replacement
+    running into the next word). Those pixels sit inside the new text's own box, so the
+    outside-the-edit check alone can't see it."""
+    misplaced_text: bool = False
+    """New text appeared away from where the edit drew it (from its start point to its end point)."""
     looks_right: bool = dataclasses.field(init=False)
-    """All three checks passed. A real field, not a property, so it reaches the JSON the UI reads."""
+    """Every check passed. A real field, not a property, so it reaches the JSON the UI reads."""
 
     def __post_init__(self) -> None:
-        ok = self.text_matches and self.diff.changed_fraction > 0.0
-        object.__setattr__(self, "looks_right", ok and self.outside_changed_fraction <= _OUTSIDE_TOLERANCE)
+        ok = self.text_matches and self.diff.changed_fraction > 0.0 and not self.overlaps_other_text
+        ok = ok and not self.misplaced_text and self.outside_changed_fraction <= _OUTSIDE_TOLERANCE
+        object.__setattr__(self, "looks_right", ok)
 
 
 @dataclass(frozen=True)
@@ -134,18 +142,30 @@ def _verify_edit(
     before: _BeforeEdit,
     expected_text: str,
     removed: list[SpanTrace],
+    drawn: list[_DrawnLine] | None = None,
 ) -> VerificationResult:
     """FNT-12: confirm `expected_text` is now really on the page, measure how much
-    of the page changed, and how much changed outside the edit itself (the
-    `removed` spans' boxes plus every span that is new since `before`)."""
+    of the page changed, how much changed outside the edit itself (the `removed`
+    spans' boxes plus every span that is new since `before`), whether the new
+    text landed on top of untouched text, and whether it landed where it was
+    `drawn` (each line's start point, end point and size)."""
     page = document.raw[page_index]
     after = render_to_array(document.raw, page_index, dpi=VERIFY_DPI)
     diff = pixel_diff(before.render, after)
     flat_text = "".join(span.style.text for span in extract_page_spans(document.raw, page_index))
     text_matches = expected_text in flat_text if expected_text else True
 
+    removed_keys = {(span.style.text, tuple(round(v, 2) for v in span.style.bbox)) for span in removed}
+    untouched = [pymupdf.Rect(key[1]) for key in before.span_keys if key not in removed_keys]
+    new_boxes = [pymupdf.Rect(key[1]) for key in _span_keys(page) if key not in before.span_keys]
+    overlaps = any(_overlap(box, other) for box in new_boxes for other in untouched)
+    misplaced = False
+    if drawn:
+        expected = [_drawn_area(line) for line in drawn]
+        misplaced = any(not any(box.intersects(area) for area in expected) for box in new_boxes)
+
     boxes: list[tuple[float, ...]] = [span.style.bbox for span in removed]
-    boxes += [key[1] for key in _span_keys(page) if key not in before.span_keys]
+    boxes += [(box.x0, box.y0, box.x1, box.y1) for box in new_boxes]
     scale = VERIFY_DPI / 72
     allowed = []
     for box in boxes:
@@ -159,8 +179,29 @@ def _verify_edit(
             )
         )
     return VerificationResult(
-        text_matches=text_matches, diff=diff, outside_changed_fraction=changed_outside(before.render, after, allowed)
+        text_matches=text_matches,
+        diff=diff,
+        outside_changed_fraction=changed_outside(before.render, after, allowed),
+        overlaps_other_text=overlaps,
+        misplaced_text=misplaced,
     )
+
+
+_DrawnLine = tuple[tuple[float, float], tuple[float, float], float]
+"""(start point, end point, font size) of one drawn line of text."""
+
+
+def _drawn_area(line: _DrawnLine) -> pymupdf.Rect:
+    """Where a drawn line's glyphs can be: its baseline segment, grown by the font size."""
+    (x0, y0), (x1, y1), size = line
+    area = pymupdf.Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+    return pymupdf.Rect(area.x0 - size, area.y0 - size * 1.5, area.x1 + size, area.y1 + size * 1.5)
+
+
+def _overlap(a: pymupdf.Rect, b: pymupdf.Rect) -> bool:
+    """Real overlap, not glyph boxes that merely touch or kern into each other."""
+    inner = a & b
+    return not inner.is_empty and inner.width > _OVERLAP_MIN_PT and inner.height > _OVERLAP_MIN_PT
 
 
 def _resolve_font_resource(page: pymupdf.Page, resolution: FontResolution) -> str:
@@ -278,27 +319,46 @@ def draw_styled_text(
     spacing/scaling/rise/render mode and `rotation_degrees`, through the font
     `resolution` selected. Returns the baseline point just past the last character.
 
-    Text with default spacing (Tc=0, Tw=0, Tz=100%) and no rotation is drawn
-    with a single call, so it stays one contiguous span for any edit that
-    follows (confirmed: per-character calls fragment texttrace's spans one
-    character each, which then only a single-character search can find).
-    Non-default spacing or rotation still needs per-character control, and
-    accepts that fragmentation as a known trade-off; the one upside is that
-    the font's own kerning pairs (FNT-09) are applied there too, since
-    PyMuPDF's own text insertion never applies any kerning at all, in
-    either drawing path (also confirmed empirically).
+    Text with default spacing (Tc=0, Tw=0, Tz=100%) and no rise is drawn with
+    a single call, so it stays one contiguous span for any edit that follows
+    (confirmed: per-character calls fragment texttrace's spans one character
+    each, which then only a single-character search can find). Non-default
+    spacing or rise still needs per-character control, and accepts that
+    fragmentation as a known trade-off; the one upside is that the font's own
+    kerning pairs (FNT-09) are applied there too, since PyMuPDF's own text
+    insertion never applies any kerning at all, in either drawing path (also
+    confirmed empirically).
+
+    Rotated text is drawn rotated: every insert_text call gets
+    ``morph=(point, Matrix(-rotation_degrees))`` -- measured on pymupdf 1.28.2,
+    that is the matrix whose output texttrace reports at `rotation_degrees`.
+    Without it, rotated text came back as upright glyphs stepped along the angle.
     """
     if not text:
         return origin
 
     fontname = _resolve_font_resource(page, resolution)
     font = _load_font(resolution)
+    rotation = pymupdf.Matrix(-rotation_degrees) if rotation_degrees else None
 
-    if rotation_degrees == 0.0 and text_state.rise == 0.0 and _is_default_spacing(text_state):
+    def morph_at(x: float, y: float) -> tuple[pymupdf.Point, pymupdf.Matrix] | None:
+        return (pymupdf.Point(x, y), rotation) if rotation is not None else None
+
+    angle = math.radians(rotation_degrees)
+    cos_a, sin_a = math.cos(angle), math.sin(angle)
+
+    if text_state.rise == 0.0 and _is_default_spacing(text_state):
         page.insert_text(
-            origin, text, fontsize=font_size, fontname=fontname, color=color, render_mode=text_state.render_mode
+            origin,
+            text,
+            fontsize=font_size,
+            fontname=fontname,
+            color=color,
+            render_mode=text_state.render_mode,
+            morph=morph_at(*origin),
         )
-        return (origin[0] + font.text_length(text, fontsize=font_size), origin[1])
+        length = font.text_length(text, fontsize=font_size)
+        return (origin[0] + length * cos_a, origin[1] + length * sin_a)
 
     widths = font.char_lengths(text, fontsize=font_size)
     # FNT-09: PyMuPDF applies no kerning at all in either drawing path (confirmed
@@ -306,9 +366,8 @@ def draw_styled_text(
     # character positioning is already happening for another reason anyway.
     kern_pairs = build_kern_pairs(resolution.font_bytes) if resolution.font_bytes else {}
 
-    angle = math.radians(rotation_degrees)
-    cos_a, sin_a = math.cos(angle), math.sin(angle)
-    rise_dx, rise_dy = -text_state.rise * sin_a, -text_state.rise * cos_a
+    # Rise moves along the glyphs' "up": (sin, -cos) for a text direction (cos, sin) in y-down space.
+    rise_dx, rise_dy = text_state.rise * sin_a, -text_state.rise * cos_a
 
     x, y = origin
     previous_char: str | None = None
@@ -324,6 +383,7 @@ def draw_styled_text(
             fontname=fontname,
             color=color,
             render_mode=text_state.render_mode,
+            morph=morph_at(x + rise_dx, y + rise_dy),
         )
         advance = advance_for_char(base_width, char, text_state)
         x += advance * cos_a
@@ -495,7 +555,8 @@ def replace_span_text(
         resolution=resolution,
     )
 
-    verification = _verify_edit(document, page_index, before, new_text, [span]) if before is not None else None
+    drawn = [(origin, end_point, font_size)] if new_text else []
+    verification = _verify_edit(document, page_index, before, new_text, [span], drawn) if before is not None else None
     note = resolution.note + _text_state_note(span)
     if alignment != "left":
         note += f"; kept the line's {alignment} alignment"
@@ -555,7 +616,10 @@ def copy_span_style(
         resolution=resolution,
     )
 
-    verification = _verify_edit(document, target_page_index, before, text, [target]) if before is not None else None
+    drawn = [(target.style.chars[0].origin, end_point, font_size)]
+    verification = (
+        _verify_edit(document, target_page_index, before, text, [target], drawn) if before is not None else None
+    )
     return EditResult(
         tier=resolution.tier,
         confidence=resolution.confidence,
@@ -599,7 +663,8 @@ def insert_text_near(
         resolution=resolution,
     )
 
-    verification = _verify_edit(document, page_index, before, text, []) if before is not None else None
+    drawn = [(origin, end_point, font_size)]
+    verification = _verify_edit(document, page_index, before, text, [], drawn) if before is not None else None
     return EditResult(
         tier=resolution.tier,
         confidence=resolution.confidence,
@@ -693,7 +758,10 @@ def move_resize_block(
             )
         )
     if before is not None:
-        verification = _verify_edit(document, page_index, before, placed[0][0], list(block.lines))
+        drawn = [
+            (origin, result.end_point, font_size) for (_t, origin, _l), result in zip(placed, results, strict=True)
+        ]
+        verification = _verify_edit(document, page_index, before, placed[0][0], list(block.lines), drawn)
         results[-1] = dataclasses.replace(results[-1], verification=verification)
     return results
 

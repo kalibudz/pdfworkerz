@@ -383,7 +383,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   }
 
   async function download(): Promise<void> {
-    const bytes = await options.api.documentFile(options.documentId);
+    const bytes = await options.api.documentDownload(options.documentId);
     const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
     const link = document.createElement("a");
     link.href = url;

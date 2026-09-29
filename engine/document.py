@@ -26,6 +26,7 @@ from engine.errors import (
     OverwriteRefusedError,
     PasswordRequiredError,
     RepairFailedError,
+    SaveFailedError,
     SaveNotPossibleError,
     WrongPasswordError,
 )
@@ -261,24 +262,35 @@ class Document:
             save_kwargs["owner_pw"] = owner_password or ""
             save_kwargs["user_pw"] = user_password or ""
 
-        if chosen_mode == "incremental":
-            self._doc.save(str(target), incremental=True, **save_kwargs)
-        elif writes_original and self._file_backed:
-            # PyMuPDF refuses a full (non-incremental) save back to the file it read from
-            # -- the writer can't rewrite a file it's still reading. Write to a sibling
-            # temp file and atomically replace the original (SPEC.md section 10: "atomic
-            # writes, temp file then rename"), so a crash mid-write never corrupts it.
-            tmp = target.with_name(f".{target.name}.pdfworkerz-tmp")
-            self._doc.save(str(tmp), garbage=4, deflate=True, **save_kwargs)
-            self._doc.close()  # release the read handle on `target` before replacing it (required on Windows)
-            Path(tmp).replace(target)
-            self._reopen(target, user_password)
-        else:
-            tmp = target.with_name(f".{target.name}.pdfworkerz-tmp")
-            self._doc.save(str(tmp), garbage=4, deflate=True, **save_kwargs)
-            Path(tmp).replace(target)
-            if writes_original:
+        tmp = target.with_name(f".{target.name}.pdfworkerz-tmp")
+        unsaved = self.snapshot()  # to recover the edits if the file can't be replaced after closing it
+        try:
+            if chosen_mode == "incremental":
+                self._doc.save(str(target), incremental=True, **save_kwargs)
+            elif writes_original and self._file_backed:
+                # PyMuPDF refuses a full (non-incremental) save back to the file it read from
+                # -- the writer can't rewrite a file it's still reading. Write to a sibling
+                # temp file and atomically replace the original (SPEC.md section 10: "atomic
+                # writes, temp file then rename"), so a crash mid-write never corrupts it.
+                self._doc.save(str(tmp), garbage=4, deflate=True, **save_kwargs)
+                self._doc.close()  # release the read handle on `target` before replacing it (required on Windows)
+                Path(tmp).replace(target)
                 self._reopen(target, user_password)
+            else:
+                self._doc.save(str(tmp), garbage=4, deflate=True, **save_kwargs)
+                Path(tmp).replace(target)
+                if writes_original:
+                    self._reopen(target, user_password)
+        except (OSError, pymupdf.mupdf.FzErrorBase) as exc:
+            tmp.unlink(missing_ok=True)
+            if self._doc.is_closed:  # closed for the replace, which then failed: keep the edits
+                recovered = pymupdf.open(stream=unsaved, filetype="pdf")
+                if recovered.needs_pass:  # read before authenticate(), see _reopen
+                    recovered.authenticate(self._password_used or "")
+                remember_password(recovered, self._password_used)
+                self._doc = recovered
+                self._file_backed = False
+            raise SaveFailedError(f"could not write {target}: {exc}") from exc
 
         return SaveResult(path=target, mode=chosen_mode, bytes_written=target.stat().st_size, note=note)
 
@@ -288,9 +300,13 @@ class Document:
             self._doc.close()
         self._doc = pymupdf.open(str(target), filetype="pdf")
         password = new_user_password if new_user_password is not None else self._password_used
-        if self._doc.needs_pass and not self._doc.authenticate(password or ""):
+        # Read needs_pass exactly once, before authenticate(): measured on pymupdf 1.28.2,
+        # reading it *after* a successful authenticate() breaks decryption (every page then
+        # reads blank, and the next overwrite save wrote that blank document to disk).
+        needs_pass = bool(self._doc.needs_pass)
+        if needs_pass and not self._doc.authenticate(password or ""):
             raise WrongPasswordError(f"saved {target}, but could not reopen it with the document's password")
-        self._password_used = password if self._doc.needs_pass else self._password_used
+        self._password_used = password if needs_pass else self._password_used
         remember_password(self._doc, self._password_used)
         self._file_backed = True
 

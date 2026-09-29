@@ -12,7 +12,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import typer
 
@@ -123,6 +123,13 @@ def _save(document: Document, path: Path, out: Path | None, overwrite: bool) -> 
     return result.path
 
 
+def _run(op: Op, document: Document) -> Any:
+    """Apply an Op after the same page-range check the journal and server do, so an
+    out-of-range --page is a clear error, not pymupdf's raw IndexError."""
+    op.check_pages(document)
+    return op.apply(document)
+
+
 @app.command()
 def inspect(
     path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to inspect")],
@@ -131,7 +138,7 @@ def inspect(
     """Print the document inspection report (COR-03) as JSON."""
     try:
         with Document.open(path, password=password) as document:
-            report = InspectOp(password=password or "").apply(document)
+            report = _run(InspectOp(password=password or ""), document)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
     typer.echo(report.model_dump_json(indent=2))
@@ -148,7 +155,7 @@ def render(
     """Render one page to a PNG file (COR-02)."""
     try:
         with Document.open(path, password=password) as document:
-            png_bytes = RenderPageOp(page_index=page, dpi=dpi).apply(document)
+            png_bytes = _run(RenderPageOp(page_index=page, dpi=dpi), document)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
     output = out or path.with_name(f"{path.stem}.p{page}.png")
@@ -166,7 +173,7 @@ def spans(
     data UI-02's click-to-edit overlay and UI-03's inspector panel use."""
     try:
         with Document.open(path, password=password) as document:
-            traces = PageSpansOp(page_index=page).apply(document)
+            traces = _run(PageSpansOp(page_index=page), document)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
     typer.echo(json.dumps([trace.model_dump(mode="json") for trace in traces], indent=2))
@@ -213,7 +220,7 @@ def replace(
                 require_tier=require_tier,
                 fit=fit,
             )
-            results = op.apply(document)
+            results = _run(op, document)
             saved_to = _save(document, path, out, overwrite)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
@@ -247,7 +254,7 @@ def delete(
                 page_index=page,
                 require_tier=require_tier,
             )
-            results = op.apply(document)
+            results = _run(op, document)
             saved_to = _save(document, path, out, overwrite)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
@@ -284,7 +291,7 @@ def restyle(
                 page_index=page,
                 require_tier=require_tier,
             )
-            results = op.apply(document)
+            results = _run(op, document)
             saved_to = _save(document, path, out, overwrite)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
@@ -315,7 +322,7 @@ def insert(
                 reference_match=reference,
                 require_tier=require_tier,
             )
-            result = op.apply(document)
+            result = _run(op, document)
             saved_to = _save(document, path, out, overwrite)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
@@ -346,7 +353,7 @@ def copy_style(
                 target_span_index=find_span_index(document, target_page_index, target),
                 require_tier=require_tier,
             )
-            result = op.apply(document)
+            result = _run(op, document)
             saved_to = _save(document, path, out, overwrite)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
@@ -378,7 +385,7 @@ def move_block(
                 width=width,
                 require_tier=require_tier,
             )
-            results = op.apply(document)
+            results = _run(op, document)
             saved_to = _save(document, path, out, overwrite)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
@@ -395,7 +402,7 @@ def links(
     """Print every link on one page (EDT-10) as JSON; `index` is what remove-link takes."""
     try:
         with Document.open(path, password=password) as document:
-            found = PageLinksOp(page_index=page).apply(document)
+            found = _run(PageLinksOp(page_index=page), document)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
     typer.echo(json.dumps([link.model_dump(mode="json") for link in found], indent=2))
@@ -423,7 +430,7 @@ def add_link(
             else:
                 span_index = find_span_index(document, page, str(over))
                 area = extract_page_spans(document.raw, page)[span_index].style.bbox
-            added = AddLinkOp(page_index=page, rect=area, uri=uri, target_page=to_page).apply(document)
+            added = _run(AddLinkOp(page_index=page, rect=area, uri=uri, target_page=to_page), document)
             saved_to = _save(document, path, out, overwrite)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
@@ -443,7 +450,7 @@ def remove_link(
     """Remove one hyperlink (EDT-10); the text under it is untouched."""
     try:
         with Document.open(path, password=password) as document:
-            RemoveLinkOp(page_index=page, index=index).apply(document)
+            _run(RemoveLinkOp(page_index=page, index=index), document)
             saved_to = _save(document, path, out, overwrite)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
@@ -462,7 +469,7 @@ def _apply_and_save(path: Path, op: Op, *, out: Path | None, overwrite: bool, pa
     """Open, apply one Op, save -- the shared body of the simpler edit commands."""
     try:
         with Document.open(path, password=password) as document:
-            op.apply(document)
+            _run(op, document)
             return _save(document, path, out, overwrite)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
@@ -481,7 +488,7 @@ def images(
     """Print every image placement on one page (EDT-08) as JSON; `index` is what the image commands take."""
     try:
         with Document.open(path, password=password) as document:
-            found = PageImagesOp(page_index=page).apply(document)
+            found = _run(PageImagesOp(page_index=page), document)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
     typer.echo(json.dumps([info.model_dump(mode="json") for info in found], indent=2))
@@ -577,7 +584,7 @@ def shapes(
     """Print every vector path on one page (EDT-09) as JSON; `index` is what the shape commands take."""
     try:
         with Document.open(path, password=password) as document:
-            found = PageShapesOp(page_index=page).apply(document)
+            found = _run(PageShapesOp(page_index=page), document)
     except PdfWorkerzError as exc:
         raise _fail(exc) from exc
     typer.echo(json.dumps([info.model_dump(mode="json") for info in found], indent=2))
@@ -667,7 +674,7 @@ def spellcheck(
             pages = range(document.page_count) if page is None else [page]
             total = 0
             for page_index in pages:
-                found = SpellCheckOp(page_index=page_index, language=language, ignore=ignore or []).apply(document)
+                found = _run(SpellCheckOp(page_index=page_index, language=language, ignore=ignore or []), document)
                 for miss in found:
                     hint = f" -> {', '.join(miss.suggestions)}" if miss.suggestions else ""
                     typer.echo(f"page {page_index}: {miss.word}{hint}")

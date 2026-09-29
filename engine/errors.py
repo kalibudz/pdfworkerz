@@ -54,6 +54,11 @@ class SaveNotPossibleError(PdfWorkerzError):
     example an incremental save of a document the undo journal reloaded from memory."""
 
 
+class SaveFailedError(PdfWorkerzError):
+    """The file couldn't be written (for example it is open and locked in another program).
+    The document and its edits are still open, so the save can be retried."""
+
+
 class EncryptionLostError(PdfWorkerzError):
     """An operation would have left an encrypted document decrypted (SEC-03), so it was refused."""
 

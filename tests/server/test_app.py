@@ -587,3 +587,24 @@ def test_history_does_not_resend_inserted_image_data(client: TestClient, simple_
     (entry,) = client.get(f"/documents/{document_id}/history", headers=AUTH).json()["ops"]
     assert entry["op"] == "insert_image"
     assert entry["image_base64"] == f"<{len(encoded) * 3 // 4} bytes>"
+
+
+@pytest.mark.feature("SEC-03")
+def test_download_keeps_the_original_encryption(client: TestClient, corpus: Corpus, work_dir: Path) -> None:
+    import pymupdf
+
+    source = work_dir / "aes256.pdf"
+    shutil.copy(corpus.encrypted_aes_256, source)
+    document_id = _open(client, source, password=corpus.user_password)
+    op = {"op": "replace_text", "match": "quarterly", "replacement": "annual", "require_tier": "fallback"}
+    assert client.post(f"/documents/{document_id}/ops", json=op, headers=AUTH).status_code == 200
+
+    downloaded = client.get(f"/documents/{document_id}/download", headers=AUTH).content
+    with pymupdf.open(stream=downloaded, filetype="pdf") as doc:
+        assert doc.needs_pass
+        assert doc.authenticate(corpus.user_password)
+        assert doc[0].get_text().strip() == "Confidential: annual figures"
+    # .../file stays decrypted on purpose: pdf.js renders it.
+    rendered = client.get(f"/documents/{document_id}/file", headers=AUTH).content
+    with pymupdf.open(stream=rendered, filetype="pdf") as doc:
+        assert not doc.needs_pass

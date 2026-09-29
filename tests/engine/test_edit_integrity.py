@@ -247,11 +247,17 @@ def test_incremental_overwrite_after_undo_is_refused_clearly_or_done(corpus: Cor
 @pytest.mark.feature("COR-07")
 @pytest.mark.feature("SEC-03")
 def test_overwrite_save_of_an_encrypted_document_keeps_it_open(corpus: Corpus, work_dir: Path) -> None:
+    source = work_dir / "aes256.pdf"
     doc = _open_encrypted_copy(corpus, work_dir)
+    ReplaceTextOp(match="quarterly", replacement="annual", require_tier="fallback").apply(doc)
     doc.save(overwrite=True)
-    assert doc.page_count >= 1
-    doc.render_page(0, dpi=36)  # used to raise "document closed or encrypted"
-    assert _saved_needs_password(work_dir / "aes256.pdf")
+    # The live document must still read correctly -- it once read blank here (needs_pass read
+    # after authenticate), and the second overwrite below then wrote the blank page to disk.
+    assert doc.raw[0].get_text().strip() == "Confidential: annual figures"
+    ReplaceTextOp(match="annual", replacement="yearly", require_tier="fallback").apply(doc)
+    doc.save(overwrite=True)
+    assert _saved_needs_password(source)
+    assert _saved_text(source, corpus.user_password) == "Confidential: yearly figures"
     doc.close()
 
 
@@ -368,4 +374,126 @@ def test_an_edit_without_readable_text_state_says_so(work_dir: Path) -> None:
     span = extract_page_spans(doc.raw, 0)[0].model_copy(update={"text_state": None})
     result = replace_span_text(doc, 0, span, "Line ONE", font_index=_font_index(), verify=False)
     assert "could not be read" in result.note
+    doc.close()
+
+
+# -- R3 (re-review): rotated text is redrawn rotated, not as upright glyphs along the angle --
+
+
+@pytest.mark.feature("EDT-01")
+@pytest.mark.parametrize("morph_degrees", [90, -45, 30])
+def test_a_rotated_span_is_redrawn_at_its_own_angle(work_dir: Path, morph_degrees: int) -> None:
+    doc = pymupdf.open()
+    page = doc.new_page()
+    point = pymupdf.Point(250, 400)
+    page.insert_text(
+        point, "Vertical words", fontsize=14, fontname="helv", morph=(point, pymupdf.Matrix(morph_degrees))
+    )
+    doc.save(work_dir / "rotated_text.pdf")
+
+    document = Document.open(work_dir / "rotated_text.pdf")
+    (before,) = [span.style for span in extract_page_spans(document.raw, 0)]
+    result = ReplaceSpanTextOp(page_index=0, span_index=0, new_text="Sideways text", require_tier="exact").apply(
+        document
+    )
+    (after,) = [span.style for span in extract_page_spans(document.raw, 0)]  # still one span
+    assert after.text == "Sideways text"
+    assert after.rotation_degrees == pytest.approx(before.rotation_degrees, abs=0.5)
+    assert after.chars[0].origin == pytest.approx(before.chars[0].origin, abs=0.5)
+    assert result.verification is not None and result.verification.looks_right
+    document.close()
+
+
+@pytest.mark.feature("EDT-01")
+def test_a_rotated_span_with_character_spacing_keeps_every_glyph_rotated(work_dir: Path) -> None:
+    # 90 degrees counter-clockwise on the page, with Tc: the per-character drawing path.
+    path = _helvetica_pdf(work_dir / "rot_tc.pdf", b"BT /F1 12 Tf 1 Tc 0 1 -1 0 300 300 Tm (Rotated) Tj ET")
+    document = Document.open(path)
+    before = extract_page_spans(document.raw, 0)[0].style
+    ReplaceSpanTextOp(page_index=0, span_index=0, new_text="Turned", require_tier="exact").apply(document)
+    after = [span.style for span in extract_page_spans(document.raw, 0)]
+    assert "".join(style.text for style in after) == "Turned"
+    assert all(style.rotation_degrees == pytest.approx(before.rotation_degrees, abs=0.5) for style in after)
+    document.close()
+
+
+# -- #10 tightened (re-review): overlapping and misplaced new text are flagged --
+
+
+@pytest.mark.feature("FNT-12")
+def test_verification_flags_a_replacement_that_runs_into_the_next_word(work_dir: Path) -> None:
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "Total:", fontsize=12, fontname="helv")
+    page.insert_text((115, 100), "100", fontsize=12, fontname="tiro")  # a separate span just after it
+    doc.save(work_dir / "price.pdf")
+
+    document = Document.open(work_dir / "price.pdf")
+    index = _texts(document).index("Total:")
+    result = ReplaceSpanTextOp(page_index=0, span_index=index, new_text="PRICE: XXXXXX", require_tier="fallback").apply(
+        document
+    )
+    assert result.verification is not None
+    assert result.verification.overlaps_other_text
+    assert not result.verification.looks_right
+    document.close()
+
+
+@pytest.mark.feature("FNT-12")
+def test_verification_flags_new_text_away_from_where_it_was_drawn(work_dir: Path) -> None:
+    from engine.edit import _capture, _verify_edit
+
+    doc = Document.open(_three_lines(work_dir / "three.pdf", 14.4))
+    before = _capture(doc, 0, verify=True)
+    assert before is not None
+    doc.raw[0].insert_text((300, 600), "stray", fontsize=12, fontname="helv")
+    result = _verify_edit(doc, 0, before, "stray", removed=[], drawn=[((72, 300), (110, 300), 12.0)])
+    assert result.misplaced_text and not result.looks_right
+    placed = _verify_edit(doc, 0, before, "stray", removed=[], drawn=[((300, 600), (330, 600), 12.0)])
+    assert not placed.misplaced_text
+    doc.close()
+
+
+# -- Minor (re-review): a save that can't write the file is a clear error and keeps the edits --
+
+
+@pytest.mark.feature("COR-07")
+def test_a_save_to_an_unwritable_place_fails_clearly_and_keeps_the_document(corpus: Corpus, work_dir: Path) -> None:
+    source = work_dir / "simple.pdf"
+    shutil.copy(corpus.simple, source)
+    doc = Document.open(source)
+    ReplaceTextOp(match="PDFWorkerz", replacement="Editor", require_tier="fallback").apply(doc)
+    from engine.errors import SaveFailedError
+
+    with pytest.raises(SaveFailedError):
+        doc.save(work_dir / "missing-dir" / "out.pdf")
+    assert "Hello, Editor." in doc.raw[0].get_text()
+    doc.close()
+
+
+@pytest.mark.feature("COR-07")
+def test_a_failed_replace_of_the_original_keeps_the_edits_and_the_original(
+    corpus: Corpus, work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from engine.errors import SaveFailedError
+
+    source = work_dir / "simple.pdf"
+    shutil.copy(corpus.simple, source)
+    doc = Document.open(source)
+    ReplaceTextOp(match="PDFWorkerz", replacement="Editor", require_tier="fallback").apply(doc)
+
+    def locked(self: Path, target: Path) -> Path:
+        raise PermissionError(13, "The process cannot access the file because it is being used by another process")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", locked)
+        with pytest.raises(SaveFailedError):
+            doc.save(overwrite=True)
+    assert "Hello, Editor." in doc.raw[0].get_text()  # the edits survived the failed save
+    with pymupdf.open(source) as original:
+        assert "Hello, PDFWorkerz." in original[0].get_text()  # and the original is untouched
+    assert not list(work_dir.glob(".*pdfworkerz-tmp"))  # no temp file left behind
+    doc.save(overwrite=True)  # retrying once the file is free works
+    with pymupdf.open(source) as saved:
+        assert "Hello, Editor." in saved[0].get_text()
     doc.close()
