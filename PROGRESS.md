@@ -10,7 +10,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes (see the 2026-09-28 review entry) |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes; FNT-11/FNT-14 re-scoped (FNT-17/18 planned) |
 | P3 | Web UI with click-to-edit | ✅ Done: 15/15 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes |
-| P4 | Command bar & recipes | ✅ Done: 8/8 features proven by tests | Independent reviewer sign-off pending |
+| P4 | Command bar & recipes | ✅ Done: 8/8 features proven by tests | Independent reviewer: signed off 2026-09-29 after two rounds of fixes |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
 | P7 | OCR, scans, conversions | Planned | |
@@ -55,6 +55,12 @@ A phase is complete when all of its features are **done** through the evidence g
 - **API/UI:** preview/apply/complete/recipe routes; the command bar (`/`
   focuses it). `insert_text` gained anchored placement.
 - 688 tests, 93.9% coverage, gate 14/14. 65/163 features done.
+- **Independent review:** 9 findings, then 3 more on the re-check -- the
+  serious ones: `set ... whole word` parsed but dropped; an empty search, or
+  a zero-width regex like a word boundary, inserting the replacement between
+  every character; dry runs of chained recipes under-reporting (now counted
+  on a scratch copy step by step). All fixed with tests; **signed off**.
+  709 tests, gate 14/14.
 
 ### 2026-09-28 (cont. 3) — independent review of P1-P3, fixes, sign-off; owner decisions
 

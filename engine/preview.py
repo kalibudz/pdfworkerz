@@ -14,7 +14,7 @@ from engine.document import Document
 from engine.errors import PdfWorkerzError
 from engine.fonts.style import dedupe_texttrace
 from engine.ops.base import parse_op
-from engine.ops.text import _compile_pattern
+from engine.ops.text import _compile_pattern, refuse_empty_matches
 
 
 @dataclass
@@ -54,6 +54,8 @@ def preview_op(document: Document, data: dict[str, Any]) -> OpPreview:
         total, pages = 0, []
         for page_index in _pages(document, fields["page_index"]):
             texts = _span_texts(document, page_index)
+            for text in texts:
+                refuse_empty_matches(pattern, text)
             if name == "restyle_text":
                 found = sum(1 for text in texts if pattern.search(text))
             else:
@@ -87,13 +89,13 @@ def preview_steps(document: Document, ops: list[dict[str, Any]]) -> Preview:
     warnings: list[str] = []
     try:
         for number, data in enumerate(ops, start=1):
-            part = preview_op(scratch, data)
-            parts.append(part)
-            if part.matches == 0:
-                warnings.append(f"step {number} ({part.op}) matches nothing at that point")
             op = parse_op(data)
             try:
-                op.check_pages(scratch)
+                op.check_pages(scratch)  # before counting: counting reads the pages it names
+                part = preview_op(scratch, data)
+                parts.append(part)
+                if part.matches == 0:
+                    warnings.append(f"step {number} ({part.op}) matches nothing at that point")
                 op.apply(scratch)
             except PdfWorkerzError as exc:
                 warnings.append(f"step {number} would fail: {exc}")

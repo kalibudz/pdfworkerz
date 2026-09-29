@@ -469,3 +469,42 @@ def test_a_deterministic_save_that_cannot_replace_the_file_leaves_it_untouched(
     assert source.read_bytes() == original
     assert not list(tmp_path.glob(".*pdfworkerz-tmp"))
     doc.close()
+
+
+@pytest.mark.feature("CMD-06")
+@pytest.mark.parametrize("pattern", [chr(92) + "b", "(?=a)", "(?<=l)"])
+def test_a_zero_width_pattern_is_refused_on_real_text(tmp_path: Path, pattern: str) -> None:
+    from engine.errors import OpValidationError
+
+    doc = Document.open(_doc(tmp_path / "p.pdf", [["Hello cat"]]))
+    op = parse_op({"op": "replace_text", "match": pattern, "mode": "regex", "replacement": "Q"})
+    with pytest.raises(OpValidationError, match="empty stretch"):
+        op.apply(doc)
+    with pytest.raises(OpValidationError, match="empty stretch"):
+        preview_ops(doc, [op.model_dump()])
+    assert _texts(doc) == ["Hello cat"]
+    doc.close()
+
+
+@pytest.mark.feature("CMD-07")
+def test_a_dry_run_step_on_a_missing_page_is_a_warning_not_a_crash(tmp_path: Path) -> None:
+    from engine.preview import preview_steps
+
+    doc = Document.open(_doc(tmp_path / "p.pdf", [["Hello"]]))
+    preview = preview_steps(doc, [{"op": "replace_text", "match": "Hello", "replacement": "x", "page_index": 99}])
+    assert "step 1 would fail" in preview.warnings[0] and "out of range" in preview.warnings[0]
+    doc.close()
+
+
+@pytest.mark.feature("CMD-07")
+def test_a_deterministic_incremental_save_says_it_is_not_reproducible(corpus: object, tmp_path: Path) -> None:
+    import shutil
+
+    from tests.corpus.build_corpus import build_corpus
+
+    source = tmp_path / "signed.pdf"
+    shutil.copy(build_corpus().form_and_signature, source)
+    doc = Document.open(source)
+    result = doc.save(overwrite=True, deterministic=True)
+    assert result.mode == "incremental" and "not byte-for-byte reproducible" in result.note
+    doc.close()

@@ -313,6 +313,9 @@ class Document:
         note = ""
         if signed and chosen_mode == "full":
             note = "this document is signed; a full save invalidates its signatures"
+        if deterministic and chosen_mode == "incremental":
+            # An incremental save appends to the original file, so its trailer /ID can't be pinned.
+            note = (note + "; " if note else "") + "an incremental save is not byte-for-byte reproducible"
 
         save_kwargs: dict[str, object] = {"encryption": PDF_ENCRYPT_KEEP}
         if deterministic:

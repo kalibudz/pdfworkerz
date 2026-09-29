@@ -89,6 +89,16 @@ def _check_search(match: str, mode: str) -> None:
         raise OpValidationError(f"the pattern {match!r} matches empty text, so it would match everywhere")
 
 
+def refuse_empty_matches(pattern: re.Pattern[str], text: str) -> None:
+    """A zero-width pattern that needs context (a word boundary, a lookahead) passes _check_search (it can't
+    match empty text on its own) but matches between characters of real text, where a
+    substitution would insert the replacement everywhere. Refuse it on the text itself."""
+    if any(found.start() == found.end() for found in pattern.finditer(text)):
+        raise OpValidationError(
+            f"the pattern {pattern.pattern!r} matches an empty stretch of text, so it would apply between characters"
+        )
+
+
 def _page_might_match(document: Document, page_index: int, pattern: re.Pattern[str]) -> bool:
     """A cheap texttrace-only check, so pages without a match skip extract_page_spans (which
     serializes and re-parses the whole document): a no-match search of 1000 pages took ~100s."""
@@ -354,6 +364,7 @@ class _FindReplaceOp(Op):
             ]
             for origin, text in targets:
                 span = _span_by_origin(document, page_index, origin, text)
+                refuse_empty_matches(pattern, text)
                 new_text = pattern.sub(lambda m: self._replacement_for(m.group()), text)
                 if new_text == text:
                     continue
@@ -463,6 +474,7 @@ class RestyleTextOp(_StyleChange):
                 if s.style.chars and pattern.search(s.style.text)
             ]
             for origin, text in targets:
+                refuse_empty_matches(pattern, text)
                 span = _span_by_origin(document, page_index, origin, text)
                 results.append(self._restyle(document, page_index, span, font_index))
         return results

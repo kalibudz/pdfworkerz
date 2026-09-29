@@ -1,10 +1,10 @@
 {
-  "phase": "P4",
-  "taskId": "P4 complete (8/8 by evidence); independent reviewer sign-off pending, then push main, then P5",
-  "step": "P4 built: command grammar (Lark) with page/regex selectors and style words, autocomplete, preview before apply, did-you-mean suggestions, recipes (YAML/JSON, deterministic replay), CLI edit --do/--recipe and run, and the UI command bar. 688 tests, 93.9% coverage.",
+  "phase": "P5",
+  "taskId": "P4 complete and independently signed off (8/8). 65/163 features done. Next: P5",
+  "step": "P4 (command bar & recipes) built, reviewed twice, fixed and signed off. Pushed main to GitHub as a backup (the owner asked for a push after P4; Actions is manual-only so no CI run is billed).",
   "branch": "main",
   "lastGreenCommit": "b50687d (local gate, Windows 11, Python 3.14.3, 14/14 steps, 634 tests)",
-  "nextAction": "1) Independent reviewer pass for P4; fix what it finds; record sign-off. 2) Push main to GitHub (owner asked for this after P4). 3) Start P5; run tools/session_budget.py first.",
+  "nextAction": "Start P5 (organize pages, page design, annotate, document structure: 32 features); run tools/session_budget.py first. Every session: python tools/gate.py before each commit; push only with the owner's approval.",
   "openQuestions": [
     {
       "phase": "P2",
