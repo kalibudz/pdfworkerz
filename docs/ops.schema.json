@@ -68,6 +68,35 @@
     },
     {
       "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "batch",
+          "default": "batch",
+          "title": "Op",
+          "type": "string"
+        },
+        "command": {
+          "default": "",
+          "title": "Command",
+          "type": "string"
+        },
+        "ops": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Ops",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ops"
+      ],
+      "title": "BatchOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "Every image placement on one page. Read-only, so -- like\nPageSpansOp -- never journaled; server/app.py serves it from a GET route.",
       "properties": {
         "op": {
@@ -1371,18 +1400,26 @@
           "type": "string"
         },
         "position": {
-          "maxItems": 2,
-          "minItems": 2,
-          "prefixItems": [
+          "anyOf": [
             {
-              "type": "number"
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
             },
             {
-              "type": "number"
+              "type": "null"
             }
           ],
-          "title": "Position",
-          "type": "array"
+          "default": null,
+          "title": "Position"
         },
         "reference_match": {
           "anyOf": [
@@ -1395,6 +1432,24 @@
           ],
           "default": null,
           "title": "Reference Match"
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "enum": [
+                "below",
+                "above",
+                "after",
+                "before"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Anchor"
         },
         "reference_case_sensitive": {
           "default": true,
@@ -1492,8 +1547,7 @@
       },
       "required": [
         "page_index",
-        "text",
-        "position"
+        "text"
       ],
       "title": "InsertTextOp",
       "type": "object"

@@ -1331,3 +1331,80 @@ def test_add_text_places_new_text_in_the_chosen_style(page: Page, app_url: str, 
     page.wait_for_function(
         "() => (document.querySelector('.pw-inspector')?.textContent ?? '').includes('Courier')", timeout=5000
     )
+
+
+# -- P4: the command bar --
+
+
+def _open_for_commands(page: Page, app_url: str, path: Path) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(path))
+    _wait_overlay_ready(page)
+
+
+@pytest.mark.feature("CMD-04")
+def test_command_bar_offers_what_can_come_next(page: Page, app_url: str, simple_copy: Path) -> None:
+    _open_for_commands(page, app_url, simple_copy)
+    page.keyboard.press("/")
+    page.wait_for_function("() => document.activeElement?.id === 'pw-command'", timeout=3000)
+    page.keyboard.type("rep")
+    page.wait_for_selector(".pw-command-chip:has-text('replace')", timeout=5000)
+    page.click(".pw-command-chip:has-text('replace')")
+    assert page.input_value("#pw-command") == "replace "
+    page.keyboard.type('"x" ')
+    page.wait_for_selector(".pw-command-chip:has-text('with')", timeout=5000)
+
+
+@pytest.mark.feature("CMD-05")
+def test_command_bar_previews_then_applies_on_enter(page: Page, app_url: str, simple_copy: Path) -> None:
+    _open_for_commands(page, app_url, simple_copy)
+    page.click("#pw-command")
+    page.keyboard.type('replace "PDFWorkerz" with "Editor"')
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".pw-command-summary:has-text('1 match on page 1')", timeout=5000)
+    assert page.query_selector(".pw-history-entry") is None  # previewing changes nothing
+    page.click(".pw-command-apply")
+    page.wait_for_selector(".pw-span-box:has-text('Hello, Editor.')", timeout=10000)
+    page.wait_for_selector(".pw-history-entry", timeout=5000)
+
+
+@pytest.mark.feature("CMD-06")
+def test_command_bar_shows_did_you_mean_and_never_runs_the_guess(page: Page, app_url: str, simple_copy: Path) -> None:
+    _open_for_commands(page, app_url, simple_copy)
+    page.click("#pw-command")
+    page.keyboard.type('repalce "PDFWorkerz" with "Editor"')
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".pw-command-error", timeout=5000)
+    assert page.query_selector(".pw-history-entry") is None
+    page.click('.pw-command-suggestion:has-text(\'replace "PDFWorkerz" with "Editor"\')')
+    assert page.input_value("#pw-command") == 'replace "PDFWorkerz" with "Editor"'
+
+
+@pytest.mark.feature("CMD-07")
+def test_recipe_export_and_run_from_the_command_bar(
+    page: Page, app_url: str, simple_copy: Path, tmp_path: Path
+) -> None:
+    _open_for_commands(page, app_url, simple_copy)
+    page.click("#pw-command")
+    page.keyboard.type('replace "PDFWorkerz" with "Editor"')
+    page.keyboard.press("Enter")
+    page.click(".pw-command-apply")
+    page.wait_for_selector(".pw-history-entry", timeout=10000)
+    with page.expect_download() as info:
+        page.click(".pw-recipe-export")
+    recipe = tmp_path / "exported.yaml"
+    info.value.save_as(recipe)
+    assert "replace_text" in recipe.read_text(encoding="utf-8")
+
+    page.click("#pw-command")
+    page.keyboard.type("undo")
+    page.keyboard.press("Enter")
+    page.click(".pw-command-apply")
+    page.wait_for_selector(".pw-span-box:has-text('Hello, PDFWorkerz.')", timeout=10000)
+    with page.expect_file_chooser() as chooser:
+        page.click(".pw-recipe-run")
+    chooser.value.set_files(str(recipe))
+    page.wait_for_selector(".pw-command-summary:has-text('1 match')", timeout=5000)
+    page.click(".pw-command-apply")
+    page.wait_for_selector(".pw-span-box:has-text('Hello, Editor.')", timeout=10000)

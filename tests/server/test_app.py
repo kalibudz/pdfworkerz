@@ -628,3 +628,63 @@ def test_fonts_research_route_returns_the_list(client: TestClient) -> None:
     research.flag("MysteryGrotesk", tier="fallback", note="standard-font fallback", document="x.pdf")
     (row,) = client.get("/fonts/research", headers=AUTH).json()
     assert row["font"] == "MysteryGrotesk" and row["times_seen"] == 1
+
+
+# -- P4: commands and recipes over the API --
+
+
+@pytest.mark.feature("CMD-05")
+def test_command_preview_counts_without_changing_and_apply_is_one_undo(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    base = f"/documents/{document_id}/commands"
+    preview = client.post(f"{base}/preview", json={"text": 'replace "PDFWorkerz" with "Editor"'}, headers=AUTH).json()
+    assert preview["matches"] == 1 and preview["pages"] == [1]
+    assert preview["description"].startswith("Replace")
+    assert client.get(f"/documents/{document_id}/history", headers=AUTH).json()["ops"] == []
+
+    applied = client.post(f"{base}/apply", json={"text": 'replace "PDFWorkerz" with "Editor"'}, headers=AUTH)
+    assert applied.status_code == 200
+    (span,) = client.get(f"/documents/{document_id}/pages/0/spans", headers=AUTH).json()
+    assert span["style"]["text"] == "Hello, Editor."
+    client.post(f"{base}/apply", json={"text": "undo"}, headers=AUTH)
+    (span,) = client.get(f"/documents/{document_id}/pages/0/spans", headers=AUTH).json()
+    assert span["style"]["text"] == "Hello, PDFWorkerz."
+
+
+@pytest.mark.feature("CMD-06")
+def test_a_bad_command_returns_suggestions_and_a_hint(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    response = client.post(
+        f"/documents/{document_id}/commands/preview", json={"text": 'repalce "a" with "b"'}, headers=AUTH
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert body["suggestions"][0] == 'replace "a" with "b"' and body["hint"]
+
+
+@pytest.mark.feature("CMD-04")
+def test_completion_route(client: TestClient) -> None:
+    body = client.get("/commands/complete", params={"text": 'replace "a" '}, headers=AUTH).json()
+    assert body["suggestions"] == ["with"]
+
+
+@pytest.mark.feature("CMD-07")
+def test_recipe_export_and_replay_over_the_api(
+    client: TestClient, simple_path: Path, corpus: Corpus, work_dir: Path
+) -> None:
+    document_id = _open(client, simple_path)
+    client.post(
+        f"/documents/{document_id}/commands/apply", json={"text": 'replace "PDFWorkerz" with "Editor"'}, headers=AUTH
+    )
+    recipe = client.get(f"/documents/{document_id}/recipe", headers=AUTH).text
+    assert "replace_text" in recipe and "recipe: simple" in recipe
+
+    other = work_dir / "other.pdf"
+    shutil.copy(corpus.simple, other)
+    second = _open(client, other)
+    dry = client.post(f"/documents/{second}/recipe", json={"text": recipe, "dry_run": True}, headers=AUTH).json()
+    assert dry == {"recipe": "simple", "steps": 1, "matches": 1, "pages": [1], "warnings": [], "applied": False}
+    assert client.post(f"/documents/{second}/recipe", json={"text": recipe}, headers=AUTH).json()["applied"]
+    (span,) = client.get(f"/documents/{second}/pages/0/spans", headers=AUTH).json()
+    assert span["style"]["text"] == "Hello, Editor."
+    assert len(client.get(f"/documents/{second}/history", headers=AUTH).json()["ops"]) == 1

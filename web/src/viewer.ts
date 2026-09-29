@@ -14,6 +14,7 @@
  */
 
 import type { Api } from "./api";
+import { createCommandBar } from "./commandbar";
 import { createComparePanel } from "./compare";
 import { createHistoryPanel } from "./history";
 import { createImageTool } from "./images";
@@ -201,7 +202,14 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   const historyPanel = document.createElement("div");
 
   body.append(thumbRail, pageArea, inspectorPanel);
-  root.append(toolbar, body, historyPanel, shortcutsDialog);
+  const commandBar = createCommandBar({
+    api: options.api,
+    documentId: options.documentId,
+    currentPage: () => currentPage - 1,
+    onApplied: () => reloadDocument(),
+    title: options.title,
+  });
+  root.append(toolbar, commandBar.element, body, historyPanel, shortcutsDialog);
   container.appendChild(root);
 
   const loadingNotice = document.createElement("p");
@@ -494,6 +502,11 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
       shortcutsDialog.showModal();
       return;
     }
+    if (event.key === "/") {
+      event.preventDefault();
+      commandBar.focus();
+      return;
+    }
     if (event.key === "Escape" && addingText) {
       setAddingText(false);
       return;
@@ -571,6 +584,7 @@ const SHORTCUTS: readonly [string, string][] = [
   ["C", "Before/after compare view"],
   ["Enter", "Commit the text being edited"],
   ["Esc", "Discard an edit, cancel a tool, close a menu"],
+  ["/", "Type a command (Enter previews, Enter again applies)"],
   ["?", "Show this list"],
 ];
 

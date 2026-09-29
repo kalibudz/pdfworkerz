@@ -584,3 +584,83 @@ def test_fonts_research_command_shows_and_clears_the_list() -> None:
     assert "MysteryGrotesk" in shown.output
     assert runner.invoke(app, ["fonts", "--clear-research"]).exit_code == 0
     assert "no fonts to research yet" in runner.invoke(app, ["fonts", "--research"]).output
+
+
+# -- P4: CMD-08 edit --do / --recipe, and run --
+
+
+@pytest.mark.feature("CMD-08")
+def test_edit_do_applies_typed_commands(corpus: Corpus, work_dir: Path) -> None:
+    import pymupdf
+
+    out = work_dir / "out.pdf"
+    result = runner.invoke(
+        app,
+        [
+            "edit",
+            str(corpus.simple),
+            "--do",
+            'replace "PDFWorkerz" with "Editor"',
+            "--do",
+            'set bold for "Editor"',
+            "--out",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with pymupdf.open(out) as doc:
+        spans = doc[0].get_texttrace()
+    assert [("".join(chr(c[0]) for c in s["chars"]), s["font"]) for s in spans] == [
+        ("Hello, Editor.", "Helvetica-Bold")
+    ]
+
+
+@pytest.mark.feature("CMD-08")
+def test_edit_dry_run_changes_nothing(corpus: Corpus, work_dir: Path) -> None:
+    out = work_dir / "never.pdf"
+    result = runner.invoke(
+        app, ["edit", str(corpus.simple), "--do", 'delete "PDFWorkerz"', "--dry-run", "--out", str(out)]
+    )
+    assert result.exit_code == 0
+    assert "1 match(es) on page(s) 1" in result.output and "nothing was changed" in result.output
+    assert not out.exists()
+
+
+@pytest.mark.feature("CMD-06")
+def test_edit_refuses_a_misspelled_command_with_suggestions(corpus: Corpus, work_dir: Path) -> None:
+    result = runner.invoke(
+        app, ["edit", str(corpus.simple), "--do", 'repalce "a" with "b"', "--out", str(work_dir / "x.pdf")]
+    )
+    assert result.exit_code == 2
+    assert 'did you mean: replace "a" with "b"' in result.output
+    assert not (work_dir / "x.pdf").exists()
+
+
+@pytest.mark.feature("CMD-07")
+def test_save_recipe_then_run_it_on_another_file(corpus: Corpus, work_dir: Path) -> None:
+    recipe = work_dir / "fix.yaml"
+    first = runner.invoke(
+        app,
+        [
+            "edit",
+            str(corpus.simple),
+            "--do",
+            'replace "PDFWorkerz" with "Editor"',
+            "--save-recipe",
+            str(recipe),
+            "--out",
+            str(work_dir / "a.pdf"),
+        ],
+    )
+    assert first.exit_code == 0, first.output
+    second = runner.invoke(app, ["run", str(recipe), str(corpus.simple), "--out", str(work_dir / "b.pdf")])
+    assert second.exit_code == 0, second.output
+    assert (work_dir / "a.pdf").read_bytes() == (work_dir / "b.pdf").read_bytes()  # deterministic
+
+
+@pytest.mark.feature("CMD-08")
+def test_edit_with_a_recipe_option(corpus: Corpus, work_dir: Path) -> None:
+    recipe = work_dir / "r.json"
+    recipe.write_text('{"recipe": "r", "ops": [{"op": "delete_text", "match": "Hello, "}]}', encoding="utf-8")
+    result = runner.invoke(app, ["edit", str(corpus.simple), "--recipe", str(recipe), "--dry-run"])
+    assert result.exit_code == 0 and "recipe r, step 1: 1 match(es)" in result.output

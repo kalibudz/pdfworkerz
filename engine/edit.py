@@ -483,6 +483,26 @@ def _drawn_width(resolution: FontResolution, text: str, font_size: float, text_s
     return sum(advance_for_char(width, char, text_state) for char, width in zip(text, widths, strict=True))
 
 
+def anchored_position(
+    reference: SpanTrace, where: str, text: str, resolution: FontResolution, font_size: float
+) -> tuple[float, float]:
+    """EDT-03 / CMD-01: the baseline point for new text placed `where` ("below", "above",
+    "after" or "before") an existing span, one line or one space away from it."""
+    text_state = _drawing_metrics(reference)[1]
+    x0, y = reference.style.chars[0].origin
+    pitch = text_state.leading if text_state.leading > 0 else font_size * 1.2
+    space = _drawn_width(resolution, " ", font_size, TextState())
+    if where == "below":
+        return (x0, y + pitch)
+    if where == "above":
+        return (x0, y - pitch)
+    if where == "after":
+        return (reference.style.bbox[2] + space, y)
+    if where == "before":
+        return (x0 - space - _drawn_width(resolution, text, font_size, TextState()), y)
+    raise OpValidationError(f"unknown placement {where!r}: use below, above, after or before")
+
+
 def _aligned_origin(
     document: Document,
     page_index: int,

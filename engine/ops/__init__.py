@@ -11,6 +11,7 @@ engine.ops.base alone would not run their @register_op decorators.
 from __future__ import annotations
 
 from engine.ops.base import InspectOp, Op, RenderPageOp, op_registry, parse_op
+from engine.ops.batch import BatchOp
 from engine.ops.images import (
     CropImageOp,
     DeleteImageOp,
@@ -26,6 +27,7 @@ from engine.ops.text import DeleteTextOp, InsertTextOp, ReflowTextOp, ReplaceTex
 
 __all__ = [
     "AddLinkOp",
+    "BatchOp",
     "CorrectWordOp",
     "CropImageOp",
     "DeleteImageOp",

@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 from engine.document import Document
 from engine.edit import (
     EditResult,
+    anchored_position,
     copy_span_style,
     insert_styled_text,
     insert_text_near,
@@ -467,9 +468,12 @@ class InsertTextOp(Op):
     op: Literal["insert_text"] = "insert_text"
     page_index: int
     text: str
-    position: tuple[float, float]
+    position: tuple[float, float] | None = None
+    """The baseline point to start at. Leave unset to place the text by `anchor` instead."""
     reference_match: str | None = None
     """A literal substring identifying the span whose style to copy."""
+    anchor: Literal["below", "above", "after", "before"] | None = None
+    """Place the text one line below/above, or one space after/before, the reference span."""
     reference_case_sensitive: bool = True
     font: str | None = None
     size: float | None = None
@@ -483,9 +487,15 @@ class InsertTextOp(Op):
         font_index = _font_index()
         if self.size is not None and self.size <= 0:
             raise OpValidationError("insert_text: size must be positive")
+        if (self.position is None) == (self.anchor is None):
+            raise OpValidationError("insert_text: give either a position or an anchor (not both)")
         if self.reference_match is None:
+            if self.anchor is not None:
+                raise OpValidationError("insert_text: an anchor needs reference_match (the text to place it by)")
             if self.font is None or self.size is None:
                 raise OpValidationError("insert_text: give reference_match, or an explicit font and size")
+            if self.position is None:  # unreachable after the checks above; narrows the type
+                raise OpValidationError("insert_text: give a position")
             chosen = resolve_chosen_font(
                 self.font, bold=bool(self.bold), italic=bool(self.italic), text=self.text, font_index=font_index
             )
@@ -517,12 +527,22 @@ class InsertTextOp(Op):
                 text=self.text,
                 font_index=font_index,
             )
+        position = self.position
+        if position is None:
+            if self.anchor is None:  # unreachable after the checks above; narrows the type
+                raise OpValidationError("insert_text: give a position or an anchor")
+            resolution = chosen_font or resolve_font_for_span(
+                document, self.page_index, reference_span, self.text, font_index=font_index
+            )
+            chosen_font = resolution
+            size = self.size or reference_span.style.size
+            position = anchored_position(reference_span, self.anchor, self.text, resolution, size)
         result = insert_text_near(
             document,
             self.page_index,
             reference_span,
             self.text,
-            self.position,
+            position,
             font_index=font_index,
             verify=self.verify,
             override_font=chosen_font,

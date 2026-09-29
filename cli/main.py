@@ -17,13 +17,14 @@ from typing import Annotated, Any, Literal
 import typer
 
 from engine import __version__
+from engine.commands import CommandError, parse_command
 from engine.document import Document
 from engine.edit import EditResult
 from engine.errors import PdfWorkerzError
 from engine.fonts import research as font_research
 from engine.fonts.choose import available_families
 from engine.fonts.style import extract_page_spans
-from engine.ops.base import InspectOp, Op, PageSpansOp, RenderPageOp
+from engine.ops.base import InspectOp, Op, PageSpansOp, RenderPageOp, parse_op
 from engine.ops.images import CropImageOp, DeleteImageOp, InsertImageOp, MoveImageOp, PageImagesOp, ReplaceImageOp
 from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp
 from engine.ops.shapes import DeleteShapeOp, DrawShapeOp, EditShapeOp, PageShapesOp
@@ -38,6 +39,8 @@ from engine.ops.text import (
     _font_index,
     find_span_index,
 )
+from engine.preview import preview_ops
+from engine.recipes import dump_recipe, load_recipe
 from server.app import create_app, run_server
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="PDFWorkerz: free, offline, token-free PDF editing.")
@@ -776,3 +779,114 @@ def fonts(
         return
     for family in available_families(_font_index()):
         typer.echo(family)
+
+
+def _apply_steps(
+    path: Path,
+    steps: list[tuple[str, dict[str, Any]]],
+    *,
+    dry_run: bool,
+    out: Path | None,
+    overwrite: bool,
+    password: str | None,
+    save_recipe: Path | None = None,
+) -> None:
+    """Shared by `edit` and `run`: apply (label, op) steps in order, or preview them."""
+    try:
+        with Document.open(path, password=password) as document:
+            applied: list[Op] = []
+            for label, data in steps:
+                if dry_run:
+                    preview = preview_ops(document, [data])
+                    where = f" on page(s) {', '.join(map(str, preview.pages))}" if preview.pages else ""
+                    count = (
+                        f"{preview.matches} match(es){where}"
+                        if preview.ops[0].matches is not None
+                        else "will be applied"
+                    )
+                    typer.echo(f"{label}: {count}")
+                    for warning in preview.warnings:
+                        typer.echo(f"  warning: {warning}")
+                    continue
+                op = parse_op(data)
+                _run(op, document)
+                applied.append(op)
+                typer.echo(f"done: {label}")
+            if dry_run:
+                typer.echo("dry run: nothing was changed or saved")
+                return
+            if save_recipe is not None:
+                save_recipe.write_text(dump_recipe(applied, name=path.stem), encoding="utf-8")
+                typer.echo(f"recipe -> {save_recipe}")
+            result = (
+                document.save(path, overwrite=True, deterministic=True)
+                if overwrite
+                else document.save(out, deterministic=True)
+            )
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"saved -> {result.path}")
+
+
+@app.command()
+def edit(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    do: Annotated[
+        list[str] | None, typer.Option("--do", help='A command, e.g. --do \'replace "2024" with "2025"\' (repeatable)')
+    ] = None,
+    recipe: Annotated[
+        Path | None, typer.Option(exists=True, dir_okay=False, help="A recipe (YAML/JSON) to apply after --do")
+    ] = None,
+    page: Annotated[int, typer.Option(help="1-based page that 'insert' uses when a command names none")] = 1,
+    dry_run: Annotated[bool, typer.Option(help="Show what would change, without changing or saving")] = False,
+    save_recipe: Annotated[
+        Path | None, typer.Option(help="Also write the applied steps as a recipe to this file")
+    ] = None,
+    out: Annotated[Path | None, typer.Option(help="Output path; defaults to a new <name>.edited.pdf")] = None,
+    overwrite: Annotated[bool, typer.Option(help="Write back to the original file instead")] = False,
+    password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
+) -> None:
+    """Edit with typed commands (CMD-08) and/or a recipe. Commands never guess: one that
+    doesn't parse is refused with suggestions, and nothing is changed."""
+    if not do and recipe is None:
+        raise typer.BadParameter("give at least one --do command or a --recipe")
+    steps: list[tuple[str, dict[str, Any]]] = []
+    try:
+        with Document.open(path, password=password) as probe:
+            page_count = probe.page_count
+        for command in do or []:
+            plan = parse_command(command, page_count=page_count, current_page=page - 1)
+            if plan.special:
+                raise CommandError(f"'{plan.special}' only makes sense in an open editing session, not here")
+            steps.append((plan.description, plan.op()))
+        if recipe is not None:
+            loaded = load_recipe(recipe.read_text(encoding="utf-8"))
+            steps.extend((f"recipe {loaded.name}, step {i}", op) for i, op in enumerate(loaded.ops, start=1))
+    except CommandError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        for suggestion in exc.suggestions:
+            typer.echo(f"  did you mean: {suggestion}", err=True)
+        typer.echo(f"  {exc.hint}", err=True)
+        raise typer.Exit(code=2) from exc
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    _apply_steps(path, steps, dry_run=dry_run, out=out, overwrite=overwrite, password=password, save_recipe=save_recipe)
+
+
+@app.command()
+def run(
+    recipe: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="Recipe file (YAML or JSON)")],
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to apply it to")],
+    dry_run: Annotated[bool, typer.Option(help="Show what would change, without changing or saving")] = False,
+    out: Annotated[Path | None, typer.Option(help="Output path; defaults to a new <name>.edited.pdf")] = None,
+    overwrite: Annotated[bool, typer.Option(help="Write back to the original file instead")] = False,
+    password: Annotated[str | None, typer.Option(help="User password, if the file is encrypted")] = None,
+) -> None:
+    """Replay a recipe (CMD-07/CMD-08). Output is byte-identical for the same recipe and
+    input (unencrypted files; AES re-encrypts with fresh random IVs each save)."""
+    try:
+        loaded = load_recipe(recipe.read_text(encoding="utf-8"))
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    steps = [(f"step {i}: {op['op']}", op) for i, op in enumerate(loaded.ops, start=1)]
+    _apply_steps(path, steps, dry_run=dry_run, out=out, overwrite=overwrite, password=password)

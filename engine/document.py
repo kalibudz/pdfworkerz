@@ -10,6 +10,8 @@ inspection that PyMuPDF does not expose (see engine.security).
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +50,60 @@ class SaveResult:
     bytes_written: int
     note: str = ""
     """Anything the caller should tell the user, e.g. that a signed file's signatures no longer apply."""
+
+
+_TRAILER_ID = re.compile(rb"/ID\s*\[")
+_PINNED_ID_PLACEHOLDER = b"<" + b"0" * 32 + b">"
+
+
+def _pdf_string_end(data: bytes, start: int) -> int:
+    """The index just past the PDF string starting at `start`: <hex> or (literal), where a
+    literal may contain backslash escapes and balanced parentheses."""
+    if data[start : start + 1] == b"<":
+        return data.index(b">", start) + 1
+    if data[start : start + 1] != b"(":
+        raise ValueError("not a PDF string")
+    depth, i = 0, start
+    while True:
+        char = data[i : i + 1]
+        if char == b"\\":
+            i += 2
+            continue
+        if char == b"(":
+            depth += 1
+        elif char == b")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+
+
+def _pin_second_file_id(path: Path) -> None:
+    """Make a saved file reproducible: with no_new_id, pymupdf 1.28.2 keeps the first half of
+    the trailer's /ID but still writes a random second half on every save -- sometimes as a
+    <hex> string, sometimes as a (literal) one (both measured). That second half only
+    identifies the revision (encryption keys use the first), so it is replaced by a hash of
+    the file's own bytes. The classic trailer comes after the cross-reference table, so
+    changing its length moves no offset the file depends on."""
+    data = path.read_bytes()
+    trailer = data.rfind(b"trailer")
+    found = [m for m in _TRAILER_ID.finditer(data) if trailer != -1 and m.start() > trailer]
+    if not found:
+        return  # the /ID sits in a compressed cross-reference stream; nothing to pin
+    i = found[-1].end()
+    try:
+        while data[i : i + 1].isspace():
+            i += 1
+        i = _pdf_string_end(data, i)
+        while data[i : i + 1].isspace():
+            i += 1
+        second_start = i
+        second_end = _pdf_string_end(data, i)
+    except (ValueError, IndexError):
+        return  # an /ID we don't recognise: leave the file exactly as written
+    blank = data[:second_start] + _PINNED_ID_PLACEHOLDER + data[second_end:]
+    pinned = b"<" + hashlib.sha256(blank).hexdigest().upper()[:32].encode("ascii") + b">"
+    path.write_bytes(data[:second_start] + pinned + data[second_end:])
 
 
 def _default_output_path(source: Path) -> Path:
@@ -223,6 +279,7 @@ class Document:
         mode: str = "auto",
         owner_password: str | None = None,
         user_password: str | None = None,
+        deterministic: bool = False,
     ) -> SaveResult:
         """Save the document (COR-06, COR-07, COR-08).
 
@@ -258,6 +315,12 @@ class Document:
             note = "this document is signed; a full save invalidates its signatures"
 
         save_kwargs: dict[str, object] = {"encryption": PDF_ENCRYPT_KEEP}
+        if deterministic:
+            # CMD-07: keep the file's /ID instead of generating a random one, so the same
+            # recipe on the same input writes byte-identical output (verified, pymupdf 1.28.2).
+            # Unencrypted files only: AES re-encrypts every stream with a fresh random IV on
+            # each save, which is part of what makes it secure.
+            save_kwargs["no_new_id"] = True
         if owner_password is not None or user_password is not None:
             save_kwargs["owner_pw"] = owner_password or ""
             save_kwargs["user_pw"] = user_password or ""
@@ -292,6 +355,8 @@ class Document:
                 self._file_backed = False
             raise SaveFailedError(f"could not write {target}: {exc}") from exc
 
+        if deterministic:
+            _pin_second_file_id(target)
         return SaveResult(path=target, mode=chosen_mode, bytes_written=target.stat().st_size, note=note)
 
     def _reopen(self, target: Path, new_user_password: str | None) -> None:

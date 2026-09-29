@@ -11,13 +11,35 @@ import type { SessionConfig } from "./config";
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: string;
+  /** CMD-06: for a command that didn't parse, the closest valid commands and a syntax hint. */
+  readonly suggestions: string[];
+  readonly hint: string;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, suggestions: string[] = [], hint = "") {
     super(detail);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
+    this.suggestions = suggestions;
+    this.hint = hint;
   }
+}
+
+export interface CommandPreview {
+  description: string;
+  special: "undo" | "redo" | null;
+  matches: number | null;
+  pages: number[];
+  warnings: string[];
+}
+
+export interface RecipeRun {
+  recipe: string;
+  steps: number;
+  matches?: number;
+  pages?: number[];
+  warnings?: string[];
+  applied: boolean;
 }
 
 export interface OpenDocumentResponse {
@@ -139,19 +161,20 @@ export interface HistoryState {
   can_redo: boolean;
 }
 
-async function parseErrorDetail(response: Response): Promise<string> {
+async function toApiError(response: Response): Promise<ApiError> {
   try {
     const body: unknown = await response.json();
     if (body && typeof body === "object" && "detail" in body) {
-      const detail = (body as { detail: unknown }).detail;
+      const { detail, suggestions, hint } = body as { detail: unknown; suggestions?: unknown; hint?: unknown };
       if (typeof detail === "string") {
-        return detail;
+        const list = Array.isArray(suggestions) ? suggestions.filter((s): s is string => typeof s === "string") : [];
+        return new ApiError(response.status, detail, list, typeof hint === "string" ? hint : "");
       }
     }
   } catch {
     // response body wasn't JSON -- fall through to the generic message below
   }
-  return `request failed with status ${response.status}`;
+  return new ApiError(response.status, `request failed with status ${response.status}`);
 }
 
 export class Api {
@@ -160,7 +183,7 @@ export class Api {
   async health(): Promise<HealthResponse> {
     const response = await fetch(`${this.config.apiBase}/health`);
     if (!response.ok) {
-      throw new ApiError(response.status, await parseErrorDetail(response));
+      throw await toApiError(response);
     }
     return (await response.json()) as HealthResponse;
   }
@@ -308,6 +331,43 @@ export class Api {
     await this.request(`/documents/${documentId}/redo`, { method: "POST" });
   }
 
+  /** CMD-04: what can come next in a half-typed command. */
+  async completeCommand(text: string): Promise<string[]> {
+    const response = await this.request(`/commands/complete?${new URLSearchParams({ text })}`);
+    return ((await response.json()) as { suggestions: string[] }).suggestions;
+  }
+
+  /** CMD-05: what a command would do, without doing it. Rejects with suggestions if it doesn't parse. */
+  async previewCommand(documentId: string, text: string, pageIndex: number): Promise<CommandPreview> {
+    const response = await this.request(`/documents/${documentId}/commands/preview`, {
+      method: "POST",
+      body: JSON.stringify({ text, page_index: pageIndex }),
+    });
+    return (await response.json()) as CommandPreview;
+  }
+
+  async applyCommand(documentId: string, text: string, pageIndex: number): Promise<unknown> {
+    const response = await this.request(`/documents/${documentId}/commands/apply`, {
+      method: "POST",
+      body: JSON.stringify({ text, page_index: pageIndex }),
+    });
+    return ((await response.json()) as { result: unknown }).result;
+  }
+
+  /** CMD-07: this session's edits as a YAML recipe. */
+  async exportRecipe(documentId: string): Promise<string> {
+    const response = await this.request(`/documents/${documentId}/recipe`);
+    return await response.text();
+  }
+
+  async runRecipe(documentId: string, text: string, dryRun: boolean): Promise<RecipeRun> {
+    const response = await this.request(`/documents/${documentId}/recipe`, {
+      method: "POST",
+      body: JSON.stringify({ text, dry_run: dryRun }),
+    });
+    return (await response.json()) as RecipeRun;
+  }
+
   /** Save the edited document on the server's disk. With no options it writes a
    * new versioned file next to the original (`name.edited.pdf`), never over it. */
   async save(documentId: string, options: { path?: string; overwrite?: boolean } = {}): Promise<SaveResponse> {
@@ -328,7 +388,7 @@ export class Api {
       },
     });
     if (!response.ok) {
-      throw new ApiError(response.status, await parseErrorDetail(response));
+      throw await toApiError(response);
     }
     return response;
   }

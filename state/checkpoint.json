@@ -1,10 +1,10 @@
 {
   "phase": "P4",
-  "taskId": "P1-P3 independently reviewed and signed off; owner decisions applied. Next: P4 (command bar & recipes)",
-  "step": "The independent reviewer signed off P1, P2 and P3 after two rounds of fixes (16 findings, then R1-R3 and a minor double-rise bug). Owner decisions applied: EDT-03 explicit style and EDT-06 font/weight changes are built (engine, CLI, API, UI); FNT-11 and FNT-14 were split, with the unbuilt parts planned as FNT-17 and FNT-18; non-exact font matches are flagged in a fonts-to-research list (pdfworkerz fonts --research).",
+  "taskId": "P4 complete (8/8 by evidence); independent reviewer sign-off pending, then push main, then P5",
+  "step": "P4 built: command grammar (Lark) with page/regex selectors and style words, autocomplete, preview before apply, did-you-mean suggestions, recipes (YAML/JSON, deterministic replay), CLI edit --do/--recipe and run, and the UI command bar. 688 tests, 93.9% coverage.",
   "branch": "main",
   "lastGreenCommit": "b50687d (local gate, Windows 11, Python 3.14.3, 14/14 steps, 634 tests)",
-  "nextAction": "Start P4 (CMD-01..08: plain-English command grammar and recipes); run tools/session_budget.py first. Review the fonts-to-research list from time to time and add fonts (with their licenses) to assets/fonts. Every session: python tools/gate.py before each commit; push only with the owner's approval.",
+  "nextAction": "1) Independent reviewer pass for P4; fix what it finds; record sign-off. 2) Push main to GitHub (owner asked for this after P4). 3) Start P5; run tools/session_budget.py first.",
   "openQuestions": [
     {
       "phase": "P2",

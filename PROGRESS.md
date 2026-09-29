@@ -10,7 +10,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P1 | Engine core, inspection, encryption, repair, CLI | ✅ Done: 17/17 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes (see the 2026-09-28 review entry) |
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes; FNT-11/FNT-14 re-scoped (FNT-17/18 planned) |
 | P3 | Web UI with click-to-edit | ✅ Done: 15/15 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes |
-| P4 | Command bar & recipes | Planned | |
+| P4 | Command bar & recipes | ✅ Done: 8/8 features proven by tests | Independent reviewer sign-off pending |
 | P5 | Organize, page design, annotate, document structure | Planned | |
 | P6 | Forms, signatures, security, redaction | Planned | |
 | P7 | OCR, scans, conversions | Planned | |
@@ -25,6 +25,36 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-29 — P4: command bar and recipes (CMD-01..CMD-08)
+
+- **Grammar (CMD-01..03, CMD-06):** `engine/commands.py`, a fixed Lark LALR
+  grammar turning plain-English commands into the existing Ops: `replace`,
+  `delete`, `insert` (below/above/after/before a span, or at a point),
+  `set <style> for`, `undo`, `redo`; targets `"text"`, `/regex/` or `text`;
+  pages `on page N | on pages 1-3,5 | on odd/even/all pages` (1-based);
+  style words bold/italic/size/color/font/match style. A command over several
+  pages becomes one `BatchOp` (one history entry, one undo). A command that
+  doesn't parse is refused with rapidfuzz "did you mean" suggestions and a
+  syntax hint, never run as a guess; later-phase verbs (merge, watermark, ...)
+  say which phase brings them. Keywords are whole-word terminals (a plain
+  string terminal read "Redo" as the color "red" plus "o").
+- **Autocomplete (CMD-04):** Lark's interactive parser lists what can come
+  next; the UI command bar shows it as clickable chips.
+- **Preview (CMD-05):** `engine/preview.py` counts matches per page without
+  touching the document; the bar shows it before Apply.
+- **Recipes (CMD-07):** `engine/recipes.py`, YAML/JSON lists of real Ops
+  (the published schema, not SPEC §9's sketch); export from history, replay
+  as one batch, dry-run first. `Document.save(deterministic=True)` makes a
+  replay byte-identical: `no_new_id` keeps the first /ID half, and the second
+  half, which pymupdf still randomises (as a hex or a literal string), is
+  pinned to a content hash. Not possible for AES-encrypted files, whose
+  streams get fresh random IVs on every save -- by design.
+- **CLI (CMD-08):** `pdfworkerz edit FILE --do "..." --recipe FILE
+  [--dry-run] [--save-recipe]` and `pdfworkerz run RECIPE FILE`.
+- **API/UI:** preview/apply/complete/recipe routes; the command bar (`/`
+  focuses it). `insert_text` gained anchored placement.
+- 688 tests, 93.9% coverage, gate 14/14. 65/163 features done.
 
 ### 2026-09-28 (cont. 3) — independent review of P1-P3, fixes, sign-off; owner decisions
 

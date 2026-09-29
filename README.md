@@ -25,8 +25,11 @@ pdfworkerz repair damaged.pdf --out fixed.pdf             # fix a broken PDF
 pdfworkerz replace mydoc.pdf "old text" "new text" --out edited.pdf
 pdfworkerz replace mydoc.pdf --match "- End -" "Fin"      # --match for text starting with "-"
 pdfworkerz delete mydoc.pdf "text to remove" --out edited.pdf
-pdfworkerz restyle mydoc.pdf "text" --size 14 --color 1,0,0 --out edited.pdf
+pdfworkerz restyle mydoc.pdf "text" --size 14 --color 1,0,0 --bold --font "Times" --out edited.pdf
 pdfworkerz insert mydoc.pdf "new text" --position 72,700 --reference "existing text" --out edited.pdf
+pdfworkerz insert mydoc.pdf "APPROVED" --position 72,700 --font "Courier" --size 20 --bold   # explicit style
+pdfworkerz fonts                                            # font families you can choose
+pdfworkerz fonts --research                                 # fonts edits could only approximate
 pdfworkerz copy-style mydoc.pdf --source "Heading" --target "plain text"      # format painter
 pdfworkerz move-block mydoc.pdf --match "a line of the paragraph" --dy 40 --width 300
 pdfworkerz spellcheck mydoc.pdf                            # offline, Hunspell en_US
@@ -38,7 +41,15 @@ pdfworkerz insert-image mydoc.pdf logo.png --rect 72,72,172,122
 pdfworkerz images mydoc.pdf 0 / move-image / crop-image / replace-image / delete-image
 pdfworkerz draw-shape mydoc.pdf rect --points "72,300 272,400" --fill 1,1,0
 pdfworkerz shapes mydoc.pdf 0 / edit-shape / delete-shape
+
+# Plain-English commands and recipes (P4)
+pdfworkerz edit mydoc.pdf --do 'replace "2024" with "2025" on all pages' --do 'set bold for "Total"'
+pdfworkerz edit mydoc.pdf --do 'delete "DRAFT" on odd pages' --dry-run      # show what would change
+pdfworkerz edit mydoc.pdf --do '...' --save-recipe fixes.yaml               # keep the steps
+pdfworkerz run fixes.yaml other.pdf --dry-run                               # replay on another file
 ```
+
+Commands never guess: one that doesn't parse is refused with the closest valid forms ("did you mean …") and a syntax hint, and nothing changes. The grammar covers `replace`, `delete`, `insert … below/above/after/before "…"` or `at x, y`, `set <style> for …`, pages as `on page 3 | on pages 1-3,5 | on odd pages | on all pages`, targets as `"text"`, `/regex/` or `text`, and style words `bold`, `italic`, `size 11`, `color #cc0000`, `font "Times"`, `match style`. A recipe is a YAML/JSON list of the same Ops as `docs/ops.schema.json`; replaying one on the same input gives byte-identical output (for unencrypted files: AES uses fresh random IVs on every save).
 
 Every text edit command prints which font-match tier it used (exact / approximate / fallback) and whether the result needs a look — `--require-tier exact` refuses to proceed on anything weaker. A replacement keeps a right-aligned or centered line's edge. `--out` is optional; without it, the edited copy goes to `<name>.edited.pdf` next to the original, which is never touched (`--overwrite` writes back to it explicitly, when that's what you want).
 
@@ -52,7 +63,7 @@ cd web && npm ci && npm run build && npm run preview
 # open the printed URL with ?token=<token>&api=http://127.0.0.1:8000
 ```
 
-Click any text to edit it in place, in its detected style. The inspector shows the font, size, color and match confidence, and offers **Copy style** (format painter) and the text's **links**. Drag the handles beside selected text to move or re-wrap its paragraph. Images and shapes can be selected, dragged, resized, restyled, cropped (images) and deleted. The toolbar inserts images, draws lines/rectangles/ellipses, toggles **Spelling** (underlines, with suggestions), and opens a before/after **Compare** view. Every change is undoable from the history strip (Ctrl+Z / Ctrl+Shift+Z).
+Type commands in the **command bar** under the toolbar (press `/`): suggestions show what can come next, Enter previews how many matches would change, and Enter again (or **Apply**) does it; the bar also exports the session as a recipe and runs a recipe after a dry run. Click any text to edit it in place, in its detected style. The inspector shows the font, size, color and match confidence, and offers **Change style…** (font, bold, italic, size, color), **Copy style** (format painter) and the text's **links**. Drag the handles beside selected text to move or re-wrap its paragraph. Images and shapes can be selected, dragged, resized, restyled, cropped (images) and deleted. The toolbar adds text (**Text…**, then click where it goes), inserts images, draws lines/rectangles/ellipses, toggles **Spelling** (underlines, with suggestions), and opens a before/after **Compare** view. Every change is undoable from the history strip (Ctrl+Z / Ctrl+Shift+Z).
 
 The server binds to `127.0.0.1` only, and every request must carry the session token in an `X-Session-Token` header (`401` otherwise). The API is the same `Op` classes as the CLI, over JSON: `POST /documents` opens a file, `POST /documents/{id}/ops` applies any Op (journaled, undoable), and read-only `GET .../pages/{n}/spans|links|images|shapes|spelling|render` routes describe a page. `docs/ops.schema.json` lists every Op.
 
@@ -60,7 +71,7 @@ The server binds to `127.0.0.1` only, and every request must carry the session t
 
 | Document | What it is |
 |---|---|
-| [SPEC.md](SPEC.md) | Full product and technical specification, with 161 catalogued features |
+| [SPEC.md](SPEC.md) | Full product and technical specification, with 163 catalogued features |
 | [tracker/features.json](tracker/features.json) | Single source of truth for feature status |
 | [tracker/src/FeatureTracker.jsx](tracker/src/FeatureTracker.jsx) | Live tracker UI |
 | [docs/SESSION_PROTOCOL.md](docs/SESSION_PROTOCOL.md) | Token look-ahead and resume procedure for build sessions |

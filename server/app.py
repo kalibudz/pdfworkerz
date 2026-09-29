@@ -43,6 +43,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from engine import __version__
+from engine.commands import CommandError, CommandPlan, complete, parse_command
 from engine.document import Document
 from engine.errors import (
     CertificateEncryptedError,
@@ -69,6 +70,8 @@ from engine.ops.links import PageLinksOp
 from engine.ops.shapes import PageShapesOp
 from engine.ops.spellcheck import SpellCheckOp
 from engine.ops.text import PreviewTextOp, _font_index
+from engine.preview import preview_ops
+from engine.recipes import RecipeError, as_single_op, dump_recipe, load_recipe
 
 _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
     DocumentNotFoundError: 404,
@@ -80,6 +83,8 @@ _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
     OverwriteRefusedError: 409,
     SaveNotPossibleError: 409,
     SaveFailedError: 409,
+    CommandError: 400,
+    RecipeError: 400,
     EncryptionLostError: 422,
     NothingToUndoError: 409,
     OpValidationError: 400,
@@ -295,6 +300,84 @@ def document_file(document_id: str, journal: JournalDep) -> Response:
     return Response(content=journal.document.to_bytes(), media_type="application/pdf")
 
 
+class CommandRequest(BaseModel):
+    text: str
+    page_index: int = 0
+    """The page shown in the viewer (0-based): where "insert" goes when the command names no page."""
+
+
+class RecipeRequest(BaseModel):
+    text: str
+    dry_run: bool = False
+
+
+def _plan(journal: UndoRedoJournal, body: CommandRequest) -> CommandPlan:
+    return parse_command(body.text, page_count=journal.document.page_count, current_page=body.page_index)
+
+
+@router.get("/commands/complete")
+def command_completions(text: str = "") -> dict[str, list[str]]:
+    """CMD-04: what can come next in a half-typed command."""
+    return {"suggestions": complete(text)}
+
+
+@router.post("/documents/{document_id}/commands/preview")
+def command_preview(document_id: str, body: CommandRequest, journal: JournalDep) -> dict[str, Any]:
+    """CMD-05: what a command would do, counted without changing anything."""
+    plan = _plan(journal, body)
+    if plan.special:
+        return {"description": plan.description, "special": plan.special, "matches": None, "pages": [], "warnings": []}
+    preview = preview_ops(journal.document, plan.ops)
+    return {
+        "description": plan.description,
+        "special": None,
+        "op": plan.op(),
+        "matches": preview.matches,
+        "pages": preview.pages,
+        "warnings": preview.warnings,
+    }
+
+
+@router.post("/documents/{document_id}/commands/apply")
+def command_apply(document_id: str, body: CommandRequest, journal: JournalDep) -> dict[str, Any]:
+    """CMD-01: run a command -- the same Ops, journaled like any other edit (one undo step)."""
+    plan = _plan(journal, body)
+    if plan.special == "undo":
+        journal.undo()
+        return {"description": plan.description, "result": None}
+    if plan.special == "redo":
+        journal.redo()
+        return {"description": plan.description, "result": None}
+    result = journal.record(parse_op(plan.op()))
+    return {"description": plan.description, "result": _jsonable(result)}
+
+
+@router.get("/documents/{document_id}/recipe")
+def export_recipe(document_id: str, journal: JournalDep, format: Literal["yaml", "json"] = "yaml") -> Response:
+    """CMD-07: this session's edits as a replayable recipe."""
+    name = journal.document.source_path.stem if journal.document.source_path else "recipe"
+    text = dump_recipe(journal.history, name=name, fmt=format)
+    return Response(content=text, media_type="application/json" if format == "json" else "application/yaml")
+
+
+@router.post("/documents/{document_id}/recipe")
+def run_recipe(document_id: str, body: RecipeRequest, journal: JournalDep) -> dict[str, Any]:
+    """CMD-07: replay a recipe as one step (one undo), or dry-run it to see what it would change."""
+    recipe = load_recipe(body.text)
+    if body.dry_run:
+        preview = preview_ops(journal.document, recipe.ops)
+        return {
+            "recipe": recipe.name,
+            "steps": len(recipe.ops),
+            "matches": preview.matches,
+            "pages": preview.pages,
+            "warnings": preview.warnings,
+            "applied": False,
+        }
+    journal.record(parse_op(as_single_op(recipe)))
+    return {"recipe": recipe.name, "steps": len(recipe.ops), "applied": True}
+
+
 @router.get("/fonts")
 def fonts() -> dict[str, list[str]]:
     """EDT-03/EDT-06: the font families the user can choose from."""
@@ -370,7 +453,10 @@ def create_app(*, token: str | None = None) -> FastAPI:
 
     @app.exception_handler(PdfWorkerzError)
     def handle_engine_error(_request: Request, exc: PdfWorkerzError) -> JSONResponse:
-        return JSONResponse(status_code=_status_for(exc), content={"detail": str(exc)})
+        content: dict[str, Any] = {"detail": str(exc)}
+        if isinstance(exc, CommandError):  # CMD-06: the command bar shows these, never runs them
+            content.update(suggestions=exc.suggestions, hint=exc.hint)
+        return JSONResponse(status_code=_status_for(exc), content=content)
 
     @app.get("/health")
     def health() -> dict[str, str]:
