@@ -3,13 +3,13 @@
   "taskId": "P1-P3 independently reviewed and signed off; owner decisions applied. Next: P4 (command bar & recipes)",
   "step": "The independent reviewer signed off P1, P2 and P3 after two rounds of fixes (16 findings, then R1-R3 and a minor double-rise bug). Owner decisions applied: EDT-03 explicit style and EDT-06 font/weight changes are built (engine, CLI, API, UI); FNT-11 and FNT-14 were split, with the unbuilt parts planned as FNT-17 and FNT-18; non-exact font matches are flagged in a fonts-to-research list (pdfworkerz fonts --research).",
   "branch": "main",
-  "lastGreenCommit": "7f4273e (local gate, Windows 11, Python 3.14.3, 14/14 steps; Python 3.11 types+tests also pass)",
+  "lastGreenCommit": "b50687d (local gate, Windows 11, Python 3.14.3, 14/14 steps, 634 tests)",
   "nextAction": "Start P4 (CMD-01..08: plain-English command grammar and recipes); run tools/session_budget.py first. Review the fonts-to-research list from time to time and add fonts (with their licenses) to assets/fonts. Every session: python tools/gate.py before each commit; push only with the owner's approval.",
   "openQuestions": [
     {
       "phase": "P2",
       "kind": "limitation",
-      "text": "RTL scripts (Arabic, Hebrew) and CJK vertical writing mode are not supported for editing -- documented in tests/engine/test_font_cjk.py's module docstring"
+      "text": "RTL scripts (Arabic, Hebrew) and vertical writing are not supported for editing; planned as FNT-18 (P8)."
     },
     {
       "phase": "P2",
