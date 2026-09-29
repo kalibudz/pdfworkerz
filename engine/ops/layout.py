@@ -44,9 +44,11 @@ class ResizePagesOp(Op):
     page_indices: list[int]
     size: str | tuple[float, float]
     scale: bool = True
+    drop_interactive: bool = False
+    """Resize even though annotations or form fields on those pages can't be carried over."""
 
     def apply(self, document: Document) -> None:
-        layout.resize(document, self.page_indices, self.size, scale=self.scale)
+        layout.resize(document, self.page_indices, self.size, scale=self.scale, drop_interactive=self.drop_interactive)
 
 
 @register_op
@@ -58,9 +60,18 @@ class NUpOp(Op):
     rows: int = 1
     sheet: str | tuple[float, float] = "a4-landscape"
     gap: float = 12.0
+    drop_interactive: bool = False
+    """Impose even though links, annotations and form fields can't be carried onto the sheets."""
 
     def apply(self, document: Document) -> int:
-        return layout.n_up(document, cols=self.cols, rows=self.rows, sheet=self.sheet, gap=self.gap)
+        return layout.n_up(
+            document,
+            cols=self.cols,
+            rows=self.rows,
+            sheet=self.sheet,
+            gap=self.gap,
+            drop_interactive=self.drop_interactive,
+        )
 
 
 @register_op
@@ -70,6 +81,8 @@ class BookletOp(Op):
     op: Literal["booklet"] = "booklet"
     sheet: str | tuple[float, float] = "a4-landscape"
     gap: float = 0.0
+    drop_interactive: bool = False
+    """Impose even though links, annotations and form fields can't be carried onto the sheets."""
 
     def apply(self, document: Document) -> int:
-        return layout.booklet(document, sheet=self.sheet, gap=self.gap)
+        return layout.booklet(document, sheet=self.sheet, gap=self.gap, drop_interactive=self.drop_interactive)

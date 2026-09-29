@@ -182,3 +182,68 @@ def test_geometry_commands_plan_the_matching_ops() -> None:
     assert ops("impose as booklet on a3 landscape") == [{"op": "booklet", "sheet": "a3-landscape"}]
     with pytest.raises(CommandError, match="not 5"):
         ops("impose 5 up")
+
+
+# -- review fixes: nothing is lost silently --
+
+
+def _linked(path: Path) -> Path:
+    doc = pymupdf.open()
+    for n in range(1, 4):
+        doc.new_page().insert_text((72, 72), f"Page {n}")
+    doc.set_toc([[1, "One", 1], [1, "Two", 2], [2, "Three", 3]])
+    doc[0].insert_link({"kind": pymupdf.LINK_GOTO, "from": pymupdf.Rect(72, 60, 150, 80), "page": 1})
+    doc[1].insert_link(
+        {"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(100, 100, 200, 120), "uri": "https://example.com"}
+    )
+    doc.save(path)
+    return path
+
+
+@pytest.mark.feature("ORG-10")
+def test_resize_keeps_the_outline_and_links_and_scales_links_on_the_page(tmp_path: Path) -> None:
+    doc = Document.open(_linked(tmp_path / "l.pdf"))
+    _apply(doc, {"op": "resize_pages", "page_indices": [1], "size": "a5"})
+    assert doc.raw.get_toc() == [[1, "One", 1], [1, "Two", 2], [2, "Three", 3]]
+    assert [link["page"] for link in doc.raw[0].get_links()] == [1]  # the link into the resized page survives
+    (uri,) = doc.raw[1].get_links()
+    scale = 420 / 595
+    assert tuple(uri["from"]) == pytest.approx(tuple(pymupdf.Rect(100, 100, 200, 120) * scale), abs=0.5)
+
+
+@pytest.mark.feature("ORG-10")
+def test_resize_refuses_to_drop_annotations_unless_asked(tmp_path: Path) -> None:
+    source = pymupdf.open(_linked(tmp_path / "l.pdf"))
+    source[1].add_text_annot((50, 50), "keep me")
+    source.save(tmp_path / "a.pdf")
+    doc = Document.open(tmp_path / "a.pdf")
+    with pytest.raises(OpValidationError, match="can't carry over 1 annotation"):
+        _apply(doc, {"op": "resize_pages", "page_indices": [1], "size": "a5"})
+    assert doc.raw[1].rect.width == 595  # nothing changed
+    _apply(doc, {"op": "resize_pages", "page_indices": [1], "size": "a5", "drop_interactive": True})
+    assert doc.raw[1].rect.width == 420
+
+
+@pytest.mark.feature("ORG-11")
+@pytest.mark.feature("ORG-12")
+def test_imposition_refuses_to_drop_links_and_moves_bookmarks_to_sheets(tmp_path: Path) -> None:
+    doc = Document.open(_linked(tmp_path / "l.pdf"))
+    with pytest.raises(OpValidationError, match="can't carry over 2 links"):
+        _apply(doc, {"op": "n_up", "cols": 2, "rows": 1})
+    assert doc.page_count == 3
+    _apply(doc, {"op": "n_up", "cols": 2, "rows": 1, "drop_interactive": True})
+    assert doc.raw.get_toc() == [[1, "One", 1], [1, "Two", 1], [2, "Three", 2]]
+    doc = Document.open(tmp_path / "l.pdf")
+    _apply(doc, {"op": "booklet", "drop_interactive": True})  # order [blank, 1, 2, 3]
+    assert doc.raw.get_toc() == [[1, "One", 1], [1, "Two", 2], [2, "Three", 2]]
+
+
+@pytest.mark.feature("ORG-11")
+def test_nan_and_negative_geometry_are_refused(tmp_path: Path) -> None:
+    doc = Document.open(_numbered(tmp_path / "p.pdf", 4))
+    with pytest.raises(OpValidationError, match="finite number"):
+        parse_op({"op": "n_up", "cols": 2, "rows": 1, "gap": float("nan")})
+    with pytest.raises(OpValidationError, match="finite number"):
+        parse_op({"op": "crop_pages", "page_indices": [0], "box": (0, 0, float("nan"), 100)})
+    with pytest.raises(OpValidationError, match="can't be negative"):
+        _apply(doc, {"op": "n_up", "cols": 2, "rows": 1, "gap": -5})

@@ -46,7 +46,9 @@ class Op(BaseModel):
     can never be registered or mistaken for a real operation.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # allow_inf_nan=False: a NaN coordinate compares False with every bound, so it slipped past
+    # range checks and failed deep inside pymupdf instead of as a validation error.
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     def apply(self, document: Document) -> Any:
         """Run this operation against an open document and return its result."""

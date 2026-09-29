@@ -59,9 +59,9 @@ merge_doc: MERGE STRING (RELATION PAGE NUMBER)?
 remove_blank: REMOVE BLANK PAGES
 crop_pages: CROP pageset BY number
 uncrop_pages: UNCROP pageset
-resize_pages: RESIZE pageset TO SIZENAME LANDSCAPE? (WITHOUT SCALING)?
-impose: IMPOSE number UP (ON SIZENAME LANDSCAPE?)?   -> impose_n_up
-      | IMPOSE AS? BOOKLET (ON SIZENAME LANDSCAPE?)? -> impose_booklet
+resize_pages: RESIZE pageset TO SIZENAME LANDSCAPE? (WITHOUT SCALING)? (DROPPING ANNOTATIONS)?
+impose: IMPOSE number UP (ON SIZENAME LANDSCAPE?)? (DROPPING ANNOTATIONS)?   -> impose_n_up
+      | IMPOSE AS? BOOKLET (ON SIZENAME LANDSCAPE?)? (DROPPING ANNOTATIONS)? -> impose_booklet
 number_pages: NUMBERVERB PAGES? (FROM number)? (EXCEPT pageset)? (AT (POSNAME | CENTER))? (AS STRING)?
 bates: BATES STRING? (FROM number)?
 header_footer: (HEADER | FOOTER) STRING (LEFT | CENTER | RIGHT)? scope?
@@ -188,6 +188,7 @@ KEYWORDS: dict[str, tuple[str, ...]] = {
     "UP": ("up",),
     "AS": ("as", "a"),
     "BOOKLET": ("booklet",),
+    "DROPPING": ("dropping",),
     "NUMBERVERB": ("number",),
     "FROM": ("from",),
     "EXCEPT": ("except", "skipping", "skip"),
@@ -855,7 +856,9 @@ def _resize_pages(source: str, children: list[Any], page_count: int, _current: i
     pages = _pageset(children, page_count)
     size = _sheet(children, "a4")
     scale = not _tokens(children, "WITHOUT")
-    op = {"op": "resize_pages", "page_indices": pages, "size": size, "scale": scale}
+    op: dict[str, Any] = {"op": "resize_pages", "page_indices": pages, "size": size, "scale": scale}
+    if _tokens(children, "DROPPING"):
+        op["drop_interactive"] = True
     how = "scaling content to fit" if scale else "keeping content at its size"
     return CommandPlan(source, f"Resize page(s) {_page_list(pages)} to {size}, {how}", [op])
 
@@ -869,14 +872,18 @@ def _impose_n_up(source: str, children: list[Any], page_count: int, _current: in
         raise CommandError(f"impose {', '.join(map(str, N_UP_GRIDS))} up, not {count:g}")
     cols, rows = N_UP_GRIDS[int(count)]
     sheet = _sheet(children, "a4-landscape" if cols > rows else "a4")
-    op = {"op": "n_up", "cols": cols, "rows": rows, "sheet": sheet}
+    op: dict[str, Any] = {"op": "n_up", "cols": cols, "rows": rows, "sheet": sheet}
+    if _tokens(children, "DROPPING"):
+        op["drop_interactive"] = True
     sheets = -(-page_count // (cols * rows))
     return CommandPlan(source, f"Put {int(count)} pages on each {sheet} sheet ({sheets} sheet(s))", [op])
 
 
 def _impose_booklet(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
     sheet = _sheet(children, "a4-landscape")
-    op = {"op": "booklet", "sheet": sheet}
+    op: dict[str, Any] = {"op": "booklet", "sheet": sheet}
+    if _tokens(children, "DROPPING"):
+        op["drop_interactive"] = True
     sides = -(-page_count // 4) * 2
     return CommandPlan(
         source, f"Impose as a folded booklet on {sheet} ({sides} sheet sides, blanks added to fill)", [op]

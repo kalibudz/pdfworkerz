@@ -224,3 +224,33 @@ def test_page_operations_undo_like_any_edit(five: Document) -> None:
     journal.undo()
     assert _labels(journal.document)[0] == "Page 1" and journal.document.raw[0].rotation == 0
     journal.document.close()
+
+
+# -- review fix: extract and split keep encryption --
+
+
+@pytest.mark.feature("ORG-06")
+def test_extract_and_split_from_an_encrypted_document_stay_encrypted(corpus, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    doc = Document.open(corpus.encrypted_aes_256, password=corpus.user_password)
+    out = tmp_path / "picked.pdf"
+    _apply(doc, {"op": "extract_pages", "page_indices": [0], "out": str(out)})
+    with pymupdf.open(out) as picked:
+        assert picked.needs_pass and picked.authenticate(corpus.user_password)
+        assert picked[0].get_text() == doc.raw[0].get_text()
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    _apply(doc, {"op": "split", "out_dir": str(parts), "every": 1})
+    for part in parts.iterdir():
+        with pymupdf.open(part) as opened:
+            assert opened.needs_pass
+
+
+@pytest.mark.feature("ORG-06")
+def test_extract_keeps_bookmarks_and_links_among_the_kept_pages(tmp_path: Path, five: Document) -> None:
+    five.raw.set_toc([[1, "First", 1], [1, "Third", 3], [1, "Fifth", 5]])
+    five.raw[0].insert_link({"kind": pymupdf.LINK_GOTO, "from": pymupdf.Rect(72, 60, 150, 80), "page": 2})
+    out = tmp_path / "kept.pdf"
+    _apply(five, {"op": "extract_pages", "page_indices": [0, 2], "out": str(out)})
+    with pymupdf.open(out) as kept:
+        assert kept.get_toc() == [[1, "First", 1], [1, "Third", 2]]
+        assert [link["page"] for link in kept[0].get_links()] == [1]

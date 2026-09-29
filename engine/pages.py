@@ -15,6 +15,7 @@ import pymupdf
 
 from engine.document import Document
 from engine.errors import OpValidationError, OverwriteRefusedError
+from engine.pdfbytes import PDF_ENCRYPT_KEEP, encrypted_snapshot, working_copy
 
 A4 = (595.0, 842.0)
 LETTER = (612.0, 792.0)
@@ -146,17 +147,23 @@ def duplicate_pages(document: Document, pages: list[int], *, copies: int = 1) ->
             document.raw.fullcopy_page(index, index + 1)
 
 
+def _selected(document: Document, pages: list[int], snapshot: bytes | None = None) -> pymupdf.Document:
+    """A copy holding just `pages`, in that order, still encrypted like the document (with the
+    same passwords) and keeping its metadata, and the bookmarks and links among those pages."""
+    copy = working_copy(document.raw, snapshot)
+    copy.select(pages)
+    return copy
+
+
 def extract_pages(document: Document, pages: list[int], out: str | Path, *, overwrite: bool = False) -> Path:
     """ORG-06: write the given pages, in the given order, to a new PDF. The document itself
-    is unchanged."""
+    is unchanged. An encrypted document's pages are written encrypted, with its passwords."""
     _check_indices(document, pages)
     target = Path(out)
     _refuse_overwrite(target, overwrite)
-    new = pymupdf.open()
+    new = _selected(document, pages)
     try:
-        for page in pages:
-            new.insert_pdf(document.raw, from_page=page, to_page=page)
-        new.save(str(target), garbage=4, deflate=True)
+        new.save(str(target), garbage=4, deflate=True, encryption=PDF_ENCRYPT_KEEP)
     finally:
         new.close()
     return target
@@ -201,9 +208,10 @@ def split_plan(
         raise OpValidationError("the maximum size must be positive")
     parts: list[list[int]] = []
     current: list[int] = []
+    snapshot = encrypted_snapshot(document.raw)
     for page in range(count):
         trial = [*current, page]
-        if current and _bytes_for(document, trial) > max_bytes:
+        if current and _bytes_for(document, trial, snapshot) > max_bytes:
             parts.append(current)
             current = [page]
         else:
@@ -212,12 +220,11 @@ def split_plan(
     return parts
 
 
-def _bytes_for(document: Document, pages: list[int]) -> int:
-    new = pymupdf.open()
+def _bytes_for(document: Document, pages: list[int], snapshot: bytes | None = None) -> int:
+    """The size a part holding `pages` is written at (the same way extract_pages writes it)."""
+    new = _selected(document, pages, snapshot)
     try:
-        for page in pages:
-            new.insert_pdf(document.raw, from_page=page, to_page=page)
-        return len(new.tobytes(garbage=4, deflate=True))
+        return len(new.tobytes(garbage=4, deflate=True, encryption=PDF_ENCRYPT_KEEP))
     finally:
         new.close()
 

@@ -55,3 +55,16 @@ def encrypted_snapshot(doc: pymupdf.Document) -> bytes:
     """`doc`'s current state as bytes that keep its encryption (for the undo journal)."""
     data: bytes = doc.tobytes(encryption=PDF_ENCRYPT_KEEP)
     return data
+
+
+def working_copy(doc: pymupdf.Document, data: bytes | None = None) -> pymupdf.Document:
+    """An independent copy of `doc` (or of snapshot bytes `data`) that keeps its encryption and
+    is logged in with the same password: save it with ``encryption=PDF_ENCRYPT_KEEP`` to write
+    part of an encrypted document out still encrypted, without touching `doc` itself."""
+    password = getattr(doc, _PASSWORD_ATTR, None)
+    copy = pymupdf.open(stream=data if data is not None else encrypted_snapshot(doc), filetype="pdf")
+    if copy.needs_pass and not copy.authenticate(password or ""):  # read before authenticate()
+        copy.close()
+        raise WrongPasswordError("could not open a working copy of this document")
+    remember_password(copy, password)
+    return copy

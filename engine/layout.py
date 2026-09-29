@@ -3,8 +3,9 @@
 Crop changes a page's visible area (its crop box) and nothing else: the content outside is
 hidden, not removed, so it can be uncropped. Resize, N-up and booklet build new pages that
 show the old ones scaled into place (``show_pdf_page``): the text stays text, drawn inside a
-Form XObject, which the editor already edits. Links and annotations of rebuilt pages are not
-carried over -- a documented limitation of placing pages this way.
+Form XObject, which the editor already edits. Bookmarks are kept (resize keeps links too);
+what can't be carried onto a rebuilt page -- annotations and form fields, and links on imposed
+sheets -- is refused unless the caller chooses to drop it, never lost silently.
 
 Coordinates are PDF points in the unrotated page, top-left origin (measured: pymupdf 1.28.2's
 ``set_cropbox`` takes them that way).
@@ -13,6 +14,7 @@ Coordinates are PDF points in the unrotated page, top-left origin (measured: pym
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 import pymupdf
 
@@ -72,43 +74,103 @@ def _size(name_or_size: str | tuple[float, float]) -> tuple[float, float]:
     return width, height
 
 
-def _replace_all_pages(document: Document, built: pymupdf.Document) -> None:
-    """Swap every page for the pages of `built`, keeping this Document (and its encryption)."""
-    old = document.page_count
-    document.raw.insert_pdf(built, start_at=0)
-    document.raw.delete_pages(built.page_count, built.page_count + old - 1)
-
-
 def _source_copy(document: Document) -> pymupdf.Document:
     return pymupdf.open(stream=plain_bytes(document.raw), filetype="pdf")
 
 
-def resize(document: Document, pages: list[int], size: str | tuple[float, float], *, scale: bool = True) -> None:
+def _interactive(document: Document, pages: Iterable[int], *, links: bool) -> dict[str, int]:
+    """What placing these pages onto new ones can't carry over: annotations and form fields
+    (and, when `links`, links too), counted per kind."""
+    counts = {"annotation": 0, "form field": 0, "link": 0}
+    for index in pages:
+        page = document.raw[index]
+        counts["annotation"] += len(list(page.annots()))
+        counts["form field"] += len(list(page.widgets()))
+        if links:
+            counts["link"] += len(page.get_links())
+    return {kind: n for kind, n in counts.items() if n}
+
+
+def _refuse_dropping(action: str, counts: dict[str, int], drop_interactive: bool) -> None:
+    if counts and not drop_interactive:
+        found = ", ".join(f"{n} {kind}{'s' if n > 1 else ''}" for kind, n in counts.items())
+        raise OpValidationError(
+            f"{action} can't carry over {found}: flatten annotations first, or drop them "
+            '(drop_interactive; in the command bar, add "dropping annotations")'
+        )
+
+
+def _placement(old: pymupdf.Rect, target: pymupdf.Rect) -> pymupdf.Matrix:
+    """The matrix show_pdf_page(keep_proportion=True) uses to put `old` into `target`."""
+    scale = min(target.width / old.width, target.height / old.height)
+    dx = target.x0 + (target.width - old.width * scale) / 2 - old.x0 * scale
+    dy = target.y0 + (target.height - old.height * scale) / 2 - old.y0 * scale
+    return pymupdf.Matrix(scale, 0, 0, scale, dx, dy)
+
+
+def _link_key(link: dict[str, Any]) -> tuple[Any, ...]:
+    return (link.get("kind"), tuple(round(v, 1) for v in link["from"]), link.get("page"), link.get("uri"))
+
+
+def resize(
+    document: Document,
+    pages: list[int],
+    size: str | tuple[float, float],
+    *,
+    scale: bool = True,
+    drop_interactive: bool = False,
+) -> None:
     """ORG-10: give pages a new size (a named size such as "a4" or "letter-landscape", or
     (width, height) points). With `scale`, content is scaled to fit and centered; without,
-    it keeps its size, centered on the new page (cropped if the page got smaller)."""
+    it keeps its size, centered on the new page (cropped if the page got smaller).
+
+    Only the chosen pages are rebuilt. The outline and every link are kept (links on a resized
+    page move and scale with its content). Annotations and form fields on a resized page can't
+    be carried over, so the resize is refused unless `drop_interactive`."""
     _check_indices(document, pages)
     width, height = _size(size)
+    chosen = sorted(set(pages))
+    rotated = [i for i in chosen if document.raw[i].rotation and document.raw[i].get_links()]
+    counts = _interactive(document, chosen, links=False)
+    if rotated:
+        counts["link on a rotated page"] = sum(len(document.raw[i].get_links()) for i in rotated)
+    _refuse_dropping("resizing those pages", counts, drop_interactive)
+
+    toc = document.raw.get_toc(simple=False)
+    saved_links = [document.raw[i].get_links() for i in range(document.page_count)]
     source = _source_copy(document)
-    built = pymupdf.open()
     try:
-        chosen = set(pages)
-        for index in range(document.page_count):
-            if index not in chosen:
-                built.insert_pdf(source, from_page=index, to_page=index)
-                continue
+        for index in chosen:
             old = source[index].rect
-            page = built.new_page(width=width, height=height)
+            page = document.raw.new_page(index, width=width, height=height)
             if scale:
-                page.show_pdf_page(page.rect, source, index, keep_proportion=True)
+                target = page.rect
+                page.show_pdf_page(target, source, index, keep_proportion=True)
+                matrix = _placement(old, target)
             else:
                 x0, y0 = (width - old.width) / 2, (height - old.height) / 2
                 target = pymupdf.Rect(x0, y0, x0 + old.width, y0 + old.height)
                 page.show_pdf_page(target & page.rect, source, index, clip=_clip_for(target, page.rect, old))
-        _replace_all_pages(document, built)
+                matrix = pymupdf.Matrix(1, 0, 0, 1, x0, y0)
+            document.raw.delete_page(index + 1)
+            page = document.raw[index]  # deleting a page invalidates page objects already loaded
+            if index not in rotated:
+                for link in saved_links[index]:
+                    moved = (pymupdf.Rect(link["from"]) * matrix) & page.rect
+                    if not moved.is_empty:
+                        page.insert_link({**link, "from": moved})
     finally:
-        built.close()
         source.close()
+    # Deleting the old pages also removed the bookmarks and the links elsewhere that pointed at them.
+    document.raw.set_toc(toc)
+    for index in range(document.page_count):
+        if index in chosen:
+            continue
+        page = document.raw[index]
+        present = {_link_key(link) for link in page.get_links()}
+        for link in saved_links[index]:
+            if _link_key(link) not in present:
+                page.insert_link(link)
 
 
 def _clip_for(target: pymupdf.Rect, page: pymupdf.Rect, old: pymupdf.Rect) -> pymupdf.Rect:
@@ -127,6 +189,8 @@ def _impose(
 ) -> pymupdf.Document:
     """Place pages (None = leave the slot empty) cols x rows per sheet, left to right, top to bottom."""
     width, height = sheet
+    if gap < 0:
+        raise OpValidationError("the gap between pages can't be negative")
     cell_w = (width - gap * (cols + 1)) / cols
     cell_h = (height - gap * (rows + 1)) / rows
     if cell_w < 20 or cell_h < 20:
@@ -146,22 +210,56 @@ def _impose(
     return built
 
 
-def n_up(
-    document: Document, *, cols: int, rows: int, sheet: str | tuple[float, float] = "a4-landscape", gap: float = 12.0
+def _replace_with_sheets(
+    document: Document,
+    order: list[int | None],
+    cols: int,
+    rows: int,
+    sheet: str | tuple[float, float],
+    gap: float,
+    drop_interactive: bool,
+    action: str,
 ) -> int:
-    """ORG-11: put `cols` x `rows` pages on each sheet, in reading order. Returns sheets made."""
-    if not (1 <= cols <= 8 and 1 <= rows <= 8) or cols * rows < 2:
-        raise OpValidationError("N-up needs 2 to 64 pages per sheet (1-8 columns and rows)")
+    """Swap every page for imposed sheets, keeping this Document (and its encryption); each
+    bookmark then points at the sheet its page landed on."""
+    _refuse_dropping(action, _interactive(document, range(document.page_count), links=True), drop_interactive)
+    per_sheet = cols * rows
+    sheet_of = {page: slot // per_sheet for slot, page in enumerate(order) if page is not None}
+    toc = [
+        [level, title, sheet_of[page - 1] + 1 if page >= 1 else page]
+        for level, title, page, *_ in document.raw.get_toc()
+    ]
     source = _source_copy(document)
     try:
-        built = _impose(source, range(document.page_count), cols, rows, _size(sheet), gap)
-        try:
-            _replace_all_pages(document, built)
-            return built.page_count
-        finally:
-            built.close()
+        built = _impose(source, order, cols, rows, _size(sheet), gap)
     finally:
         source.close()
+    try:
+        old = document.page_count
+        document.raw.insert_pdf(built, start_at=0)
+        document.raw.delete_pages(built.page_count, built.page_count + old - 1)
+        document.raw.set_toc(toc)
+        return built.page_count
+    finally:
+        built.close()
+
+
+def n_up(
+    document: Document,
+    *,
+    cols: int,
+    rows: int,
+    sheet: str | tuple[float, float] = "a4-landscape",
+    gap: float = 12.0,
+    drop_interactive: bool = False,
+) -> int:
+    """ORG-11: put `cols` x `rows` pages on each sheet, in reading order. Returns sheets made.
+    Bookmarks follow their pages onto the sheets; links, annotations and form fields can't, so
+    they are refused unless `drop_interactive`."""
+    if not (1 <= cols <= 8 and 1 <= rows <= 8) or cols * rows < 2:
+        raise OpValidationError("N-up needs 2 to 64 pages per sheet (1-8 columns and rows)")
+    order: list[int | None] = list(range(document.page_count))
+    return _replace_with_sheets(document, order, cols, rows, sheet, gap, drop_interactive, "N-up")
 
 
 def booklet_order(page_count: int) -> list[int | None]:
@@ -177,16 +275,15 @@ def booklet_order(page_count: int) -> list[int | None]:
     return order
 
 
-def booklet(document: Document, *, sheet: str | tuple[float, float] = "a4-landscape", gap: float = 0.0) -> int:
+def booklet(
+    document: Document,
+    *,
+    sheet: str | tuple[float, float] = "a4-landscape",
+    gap: float = 0.0,
+    drop_interactive: bool = False,
+) -> int:
     """ORG-12: impose for a folded booklet -- two pages side by side per sheet side, in saddle-
-    stitch order, so printing double-sided and folding gives the pages in sequence."""
-    source = _source_copy(document)
-    try:
-        built = _impose(source, booklet_order(document.page_count), 2, 1, _size(sheet), gap)
-        try:
-            _replace_all_pages(document, built)
-            return built.page_count
-        finally:
-            built.close()
-    finally:
-        source.close()
+    stitch order, so printing double-sided and folding gives the pages in sequence. Bookmarks
+    follow their pages; links, annotations and form fields are refused unless `drop_interactive`."""
+    order = booklet_order(document.page_count)
+    return _replace_with_sheets(document, order, 2, 1, sheet, gap, drop_interactive, "a booklet")

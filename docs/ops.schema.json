@@ -1719,6 +1719,11 @@
           "default": true,
           "title": "Scale",
           "type": "boolean"
+        },
+        "drop_interactive": {
+          "default": false,
+          "title": "Drop Interactive",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1774,6 +1779,11 @@
           "default": 12.0,
           "title": "Gap",
           "type": "number"
+        },
+        "drop_interactive": {
+          "default": false,
+          "title": "Drop Interactive",
+          "type": "boolean"
         }
       },
       "title": "NUpOp",
@@ -1815,6 +1825,11 @@
           "default": 0.0,
           "title": "Gap",
           "type": "number"
+        },
+        "drop_interactive": {
+          "default": false,
+          "title": "Drop Interactive",
+          "type": "boolean"
         }
       },
       "title": "BookletOp",
