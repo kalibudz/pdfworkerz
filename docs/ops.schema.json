@@ -68,6 +68,711 @@
     },
     {
       "additionalProperties": false,
+      "description": "Every annotation on one page (or all pages, with page_index None). Read-only, so --\nlike PageLinksOp -- never journaled; server/app.py serves it from a GET route.",
+      "properties": {
+        "op": {
+          "const": "page_annotations",
+          "default": "page_annotations",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Index"
+        }
+      },
+      "title": "PageAnnotationsOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ANN-01: highlight / underline / strikeout / squiggly every `match` (or `rects`).",
+      "properties": {
+        "op": {
+          "const": "mark_text",
+          "default": "mark_text",
+          "title": "Op",
+          "type": "string"
+        },
+        "kind": {
+          "default": "highlight",
+          "enum": [
+            "highlight",
+            "underline",
+            "strikeout",
+            "squiggly"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "match": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Match"
+        },
+        "rects": {
+          "anyOf": [
+            {
+              "items": {
+                "maxItems": 4,
+                "minItems": 4,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rects"
+        },
+        "page_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Index"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "title": "MarkTextOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ANN-02: a sticky note at `point`.",
+      "properties": {
+        "op": {
+          "const": "add_note",
+          "default": "add_note",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "point": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Point",
+          "type": "array"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "icon": {
+          "default": "Note",
+          "title": "Icon",
+          "type": "string"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        }
+      },
+      "required": [
+        "page_index",
+        "point",
+        "text"
+      ],
+      "title": "AddNoteOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ANN-02: a comment shown on the page as a text box.",
+      "properties": {
+        "op": {
+          "const": "add_comment",
+          "default": "add_comment",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "rect": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Rect",
+          "type": "array"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "size": {
+          "default": 11.0,
+          "title": "Size",
+          "type": "number"
+        }
+      },
+      "required": [
+        "page_index",
+        "rect",
+        "text"
+      ],
+      "title": "AddCommentOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ANN-03: rectangle, ellipse, line, arrow, polyline, polygon or freehand annotation.",
+      "properties": {
+        "op": {
+          "const": "add_annotation_shape",
+          "default": "add_annotation_shape",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "rectangle",
+            "ellipse",
+            "line",
+            "arrow",
+            "polyline",
+            "polygon",
+            "freehand"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "rect": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rect"
+        },
+        "points": {
+          "anyOf": [
+            {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Points"
+        },
+        "strokes": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strokes"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "default": "red",
+          "title": "Color"
+        },
+        "fill": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fill"
+        },
+        "width": {
+          "default": 2.0,
+          "title": "Width",
+          "type": "number"
+        },
+        "opacity": {
+          "default": 1.0,
+          "title": "Opacity",
+          "type": "number"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "page_index",
+        "kind"
+      ],
+      "title": "AddAnnotationShapeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ANN-04: draw every annotation into the page content; returns how many.",
+      "properties": {
+        "op": {
+          "const": "flatten_annotations",
+          "default": "flatten_annotations",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "title": "FlattenAnnotationsOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ANN-05: write every annotation to `out` (markdown, csv or json). Document unchanged.",
+      "properties": {
+        "op": {
+          "const": "annotation_summary",
+          "default": "annotation_summary",
+          "title": "Op",
+          "type": "string"
+        },
+        "out": {
+          "title": "Out",
+          "type": "string"
+        },
+        "format": {
+          "default": "markdown",
+          "enum": [
+            "markdown",
+            "csv",
+            "json"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "overwrite": {
+          "default": false,
+          "title": "Overwrite",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "out"
+      ],
+      "title": "AnnotationSummaryOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ANN-06: change an annotation's comment, author, color, opacity or position.",
+      "properties": {
+        "op": {
+          "const": "update_annotation",
+          "default": "update_annotation",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "xref": {
+          "title": "Xref",
+          "type": "integer"
+        },
+        "contents": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contents"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "opacity": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Opacity"
+        },
+        "rect": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rect"
+        }
+      },
+      "required": [
+        "page_index",
+        "xref"
+      ],
+      "title": "UpdateAnnotationOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ANN-06: remove one annotation.",
+      "properties": {
+        "op": {
+          "const": "delete_annotation",
+          "default": "delete_annotation",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "xref": {
+          "title": "Xref",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_index",
+        "xref"
+      ],
+      "title": "DeleteAnnotationOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "properties": {
         "op": {
           "const": "batch",

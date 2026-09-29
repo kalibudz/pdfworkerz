@@ -10,6 +10,17 @@ engine.ops.base alone would not run their @register_op decorators.
 
 from __future__ import annotations
 
+from engine.ops.annotations import (
+    AddAnnotationShapeOp,
+    AddCommentOp,
+    AddNoteOp,
+    AnnotationSummaryOp,
+    DeleteAnnotationOp,
+    FlattenAnnotationsOp,
+    MarkTextOp,
+    PageAnnotationsOp,
+    UpdateAnnotationOp,
+)
 from engine.ops.base import InspectOp, Op, RenderPageOp, op_registry, parse_op
 from engine.ops.batch import BatchOp
 from engine.ops.design import BackgroundOp, BatesOp, HeaderFooterOp, PageNumbersOp, StampOp, WatermarkOp
@@ -41,7 +52,11 @@ from engine.ops.spellcheck import CorrectWordOp, SpellCheckOp
 from engine.ops.text import DeleteTextOp, InsertTextOp, ReflowTextOp, ReplaceTextOp, RestyleSpanOp, RestyleTextOp
 
 __all__ = [
+    "AddAnnotationShapeOp",
+    "AddCommentOp",
     "AddLinkOp",
+    "AddNoteOp",
+    "AnnotationSummaryOp",
     "BackgroundOp",
     "BatchOp",
     "BatesOp",
@@ -49,6 +64,7 @@ __all__ = [
     "CorrectWordOp",
     "CropImageOp",
     "CropPagesOp",
+    "DeleteAnnotationOp",
     "DeleteImageOp",
     "DeletePagesOp",
     "DeleteShapeOp",
@@ -58,16 +74,19 @@ __all__ = [
     "EditShapeOp",
     "ExtractPagesOp",
     "FindBlankPagesOp",
+    "FlattenAnnotationsOp",
     "HeaderFooterOp",
     "InsertImageOp",
     "InsertPagesOp",
     "InsertTextOp",
     "InspectOp",
+    "MarkTextOp",
     "MergeOp",
     "MoveImageOp",
     "MovePagesOp",
     "NUpOp",
     "Op",
+    "PageAnnotationsOp",
     "PageImagesOp",
     "PageLinksOp",
     "PageNumbersOp",
@@ -87,6 +106,7 @@ __all__ = [
     "SplitOp",
     "StampOp",
     "UncropPagesOp",
+    "UpdateAnnotationOp",
     "UpdateLinkOp",
     "WatermarkOp",
     "op_registry",

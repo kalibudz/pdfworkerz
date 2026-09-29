@@ -63,6 +63,7 @@ from engine.errors import (
 )
 from engine.fonts import research as font_research
 from engine.fonts.choose import available_families
+from engine.ops.annotations import PageAnnotationsOp
 from engine.ops.base import MAX_RENDER_DPI, MIN_RENDER_DPI, Op, PageSpansOp, RenderPageOp, parse_op
 from engine.ops.images import PageImagesOp
 from engine.ops.journal import UndoRedoJournal
@@ -256,6 +257,13 @@ def page_links(document_id: str, page_index: int, journal: JournalDep) -> Any:
     directly like page_spans; adding/editing/removing goes through the
     generic, journaled ops endpoint."""
     return _jsonable(_read(PageLinksOp(page_index=page_index), journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/annotations")
+def page_annotations(document_id: str, page_index: int, journal: JournalDep) -> Any:
+    """ANN-06: every annotation on one page. Read-only (PageAnnotationsOp), applied
+    directly like page_links; every change goes through the ops endpoint."""
+    return _jsonable(_read(PageAnnotationsOp(page_index=page_index), journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/images")

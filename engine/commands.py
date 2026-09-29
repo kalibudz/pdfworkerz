@@ -36,6 +36,7 @@ start: replace | delete | insert | set | undo | redo
      | extract_pages | split_doc | merge_doc | remove_blank
      | crop_pages | uncrop_pages | resize_pages | impose
      | number_pages | bates | header_footer | watermark | background | stamp
+     | mark_text | add_note | flatten_annots | export_annots
 
 replace: REPLACE target WITH STRING (option | scope)*
 delete: DELETE target (option | scope)*
@@ -66,6 +67,10 @@ header_footer: (HEADER | FOOTER) STRING (LEFT | CENTER | RIGHT)? scope?
 watermark: WATERMARK STRING (BEHIND | scope)*
 background: BACKGROUND (HEXCOLOR | COLORNAME) scope?
 stamp: STAMP STRING (AT (POSNAME | CENTER) | scope)*
+mark_text: (HIGHLIGHT | UNDERLINE | STRIKEOUT | SQUIGGLE) target (scope | NOTE STRING)*
+add_note: NOTE STRING AT number ","? number ON PAGE NUMBER
+flatten_annots: FLATTEN ANNOTATIONS
+export_annots: EXPORT ANNOTATIONS TO STRING
 
 pageset: PAGE NUMBER            -> ps_one
        | PAGES ranges           -> ps_ranges
@@ -190,6 +195,14 @@ KEYWORDS: dict[str, tuple[str, ...]] = {
     "BEHIND": ("behind",),
     "BACKGROUND": ("background",),
     "STAMP": ("stamp",),
+    "HIGHLIGHT": ("highlight",),
+    "UNDERLINE": ("underline",),
+    "STRIKEOUT": ("strikeout", "strike out", "strikethrough", "cross out"),
+    "SQUIGGLE": ("squiggle", "squiggly"),
+    "NOTE": ("note", "comment"),
+    "FLATTEN": ("flatten",),
+    "ANNOTATIONS": ("annotations", "comments"),
+    "EXPORT": ("export",),
 }
 GRAMMAR = GRAMMAR_TEMPLATE.replace(
     "{keywords}",
@@ -222,6 +235,13 @@ VERBS = [
     "watermark",
     "background",
     "stamp",
+    "highlight",
+    "underline",
+    "strikeout",
+    "squiggle",
+    "note",
+    "flatten",
+    "export",
 ]
 EXAMPLES = [
     'replace "old" with "new" on all pages',
@@ -253,6 +273,11 @@ EXAMPLES = [
     'watermark "DRAFT" behind',
     "background #fff8e0 on page 1",
     'stamp "approved" at top-right on page 1',
+    'highlight "total" on page 2 note "check this"',
+    'strike out "old price"',
+    'note "Is this right?" at 400, 90 on page 1',
+    "flatten annotations",
+    'export annotations to "comments.md"',
 ]
 # SPEC.md section 8.3's other actions, refused with the phase that brings them.
 LATER_ACTIONS = {
@@ -264,7 +289,9 @@ LATER_ACTIONS = {
 SYNTAX_HINT = (
     "Text commands: replace, delete, insert, set; page commands: delete pages, rotate, move, duplicate, "
     "insert N blank pages, extract, split, merge, remove blank pages, crop, uncrop, resize, impose; "
-    "page design: number pages, bates, header, footer, watermark, background, stamp; and undo, redo. "
+    "page design: number pages, bates, header, footer, watermark, background, stamp; "
+    "annotations: highlight, underline, strike out, squiggle, note, flatten annotations, export annotations; "
+    "and undo, redo. "
     'Put text in "double quotes", '
     "a regular expression in /slashes/, and pages as: on page 3 | on pages 1-3,5 | on all pages | on odd pages."
 )
@@ -500,7 +527,7 @@ def parse_command(text: str, *, page_count: int, current_page: int = 0) -> Comma
     if not source:
         raise CommandError("type a command", suggestions=EXAMPLES[:3])
     first = source.split()[0].lower()
-    if first in LATER_ACTIONS:
+    if first in LATER_ACTIONS and source.lower().split()[:2] != ["flatten", "annotations"]:
         raise CommandError(
             f"'{first}' isn't available yet: it is planned for {LATER_ACTIONS[first]}",
             suggestions=[],
@@ -923,6 +950,50 @@ def _stamp(source: str, children: list[Any], page_count: int, _current: int) -> 
     return CommandPlan(source, f"Put {kind} at the {op['position']} {_describe_pages(pages)}", [op])
 
 
+def _mark_text(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    verb = next(t for t in children if isinstance(t, Token) and t.type in _MARKUP_KINDS)
+    kind = _MARKUP_KINDS[verb.type]
+    (target,) = _parts(children, "target")
+    if target["mode"] != "literal":
+        raise CommandError(f'{verb.lower()} quoted text, e.g. {verb.lower()} "total"')
+    match = target["match"]
+    op: dict[str, Any] = {"op": "mark_text", "kind": kind, "match": match}
+    notes = _strings(children)
+    if notes:
+        op["note"] = notes[0]
+    pages = _pages(_scope(children), page_count)
+    ops = [op] if pages is None else [{**op, "page_index": p} for p in pages]
+    note = f' with the note "{notes[0]}"' if notes else ""
+    verb_text = {"strikeout": "Strike out", "squiggly": "Squiggle-underline"}.get(kind, kind.capitalize())
+    return CommandPlan(source, f'{verb_text} every "{match}" {_describe_pages(pages)}{note}', ops)
+
+
+_MARKUP_KINDS = {"HIGHLIGHT": "highlight", "UNDERLINE": "underline", "STRIKEOUT": "strikeout", "SQUIGGLE": "squiggly"}
+
+
+def _add_note(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
+    (text,) = _strings(children)
+    x, y = _numbers(children)[:2]
+    page = _target_page(children, page_count)
+    op = {"op": "add_note", "page_index": page, "point": [x, y], "text": text}
+    return CommandPlan(source, f'Add a sticky note "{text}" at {x:g}, {y:g} on page {page + 1}', [op])
+
+
+def _flatten_annots(source: str, _children: list[Any], _page_count: int, _current: int) -> CommandPlan:
+    op = {"op": "flatten_annotations"}
+    return CommandPlan(source, "Flatten every annotation into the page (they can no longer be edited)", [op])
+
+
+def _export_annots(source: str, children: list[Any], _page_count: int, _current: int) -> CommandPlan:
+    (out,) = _strings(children)
+    if not out:
+        raise CommandError("give the file to export to")
+    suffix = out.lower().rsplit(".", 1)[-1] if "." in out else ""
+    fmt = {"csv": "csv", "json": "json"}.get(suffix, "markdown")
+    op = {"op": "annotation_summary", "out": out, "format": fmt}
+    return CommandPlan(source, f'Export a summary of every annotation to "{out}" ({fmt})', [op])
+
+
 _BUILDERS = {
     "replace": _replace,
     "delete": _delete,
@@ -950,6 +1021,10 @@ _BUILDERS = {
     "watermark": _watermark,
     "background": _background,
     "stamp": _stamp,
+    "mark_text": _mark_text,
+    "add_note": _add_note,
+    "flatten_annots": _flatten_annots,
+    "export_annots": _export_annots,
 }
 
 

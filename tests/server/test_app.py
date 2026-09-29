@@ -319,6 +319,29 @@ def test_links_route_reflects_journaled_link_ops_and_undo(client: TestClient, si
     assert client.get(links_url, headers=AUTH).json() == []
 
 
+@pytest.mark.feature("ANN-06")
+def test_annotations_route_reflects_annotation_ops_and_undo(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    url = f"/documents/{document_id}/pages/0/annotations"
+    assert client.get(url, headers=AUTH).json() == []
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "add_note", "page_index": 0, "point": [100, 100], "text": "Check this", "author": "Kim"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+    (note,) = client.get(url, headers=AUTH).json()
+    assert (note["kind"], note["contents"], note["author"]) == ("Text", "Check this", "Kim")
+    response = client.post(
+        f"/documents/{document_id}/ops",
+        json={"op": "delete_annotation", "page_index": 0, "xref": note["xref"] + 999},
+        headers=AUTH,
+    )
+    assert response.status_code == 400 and "no annotation" in response.json()["detail"]
+    client.post(f"/documents/{document_id}/undo", headers=AUTH)
+    assert client.get(url, headers=AUTH).json() == []
+
+
 @pytest.mark.feature("EDT-10")
 def test_an_unsafe_link_is_a_400_validation_error(client: TestClient, simple_path: Path) -> None:
     document_id = _open(client, simple_path)
