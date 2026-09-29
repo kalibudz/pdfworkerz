@@ -3,7 +3,7 @@
   "taskId": "P4 complete and independently signed off (8/8). 65/163 features done. Next: P5",
   "step": "P4 (command bar & recipes) built, reviewed twice, fixed and signed off. Pushed main to GitHub as a backup (the owner asked for a push after P4; Actions is manual-only so no CI run is billed).",
   "branch": "main",
-  "lastGreenCommit": "b50687d (local gate, Windows 11, Python 3.14.3, 14/14 steps, 634 tests)",
+  "lastGreenCommit": "a604987 (local gate, Windows 11, Python 3.14.3, 14/14 steps, 709 tests)",
   "nextAction": "Start P5 (organize pages, page design, annotate, document structure: 32 features); run tools/session_budget.py first. Every session: python tools/gate.py before each commit; push only with the owner's approval.",
   "openQuestions": [
     {
