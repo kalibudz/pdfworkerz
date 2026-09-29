@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from engine.document import Document
+from engine.errors import PdfWorkerzError
 from engine.fonts.style import dedupe_texttrace
 from engine.ops.base import parse_op
 from engine.ops.text import _compile_pattern
@@ -75,6 +76,32 @@ def preview_op(document: Document, data: dict[str, Any]) -> OpPreview:
         batch_total = sum(p.matches or 0 for p in counted) if counted else None
         return OpPreview(name, batch_total, sorted({page for p in parts for page in p.pages}))
     return OpPreview(name, None)
+
+
+def preview_steps(document: Document, ops: list[dict[str, Any]]) -> Preview:
+    """Preview Ops that run one after another (a recipe): each step is counted on a scratch
+    copy that already has the earlier steps applied, so "replace A with B, then restyle B"
+    reports what the second step will really find. The real document is never touched."""
+    scratch = document.restore(document.snapshot())
+    parts: list[OpPreview] = []
+    warnings: list[str] = []
+    try:
+        for number, data in enumerate(ops, start=1):
+            part = preview_op(scratch, data)
+            parts.append(part)
+            if part.matches == 0:
+                warnings.append(f"step {number} ({part.op}) matches nothing at that point")
+            op = parse_op(data)
+            try:
+                op.check_pages(scratch)
+                op.apply(scratch)
+            except PdfWorkerzError as exc:
+                warnings.append(f"step {number} would fail: {exc}")
+                break
+    finally:
+        scratch.close()
+    matches = sum(p.matches or 0 for p in parts if p.matches is not None)
+    return Preview(matches, sorted({page for p in parts for page in p.pages}), parts, warnings)
 
 
 def preview_ops(document: Document, ops: list[dict[str, Any]]) -> Preview:

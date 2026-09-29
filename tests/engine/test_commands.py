@@ -349,3 +349,123 @@ def test_the_random_second_file_id_is_pinned_in_either_string_form(tmp_path: Pat
     assert second_id not in once and b"/ID[<1301C2B73AC38543C3A6C3A7C3BF15C2><" in once
     with pymupdf.open(path) as reopened:
         assert reopened[0].get_text().strip() == "x"
+
+
+# -- P4 review findings (2026-09-29) --
+
+
+@pytest.mark.feature("CMD-01")
+def test_set_whole_word_reaches_the_op_and_leaves_longer_words_alone(tmp_path: Path) -> None:
+    doc = Document.open(_doc(tmp_path / "p.pdf", [["cat", "category"]]))
+    plan = parse_command('set bold for "cat" whole word', page_count=1)
+    assert plan.op()["whole_word"] is True and "whole words only" in plan.description
+    assert preview_ops(doc, plan.ops).matches == 1
+    parse_op(plan.op()).apply(doc)
+    fonts = {s.style.text: s.style.font for s in extract_page_spans(doc.raw, 0)}
+    assert fonts == {"cat": "Helvetica-Bold", "category": "Helvetica"}
+    doc.close()
+
+
+@pytest.mark.feature("CMD-06")
+@pytest.mark.parametrize(
+    "data, message",
+    [
+        ({"op": "replace_text", "match": "", "replacement": "y"}, "empty"),
+        ({"op": "delete_text", "match": "x*", "mode": "regex"}, "matches empty text"),
+        ({"op": "restyle_text", "match": "(", "mode": "regex", "bold": True}, "not valid"),
+    ],
+)
+def test_searches_that_would_match_everywhere_or_nothing_sensible_are_refused(
+    data: dict[str, object], message: str
+) -> None:
+    from engine.errors import OpValidationError
+
+    with pytest.raises(OpValidationError, match=message):
+        parse_op(data)
+
+
+@pytest.mark.feature("CMD-06")
+def test_an_empty_search_is_refused_by_the_parser_and_in_a_recipe() -> None:
+    with pytest.raises(CommandError, match="empty"):
+        parse_command('replace "" with "y"', page_count=1)
+    with pytest.raises(RecipeError, match=r"step 1: .*empty"):
+        load_recipe('ops:\n  - {op: replace_text, match: "", replacement: y}')
+
+
+@pytest.mark.feature("CMD-05")
+def test_a_dry_run_counts_each_step_after_the_earlier_ones(tmp_path: Path) -> None:
+    from engine.preview import preview_steps
+
+    doc = Document.open(_doc(tmp_path / "p.pdf", [["Hello one", "Hello two"]]))
+    recipe = load_recipe(
+        "ops:\n"
+        "  - {op: replace_text, match: Hello, replacement: Howdy}\n"
+        "  - {op: restyle_text, match: Howdy, bold: true}\n"
+    )
+    preview = preview_steps(doc, recipe.ops)
+    assert [part.matches for part in preview.ops] == [2, 2]
+    assert preview.warnings == []
+    assert _texts(doc) == ["Hello one", "Hello two"]  # the real document is untouched
+    doc.close()
+
+
+@pytest.mark.feature("CMD-05")
+def test_a_dry_run_reports_a_step_that_would_fail(tmp_path: Path) -> None:
+    from engine.preview import preview_steps
+
+    doc = Document.open(_doc(tmp_path / "p.pdf", [["Hello"]]))
+    preview = preview_steps(doc, [{"op": "replace_span_text", "page_index": 0, "span_index": 7, "new_text": "x"}])
+    assert "step 1 would fail" in preview.warnings[0]
+    doc.close()
+
+
+@pytest.mark.feature("CMD-01")
+def test_quoted_strings_resolve_both_escapes() -> None:
+    backslash, quote = chr(92), chr(34)
+    command = (
+        f"replace {quote}a{backslash}{backslash}b {backslash}{quote}x{backslash}{quote}{quote} with {quote}c{quote}"
+    )
+    assert parse_command(command, page_count=1).op()["match"] == f"a{backslash}b {quote}x{quote}"
+
+
+@pytest.mark.feature("CMD-05")
+def test_descriptions_name_every_option_and_repeats_are_refused() -> None:
+    plan = parse_command('delete "x" whole word ignoring case', page_count=1)
+    assert plan.description.endswith("whole words only, ignoring case")
+    assert "in its style with bold" in parse_command('insert "A" below "B" bold', page_count=1).description
+    with pytest.raises(CommandError, match="given twice"):
+        parse_command('set size 5 size 9 for "x"', page_count=1)
+    with pytest.raises(CommandError, match="out of range"):
+        parse_command('set size 0.5 for "x"', page_count=1)
+    with pytest.raises(CommandError, match="doesn't apply"):
+        parse_command('delete "x" fit', page_count=1)
+
+
+@pytest.mark.feature("CMD-02")
+@pytest.mark.parametrize("current_page", [-1, 3])
+def test_the_current_page_must_exist(current_page: int) -> None:
+    with pytest.raises(CommandError, match="doesn't exist"):
+        parse_command('insert "x" below "y"', page_count=3, current_page=current_page)
+
+
+@pytest.mark.feature("CMD-07")
+def test_a_deterministic_save_that_cannot_replace_the_file_leaves_it_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from engine.errors import SaveFailedError
+
+    source = _doc(tmp_path / "p.pdf", [["Rev C"]])
+    original = source.read_bytes()
+    doc = Document.open(source)
+    parse_op({"op": "replace_text", "match": "Rev C", "replacement": "Rev D"}).apply(doc)
+
+    def locked(self: Path, target: Path) -> Path:
+        raise PermissionError(13, "in use")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", locked)
+        with pytest.raises(SaveFailedError):
+            doc.save(overwrite=True, deterministic=True)
+    assert source.read_bytes() == original
+    assert not list(tmp_path.glob(".*pdfworkerz-tmp"))
+    doc.close()

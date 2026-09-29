@@ -39,7 +39,7 @@ from engine.ops.text import (
     _font_index,
     find_span_index,
 )
-from engine.preview import preview_ops
+from engine.preview import preview_steps
 from engine.recipes import dump_recipe, load_recipe
 from server.app import create_app, run_server
 
@@ -795,26 +795,24 @@ def _apply_steps(
     try:
         with Document.open(path, password=password) as document:
             applied: list[Op] = []
-            for label, data in steps:
-                if dry_run:
-                    preview = preview_ops(document, [data])
-                    where = f" on page(s) {', '.join(map(str, preview.pages))}" if preview.pages else ""
-                    count = (
-                        f"{preview.matches} match(es){where}"
-                        if preview.ops[0].matches is not None
-                        else "will be applied"
+            if dry_run:
+                # Counted on a scratch copy with each earlier step applied (engine.preview).
+                preview = preview_steps(document, [data for _label, data in steps])
+                for (label, _data), part in zip(steps, preview.ops, strict=False):
+                    where = f" on page(s) {', '.join(map(str, part.pages))}" if part.pages else ""
+                    typer.echo(
+                        f"{label}: "
+                        + (f"{part.matches} match(es){where}" if part.matches is not None else "will be applied")
                     )
-                    typer.echo(f"{label}: {count}")
-                    for warning in preview.warnings:
-                        typer.echo(f"  warning: {warning}")
-                    continue
+                for warning in preview.warnings:
+                    typer.echo(f"  warning: {warning}")
+                typer.echo("dry run: nothing was changed or saved")
+                return
+            for label, data in steps:
                 op = parse_op(data)
                 _run(op, document)
                 applied.append(op)
                 typer.echo(f"done: {label}")
-            if dry_run:
-                typer.echo("dry run: nothing was changed or saved")
-                return
             if save_recipe is not None:
                 save_recipe.write_text(dump_recipe(applied, name=path.stem), encoding="utf-8")
                 typer.echo(f"recipe -> {save_recipe}")

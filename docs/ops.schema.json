@@ -1248,6 +1248,11 @@
           "title": "Case Sensitive",
           "type": "boolean"
         },
+        "whole_word": {
+          "default": false,
+          "title": "Whole Word",
+          "type": "boolean"
+        },
         "page_index": {
           "anyOf": [
             {

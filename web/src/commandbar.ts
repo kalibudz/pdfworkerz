@@ -71,6 +71,7 @@ export function createCommandBar(options: CommandBarOptions): CommandBarHandle {
   bar.append(row, suggestions, result);
 
   let previewedText: string | null = null;
+  let previewedPage = 0;
   let pendingRecipe: string | null = null;
   let debounce: ReturnType<typeof setTimeout> | null = null;
   let completionId = 0;
@@ -156,8 +157,10 @@ export function createCommandBar(options: CommandBarOptions): CommandBarHandle {
     const text = input.value.trim();
     if (!text) return;
     try {
-      const plan = await options.api.previewCommand(options.documentId, text, options.currentPage());
+      const page = options.currentPage();
+      const plan = await options.api.previewCommand(options.documentId, text, page);
       previewedText = text;
+      previewedPage = page;
       const apply = button(plan.special ? plan.description : "Apply", "pw-command-apply");
       apply.addEventListener("click", () => void applyPreviewed());
       const cancel = button("Cancel", "pw-command-cancel");
@@ -198,7 +201,8 @@ export function createCommandBar(options: CommandBarOptions): CommandBarHandle {
     if (text === null) return;
     clearResult();
     try {
-      await options.api.applyCommand(options.documentId, text, options.currentPage());
+      // The page that was previewed, even if the viewer has moved since.
+      await options.api.applyCommand(options.documentId, text, previewedPage);
       input.value = "";
       await options.onApplied();
       showMessage("ok", [`Done: ${text}`]);

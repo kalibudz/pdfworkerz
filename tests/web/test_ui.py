@@ -34,7 +34,8 @@ def _wait_overlay_ready(page: Page) -> None:
     *after* rendering, not before). Confirmed by a real race caught this
     way during manual testing, not a hypothetical one."""
     _wait_viewer_ready(page)
-    page.wait_for_selector(".pw-span-box", timeout=5000)
+    # 10s, not 5: under a full gate run the spans request once took just over 5s (load, not a race).
+    page.wait_for_selector(".pw-span-box", timeout=10000)
 
 
 def _open_path(page: Page, path: str, password: str | None = None) -> None:
@@ -1408,3 +1409,21 @@ def test_recipe_export_and_run_from_the_command_bar(
     page.wait_for_selector(".pw-command-summary:has-text('1 match')", timeout=5000)
     page.click(".pw-command-apply")
     page.wait_for_selector(".pw-span-box:has-text('Hello, Editor.')", timeout=10000)
+
+
+@pytest.mark.feature("CMD-05")
+def test_apply_uses_the_page_that_was_previewed(page: Page, app_url: str, corpus: Corpus) -> None:
+    _open_for_commands(page, app_url, corpus.multi_page)
+    page.click("#pw-command")
+    page.keyboard.type('insert "Checked" below "Page 1 of"')
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".pw-command-summary:has-text('on page 1')", timeout=5000)
+    page.click(".pw-toolbar button:has-text('Next')")
+    page.wait_for_function(
+        "() => document.querySelector('.pw-page-indicator')?.textContent?.trim().startsWith('2 /')", timeout=5000
+    )
+    page.click(".pw-command-apply")
+    page.wait_for_selector(".pw-history-entry", timeout=10000)
+    assert page.query_selector(".pw-span-box:has-text('Checked')") is None  # not on page 2
+    page.click(".pw-toolbar button:has-text('Prev')")
+    page.wait_for_selector(".pw-span-box:has-text('Checked')", timeout=10000)

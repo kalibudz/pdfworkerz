@@ -336,11 +336,15 @@ class Document:
                 # temp file and atomically replace the original (SPEC.md section 10: "atomic
                 # writes, temp file then rename"), so a crash mid-write never corrupts it.
                 self._doc.save(str(tmp), garbage=4, deflate=True, **save_kwargs)
+                if deterministic:
+                    _pin_second_file_id(tmp)  # on the temp file: the rename below stays the only write to target
                 self._doc.close()  # release the read handle on `target` before replacing it (required on Windows)
                 Path(tmp).replace(target)
                 self._reopen(target, user_password)
             else:
                 self._doc.save(str(tmp), garbage=4, deflate=True, **save_kwargs)
+                if deterministic:
+                    _pin_second_file_id(tmp)
                 Path(tmp).replace(target)
                 if writes_original:
                     self._reopen(target, user_password)
@@ -355,8 +359,6 @@ class Document:
                 self._file_backed = False
             raise SaveFailedError(f"could not write {target}: {exc}") from exc
 
-        if deterministic:
-            _pin_second_file_id(target)
         return SaveResult(path=target, mode=chosen_mode, bytes_written=target.stat().st_size, note=note)
 
     def _reopen(self, target: Path, new_user_password: str | None) -> None:

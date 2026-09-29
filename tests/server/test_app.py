@@ -688,3 +688,23 @@ def test_recipe_export_and_replay_over_the_api(
     (span,) = client.get(f"/documents/{second}/pages/0/spans", headers=AUTH).json()
     assert span["style"]["text"] == "Hello, Editor."
     assert len(client.get(f"/documents/{second}/history", headers=AUTH).json()["ops"]) == 1
+
+
+@pytest.mark.feature("CMD-07")
+def test_recipe_and_preview_errors_are_400s_and_dry_runs_chain(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    bad_regex = "ops:\n  - {op: replace_text, match: '(', mode: regex}"
+    response = client.post(f"/documents/{document_id}/recipe", json={"text": bad_regex, "dry_run": True}, headers=AUTH)
+    assert response.status_code == 400 and "step 1" in response.json()["detail"]
+    preview = client.post(
+        f"/documents/{document_id}/commands/preview",
+        json={"text": 'insert "x" below "Hello"', "page_index": 99},
+        headers=AUTH,
+    )
+    assert preview.status_code == 400
+    chained = (
+        "ops:\n  - {op: replace_text, match: PDFWorkerz, replacement: Editor}\n"
+        "  - {op: restyle_text, match: Editor, bold: true}\n"
+    )
+    dry = client.post(f"/documents/{document_id}/recipe", json={"text": chained, "dry_run": True}, headers=AUTH)
+    assert dry.json()["matches"] == 2 and dry.json()["warnings"] == []

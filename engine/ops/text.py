@@ -15,7 +15,7 @@ import math
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from engine.document import Document
 from engine.edit import (
@@ -74,6 +74,19 @@ def _compile_pattern(match: str, mode: str, case_sensitive: bool, whole_word: bo
         # Lookarounds rather than a word boundary, so a match that starts or ends with punctuation still works.
         pattern = rf"(?<!\w)(?:{pattern})(?!\w)"
     return re.compile(pattern, flags)
+
+
+def _check_search(match: str, mode: str) -> None:
+    """Refuse a search that can't mean what it says: an invalid regex, or a pattern that
+    matches empty text -- which `re.sub` would apply between every character."""
+    if not match:
+        raise OpValidationError("the text to find is empty")
+    try:
+        compiled = re.compile(match if mode == "regex" else re.escape(match))
+    except re.error as exc:
+        raise OpValidationError(f"the regular expression {match!r} is not valid: {exc}") from exc
+    if compiled.fullmatch(""):
+        raise OpValidationError(f"the pattern {match!r} matches empty text, so it would match everywhere")
 
 
 def _page_might_match(document: Document, page_index: int, pattern: re.Pattern[str]) -> bool:
@@ -301,6 +314,11 @@ def _span_by_origin(document: Document, page_index: int, origin: tuple[float, fl
 class _FindReplaceOp(Op):
     """Shared fields for ReplaceTextOp and DeleteTextOp."""
 
+    @model_validator(mode="after")
+    def _valid_search(self) -> _FindReplaceOp:
+        _check_search(self.match, self.mode)
+        return self
+
     match: str
     mode: Literal["literal", "regex"] = "literal"
     case_sensitive: bool = True
@@ -422,12 +440,18 @@ class RestyleTextOp(_StyleChange):
     match: str
     mode: Literal["literal", "regex"] = "literal"
     case_sensitive: bool = True
+    whole_word: bool = False
     page_index: int | None = None
+
+    @model_validator(mode="after")
+    def _valid_search(self) -> RestyleTextOp:
+        _check_search(self.match, self.mode)
+        return self
 
     def apply(self, document: Document) -> list[EditResult]:
         self._check_something_changes()
         font_index = _font_index()
-        pattern = _compile_pattern(self.match, self.mode, self.case_sensitive)
+        pattern = _compile_pattern(self.match, self.mode, self.case_sensitive, self.whole_word)
         results: list[EditResult] = []
 
         for page_index in _pages_to_search(document, self.page_index):

@@ -70,7 +70,7 @@ from engine.ops.links import PageLinksOp
 from engine.ops.shapes import PageShapesOp
 from engine.ops.spellcheck import SpellCheckOp
 from engine.ops.text import PreviewTextOp, _font_index
-from engine.preview import preview_ops
+from engine.preview import preview_ops, preview_steps
 from engine.recipes import RecipeError, as_single_op, dump_recipe, load_recipe
 
 _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
@@ -365,7 +365,7 @@ def run_recipe(document_id: str, body: RecipeRequest, journal: JournalDep) -> di
     """CMD-07: replay a recipe as one step (one undo), or dry-run it to see what it would change."""
     recipe = load_recipe(body.text)
     if body.dry_run:
-        preview = preview_ops(journal.document, recipe.ops)
+        preview = preview_steps(journal.document, recipe.ops)
         return {
             "recipe": recipe.name,
             "steps": len(recipe.ops),

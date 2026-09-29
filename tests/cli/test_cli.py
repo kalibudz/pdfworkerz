@@ -664,3 +664,25 @@ def test_edit_with_a_recipe_option(corpus: Corpus, work_dir: Path) -> None:
     recipe.write_text('{"recipe": "r", "ops": [{"op": "delete_text", "match": "Hello, "}]}', encoding="utf-8")
     result = runner.invoke(app, ["edit", str(corpus.simple), "--recipe", str(recipe), "--dry-run"])
     assert result.exit_code == 0 and "recipe r, step 1: 1 match(es)" in result.output
+
+
+@pytest.mark.feature("CMD-07")
+def test_run_dry_run_counts_later_steps_after_earlier_ones(corpus: Corpus, work_dir: Path) -> None:
+    recipe = work_dir / "chain.yaml"
+    recipe.write_text(
+        "ops:\n  - {op: replace_text, match: PDFWorkerz, replacement: Editor}\n"
+        "  - {op: restyle_text, match: Editor, bold: true}\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["run", str(recipe), str(corpus.simple), "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "step 2: restyle_text: 1 match(es) on page(s) 1" in result.output
+    assert "warning" not in result.output
+
+
+@pytest.mark.feature("CMD-08")
+def test_edit_with_a_page_that_does_not_exist_is_refused(corpus: Corpus) -> None:
+    result = runner.invoke(
+        app, ["edit", str(corpus.simple), "--do", 'insert "x" below "Hello"', "--page", "0", "--dry-run"]
+    )
+    assert result.exit_code == 2 and "doesn't exist" in result.output

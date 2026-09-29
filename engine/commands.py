@@ -200,14 +200,28 @@ def _page_number(token: Token) -> int:
 
 
 def _unquote(token: Token) -> str:
-    return str(token)[1:-1].replace('\\"', '"')
+    """The text inside a quoted string, with its escapes resolved: a backslash before a quote
+    or before another backslash stands for that character."""
+    backslash = chr(92)
+    inner, out, i = str(token)[1:-1], [], 0
+    while i < len(inner):
+        if inner[i] == backslash and i + 1 < len(inner) and inner[i + 1] in ('"', backslash):
+            out.append(inner[i + 1])
+            i += 2
+            continue
+        out.append(inner[i])
+        i += 1
+    return "".join(out)
 
 
 @v_args(inline=True)
 class _Build(Transformer[Token, Any]):
     # Leaves: each rule becomes a small (kind, value) pair the command builders read.
     def literal(self, token: Token) -> tuple[str, Any]:
-        return ("target", {"match": _unquote(token), "mode": "literal", "label": str(token)})
+        text = _unquote(token)
+        if not text:
+            raise CommandError('the text to find is empty: put something between the quotes, e.g. "Total"')
+        return ("target", {"match": text, "mode": "literal", "label": str(token)})
 
     def regex(self, token: Token) -> tuple[str, Any]:
         raw = str(token)
@@ -283,8 +297,8 @@ class _Build(Transformer[Token, Any]):
 
     def size(self, _size: Token, value: float) -> tuple[str, Any]:
         points = value
-        if not 0 < points <= 400:
-            raise CommandError(f"size {value} is out of range (1-400 points)")
+        if not 1 <= points <= 400:
+            raise CommandError(f"size {value:g} is out of range (1-400 points)")
         return ("style", ("size", points))
 
     def color(self, _color: Token, value: Token) -> tuple[str, Any]:
@@ -342,6 +356,8 @@ def parse_command(text: str, *, page_count: int, current_page: int = 0) -> Comma
     """Parse one command into a plan. `current_page` (0-based) is where "insert" goes when
     the command names no page. Raises CommandError, with suggestions, if it doesn't parse."""
     source = text.strip()
+    if not 0 <= current_page < page_count:
+        raise CommandError(f"page {current_page + 1} doesn't exist: the document has {page_count} page(s)")
     if not source:
         raise CommandError("type a command", suggestions=EXAMPLES[:3])
     first = source.split()[0].lower()
@@ -369,24 +385,51 @@ def parse_command(text: str, *, page_count: int, current_page: int = 0) -> Comma
     return _BUILDERS[kind](source, children, page_count, current_page)
 
 
-def _find_options(target: dict[str, Any], children: list[Any]) -> dict[str, Any]:
+def _find_options(target: dict[str, Any], children: list[Any], *, allowed: tuple[str, ...]) -> dict[str, Any]:
     options = dict(_parts(children, "option"))
     if target.get("ignore_case"):
         options["case_sensitive"] = False
+    refused = [name for name in options if name not in allowed]
+    if refused:
+        word = {"fit": "fit", "whole_word": "whole word", "case_sensitive": "ignoring case"}[refused[0]]
+        raise CommandError(f'"{word}" doesn\'t apply to this command')
     return options
+
+
+def _describe_options(options: dict[str, Any]) -> str:
+    words = []
+    if options.get("whole_word"):
+        words.append("whole words only")
+    if options.get("case_sensitive") is False:
+        words.append("ignoring case")
+    if options.get("fit"):
+        words.append("fitted to the original width")
+    return "".join(f", {word}" for word in words)
+
+
+def _strings(children: list[Any]) -> list[str]:
+    return [_unquote(c) for c in children if isinstance(c, Token) and c.type == "STRING"]
+
+
+def _styles(children: list[Any]) -> dict[str, Any]:
+    styles: dict[str, Any] = {}
+    for key, value in _parts(children, "style"):
+        if key in styles:
+            raise CommandError(f'"{key}" is given twice; say it once')
+        styles[key] = value
+    return styles
 
 
 def _replace(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
     (target,) = _parts(children, "target")
-    replacement = next(
-        str(c)[1:-1].replace('\\"', '"') for c in children if isinstance(c, Token) and c.type == "STRING"
-    )
+    (replacement,) = _strings(children)
     pages = _pages(_scope(children), page_count)
-    op = {"op": "replace_text", "match": target["match"], "mode": target["mode"], "replacement": replacement}
-    op.update(_find_options(target, children))
+    options = _find_options(target, children, allowed=("whole_word", "case_sensitive", "fit"))
+    op = {"op": "replace_text", "match": target["match"], "mode": target["mode"], "replacement": replacement, **options}
     return CommandPlan(
         text=source,
-        description=f'Replace {target["label"]} with "{replacement}" {_describe_pages(pages)}, matching its style',
+        description=f'Replace {target["label"]} with "{replacement}" {_describe_pages(pages)}, matching its style'
+        + _describe_options(options),
         ops=_per_page(op, pages),
     )
 
@@ -394,30 +437,38 @@ def _replace(source: str, children: list[Any], page_count: int, _current: int) -
 def _delete(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
     (target,) = _parts(children, "target")
     pages = _pages(_scope(children), page_count)
-    op = {"op": "delete_text", "match": target["match"], "mode": target["mode"]}
-    op.update(_find_options(target, children))
-    op.pop("fit", None)
+    options = _find_options(target, children, allowed=("whole_word", "case_sensitive"))
+    op = {"op": "delete_text", "match": target["match"], "mode": target["mode"], **options}
     return CommandPlan(
-        text=source, description=f"Delete {target['label']} {_describe_pages(pages)}", ops=_per_page(op, pages)
+        text=source,
+        description=f"Delete {target['label']} {_describe_pages(pages)}" + _describe_options(options),
+        ops=_per_page(op, pages),
     )
 
 
 def _insert(source: str, children: list[Any], page_count: int, current: int) -> CommandPlan:
-    new_text = next(str(c)[1:-1].replace('\\"', '"') for c in children if isinstance(c, Token) and c.type == "STRING")
+    (new_text,) = _strings(children)
+    if not new_text:
+        raise CommandError("there is no text to insert")
     (placement,) = _parts(children, "placement")
-    style = dict(_parts(children, "style"))
+    style = _styles(children)
     pages = _pages(_scope(children), page_count)
     if pages is None:
         pages = [current] if _scope(children) is None else list(range(page_count))
-    op: dict[str, Any] = {"op": "insert_text", "text": new_text, **placement}
-    op.update({key: value for key, value in style.items() if key != "match_style"})
+    changes = {key: value for key, value in style.items() if key != "match_style"}
+    op: dict[str, Any] = {"op": "insert_text", "text": new_text, **placement, **changes}
     if "position" in placement and not ("font" in op and "size" in op):
         raise CommandError(
             'text placed "at" a point needs a font and a size, e.g. insert "Note" at 72, 700 font "Helvetica" size 12',
             suggestions=['insert "Note" at 72, 700 font "Helvetica" size 12'],
         )
     where = f'{placement["anchor"]} "{placement["reference_match"]}"' if "anchor" in placement else "at the point"
-    style_words = "in its style" if "anchor" in placement and len(style) <= 1 else "in the given style"
+    if "anchor" in placement:
+        style_words = "in its style"
+        if changes:
+            style_words += " with " + ", ".join(_describe_style(key, value) for key, value in changes.items())
+    else:
+        style_words = "in " + ", ".join(_describe_style(key, value) for key, value in changes.items())
     return CommandPlan(
         text=source,
         description=f'Insert "{new_text}" {where} {_describe_pages(pages)}, {style_words}',
@@ -427,18 +478,18 @@ def _insert(source: str, children: list[Any], page_count: int, current: int) -> 
 
 def _set(source: str, children: list[Any], page_count: int, _current: int) -> CommandPlan:
     (target,) = _parts(children, "target")
-    style = dict(_parts(children, "style"))
+    style = _styles(children)
     if style.pop("match_style", False):
         raise CommandError('"match style" only applies to insert; set changes the style you give it')
+    if not style:
+        raise CommandError('say what to change, e.g. set bold size 12 for "Total"')
     pages = _pages(_scope(children), page_count)
-    op = {"op": "restyle_text", "match": target["match"], "mode": target["mode"], **style}
-    options = _find_options(target, children)
-    if "case_sensitive" in options:
-        op["case_sensitive"] = options["case_sensitive"]
+    options = _find_options(target, children, allowed=("whole_word", "case_sensitive"))
+    op = {"op": "restyle_text", "match": target["match"], "mode": target["mode"], **style, **options}
     changes = ", ".join(_describe_style(key, value) for key, value in style.items())
     return CommandPlan(
         text=source,
-        description=f"Set {changes} for {target['label']} {_describe_pages(pages)}",
+        description=f"Set {changes} for {target['label']} {_describe_pages(pages)}" + _describe_options(options),
         ops=_per_page(op, pages),
     )
 
