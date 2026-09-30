@@ -34,6 +34,11 @@ resolves to the **exact** tier by name (FNT-06) instead of an approximate metric
 match. The release zip ships no separate license file, so `OFL-Roboto.txt` is the
 standard OFL-1.1 text with Roboto's copyright line.
 
+Also: **Open Sans**, in ten static styles: Light, Regular, SemiBold, Bold and ExtraBold, each with its Italic (`OpenSans-*.ttf`). It is under the SIL Open Font License 1.1 (`OFL-OpenSans.txt`; the license statement is also in each font's `name` table, IDs 13/14), and every file allows installable embedding (fsType 0).
+- These are the unmodified `fonts/ttf/` files, version 3.003, from the official [googlefonts/opensans](https://github.com/googlefonts/opensans) repository at commit `bd7e376`, and `OFL-OpenSans.txt` is that repository's `OFL.txt`.
+- The Condensed styles are left out: documents rarely use them, and they would double the size.
+- Open Sans is one of the most common document fonts (forms, letters, anything made with Google or Microsoft tools that default to it). With it bundled, a document's Open Sans text resolves to the **exact** tier by name (FNT-06), even for characters the document's own subset never held. It is also offered by name in the editor's font list.
+
 **Follow-up** (tracked in PROGRESS.md): widen the set further — serif and
 monospace (for example Noto Serif and Roboto Mono, both OFL-licensed), plus the
 other Roboto weights and italics. Nothing in `engine.fonts.match` assumes any

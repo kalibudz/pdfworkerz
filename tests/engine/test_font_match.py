@@ -210,6 +210,71 @@ def test_bundled_roboto_turns_an_approximate_match_into_an_exact_one(work_dir: P
     assert tiers == {"with": "exact", "without": "approximate"}
 
 
+_OPEN_SANS = ("Light", "Regular", "SemiBold", "Bold", "ExtraBold")
+
+
+@pytest.mark.feature("FNT-06")
+@pytest.mark.parametrize("style", [*_OPEN_SANS, *(f"{w}Italic" for w in _OPEN_SANS if w != "Regular"), "Italic"])
+def test_bundled_open_sans_is_found_by_a_subset_tagged_name(bundled_index: list, style: str) -> None:
+    found = find_by_name(bundled_index, f"QWERTY+OpenSans-{style}")
+    assert found is not None
+    assert found.source == "bundled"
+    assert found.postscript_name == f"OpenSans-{style}"
+
+
+@pytest.mark.feature("FNT-06")
+def test_bundled_open_sans_ships_with_its_ofl_license() -> None:
+    from fontTools.ttLib import TTFont
+
+    license_text = (BUNDLED_FONTS_DIR / "OFL-OpenSans.txt").read_text(encoding="utf-8")
+    assert "SIL OPEN FONT LICENSE Version 1.1" in license_text
+    assert "The Open Sans Project Authors" in license_text
+    for path in BUNDLED_FONTS_DIR.glob("OpenSans-*.ttf"):
+        font = TTFont(path)
+        embedded = font["name"].getDebugName(13)
+        assert embedded is not None and "Open Font License" in embedded, path.name
+        assert font["OS/2"].fsType == 0, path.name  # installable: may be embedded in any PDF
+
+
+@pytest.mark.feature("FNT-06")
+def test_bundled_open_sans_turns_an_approximate_match_into_an_exact_one(work_dir: Path, bundled_index: list) -> None:
+    import pymupdf
+
+    from engine.document import Document
+    from engine.edit import replace_span_text
+    from engine.fonts.style import extract_page_spans
+
+    path = work_dir / "open_sans.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_font(fontname="OS", fontfile=str(BUNDLED_FONTS_DIR / "OpenSans-SemiBold.ttf"))
+    page.insert_text((72, 100), "Balance forward", fontname="OS", fontsize=10)
+    doc.subset_fonts()
+    doc.save(path)
+    doc.close()
+
+    without = [c for c in bundled_index if not c.postscript_name.startswith("OpenSans")]
+    tiers = {}
+    for label, index in (("with", bundled_index), ("without", without)):
+        with Document.open(path) as document:
+            span = extract_page_spans(document.raw, 0)[0]
+            # "S", "u", "m", "y" are not in the subset: only the full font can draw them.
+            result = replace_span_text(document, 0, span, "Summary forward", font_index=index)
+            assert result.verification is not None and result.verification.text_matches
+            tiers[label] = result.tier
+    assert tiers == {"with": "exact", "without": "approximate"}
+
+
+@pytest.mark.feature("EDT-06")
+def test_open_sans_can_be_chosen_by_family_and_weight(bundled_index: list) -> None:
+    from engine.fonts.choose import available_families, resolve_chosen_font
+
+    assert "Open Sans" in available_families(bundled_index)
+    bold = resolve_chosen_font("Open Sans", bold=True, italic=False, text="Total", font_index=bundled_index)
+    italic = resolve_chosen_font("Open Sans", bold=False, italic=True, text="note", font_index=bundled_index)
+    assert "OpenSans-Bold.ttf" in bold.note and "OpenSans-Italic.ttf" in italic.note
+
+
 @pytest.mark.feature("FNT-07")
 @pytest.mark.parametrize(
     ("base_font", "family", "expected"),

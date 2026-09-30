@@ -55,6 +55,7 @@ A phase is complete when all of its features are **done** through the evidence g
     resolve every target to an identity that survives renumbering, so each action is
     one undo. Copies can go to another page.
   - *Server:* a new `/pages/{n}/blocks` route.
+- **Open Sans bundled (owner's request):** ten OFL-1.1 static styles (Light to ExtraBold, and their italics), unmodified v3.003 from googlefonts/opensans. Tests show an Open Sans subset edited with characters it lacks is now exact (it was approximate before), and "Open Sans" can be chosen by family and weight. Seen as a side effect: a look-alike for a subset with no cmap is ranked on default metrics (only its weight can be measured), so with Open Sans present such a match became Open Sans Bold instead of Vera Bold. The test now checks the weight preference within one family. Measuring cmap-less subsets through their ToUnicode map would make that ranking meaningful (follow-up).
 - **Live review:** `tools/make_samples.py` writes invented documents to
   `C:\pdfworkerz-docs\samples`, and the README has a "How to report a bug" section
   (Export recipe, then `pdfworkerz run`).

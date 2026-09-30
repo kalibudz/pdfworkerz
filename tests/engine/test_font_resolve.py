@@ -73,12 +73,17 @@ def test_unknown_font_with_measurable_bytes_resolves_approximate(corpus: Corpus,
         xref = doc[0].get_fonts(full=True)[0][0]
         original_bytes = doc.extract_font(xref)[3]
 
+    # This subset has no cmap, so its letters can't be measured: cap height, x-height
+    # and width fall back to defaults, and weight is the one real signal. Among other
+    # bold families (Open Sans Bold, say) the winner is then arbitrary, so the weight
+    # preference is checked within one family.
+    vera = [c for c in font_index if c.family_name == "Bitstream Vera Sans"]
     result = resolve_font(
         unknown,
         original_font_bytes=original_bytes,
         already_rendered_text="AB",
         needed_text="ABC",
-        font_index=font_index,
+        font_index=vera,
     )
     assert result.tier == TIER_APPROXIMATE
     assert 0.0 < result.confidence < 1.0
