@@ -31,6 +31,7 @@ import pymupdf
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict
 
+from engine.contentstream import protect_text_line_moves
 from engine.document import Document
 from engine.errors import OpValidationError
 from engine.geometry import page_bounds
@@ -163,6 +164,7 @@ def _pin_point(target: pymupdf.Rect, others: list[pymupdf.Rect]) -> pymupdf.Poin
 
 
 def _remove_placement(document: Document, page: pymupdf.Page, index: int) -> pymupdf.Page:
+    protect_text_line_moves(page)  # the redaction's own content cleaning would move text
     placements = _placements(page)
     target = pymupdf.Rect(placements[index]["bbox"])
     others = [pymupdf.Rect(raw["bbox"]) for i, raw in enumerate(placements) if i != index]

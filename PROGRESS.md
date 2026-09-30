@@ -26,6 +26,30 @@ A phase is complete when all of its features are **done** through the evidence g
 
 ## Session log
 
+### 2026-09-30 (later still) — Redaction no longer moves text elsewhere on the page
+
+Reported from live use: styling one table cell of a real proposal in Open Sans Bold was
+refused by the after-edit check ("something outside the edited text changed too").
+
+- **It was right.** A colour emoji 100pt away really was pulled apart. Every redaction
+  makes MuPDF clean the page's content stream, and that cleaner **drops a text line move
+  that translates by nothing** (`0 0 Td`, `0 0 TD`, `T*` at zero leading) and mangles
+  `'` and `"`. But `Td` also resets the text matrix to the line matrix, so dropping it
+  starts the next text after the advance of everything already drawn on that line. Word
+  stacks a colour emoji's layers with exactly `0 0 Td`. Reproduced in eight lines of
+  plain Helvetica: "AAAA", `0 0 Td`, "X" puts X at x=72; after cleaning, x=104.
+- **Fix** (`engine/contentstream.py`): before any redaction, every at-risk operator is
+  rewritten into the explicit `Tm` it stands for. The cleaner drops that too when it
+  matches the line matrix it is tracking, so the replacement is offset by 1e-4 pt --
+  a hundred times the 1e-6 folding tolerance measured, and about 1/1200 of a pixel at
+  600 dpi. The tracked line matrix keeps its exact value, so nothing accumulates.
+  Called from the three places that redact: text, images and shapes.
+- **The message was incomplete too:** the UI listed only three of the engine's five
+  reasons, so "text moved somewhere the edit did not put it" -- the real signal here --
+  was never shown. All five are reported now.
+- The reported edit now passes with no dialog, and the page is pixel-identical apart
+  from the edited words.
+
 ### 2026-09-30 (later) — Edit-then-move fonts; Nitro-style arranging (EDT-13..15)
 
 - **Edited text lost its font identity (owner's report: a move after an edit asked to

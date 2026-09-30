@@ -38,10 +38,13 @@ export async function applyWithApproval(
   return { result: await api.applyOp(documentId, { ...op, require_tier: "fallback" }) };
 }
 
+/** Mirrors engine.edit.VerificationResult field-for-field (FNT-12). */
 interface Verification {
   text_matches: boolean;
   looks_right: boolean;
   outside_changed_fraction: number;
+  overlaps_other_text: boolean;
+  misplaced_text: boolean;
   diff: { changed_fraction: number };
 }
 
@@ -58,9 +61,17 @@ export function verificationProblem(result: unknown): string | null {
   if (!failed) {
     return null;
   }
+  // Every reason the engine has, so the message never leaves out the real one: a
+  // page whose other text had moved reported only the pixels that changed with it.
   const problems = [];
   if (!failed.text_matches) {
     problems.push("the new text could not be read back from the page");
+  }
+  if (failed.misplaced_text) {
+    problems.push("text moved somewhere the edit did not put it");
+  }
+  if (failed.overlaps_other_text) {
+    problems.push("the new text landed on top of text the edit did not touch");
   }
   if (failed.outside_changed_fraction > 0) {
     problems.push("something outside the edited text changed too");

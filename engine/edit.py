@@ -39,6 +39,7 @@ import pikepdf
 import pymupdf
 from numpy.typing import NDArray
 
+from engine.contentstream import protect_text_line_moves
 from engine.document import Document
 from engine.errors import FontResourceNotFoundError, OpValidationError
 from engine.fonts import research as font_research
@@ -317,6 +318,7 @@ def _redact_spans(page: pymupdf.Page, spans: list[SpanTrace]) -> None:
     targets = [char for span in spans for char in span.style.chars]
     if not targets:
         return
+    protect_text_line_moves(page)  # the redaction's own content cleaning would move other text
     before = _glyph_count(page)
     for char in targets:
         x0, y0, x1, y1 = char.bbox

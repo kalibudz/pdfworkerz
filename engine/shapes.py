@@ -31,6 +31,7 @@ from typing import Any, Literal
 import pymupdf
 from pydantic import BaseModel, ConfigDict
 
+from engine.contentstream import protect_text_line_moves
 from engine.document import Document
 from engine.errors import OpValidationError
 from engine.geometry import page_bounds
@@ -200,6 +201,7 @@ def _draw_path(
 
 def _remove_path(document: Document, page: pymupdf.Page, index: int) -> pymupdf.Page:
     """Remove exactly the path at `index`, restoring any collateral removals."""
+    protect_text_line_moves(page)  # the redaction's own content cleaning would move text
     before = _drawings(page)
     target = before[index]
     margin = _COVER_SLACK + _MITER_LIMIT * max(target.get("width") or 0.0, 1.0)
