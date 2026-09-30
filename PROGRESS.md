@@ -26,6 +26,26 @@ A phase is complete when all of its features are **done** through the evidence g
 
 ## Session log
 
+### 2026-09-30 — INF-10: a session cut off mid-task resumes itself
+
+Owner's request, after a usage limit interrupted work.
+
+- The protocol already covered a *tidy* ending (write the checkpoint, then stop). A usage
+  limit, a context overflow or an expiry gives no such chance: the session stops between
+  two tool calls. So the checkpoint is now marked `in-progress` **before** the work
+  starts (`tools/resume.py --begin`) and cleared only after the task is committed
+  (`--end`). The mark is what survives.
+- `python tools/resume.py` is the first thing every session runs. It reports whether the
+  session before it was cut off, what it was doing, the files it left uncommitted, any
+  WIP branch that is ahead, and the next action -- and the session resumes that task
+  automatically, without being told what it was. `--check` exits 1 when a task was left
+  unfinished. The gate, never the checkpoint, decides what state the code is really in.
+- Documented in `docs/SESSION_PROTOCOL.md` section 1 (with the recovery order) and
+  `SPEC.md` section 13.
+- One trap removed while testing it: the tool took its checkpoint path as a default
+  argument, which Python binds once at import -- so a caller that repointed it still
+  wrote to the real file. The path is resolved at call time now.
+
 ### 2026-09-30 (later still) — Redaction no longer moves text elsewhere on the page
 
 Reported from live use: styling one table cell of a real proposal in Open Sans Bold was

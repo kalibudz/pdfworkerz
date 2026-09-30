@@ -53,9 +53,9 @@ The parity tags reflect features that iLovePDF and Nitro PDF Pro advertise publi
 |---|---|---|
 | iLovePDF | 48 | COR-01, COR-02, SEC-01, SEC-04, SEC-05, SEC-08, EDT-01, EDT-03, EDT-04, EDT-08, EDT-09, UI-01, UI-02, UI-06, UI-07, ORG-01, ORG-02, ORG-03, ORG-04, ORG-05, ORG-06, ORG-07, ORG-09, DES-01, DES-04, ANN-01, ANN-03, SIG-01, OCR-01, OCR-02, OCR-04, CVF-01, CVF-02, CVF-03, CVF-04, CVF-07, CVT-01, CVT-02, CVT-03, CVT-04, CVT-05, OPT-01, OPT-02, OPT-06, CMP-01, CMP-02, XTR-01, XTR-02 |
 | Nitro PDF Pro | 106 | COR-01, COR-02, COR-05, COR-06, COR-07, COR-09, COR-12, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-09, SEC-10, FNT-11, FNT-14, FNT-17, FNT-18, EDT-01, EDT-02, EDT-03, EDT-04, EDT-05, EDT-06, EDT-08, EDT-09, EDT-10, EDT-11, EDT-13, EDT-14, EDT-15, UI-01, UI-02, UI-04, UI-06, UI-07, UI-08, UI-09, CMD-07, ORG-01, ORG-02, ORG-03, ORG-04, ORG-05, ORG-06, ORG-07, ORG-08, ORG-09, ORG-10, DES-01, DES-02, DES-03, DES-04, DES-05, DES-06, ANN-01, ANN-02, ANN-03, ANN-04, ANN-05, ANN-06, DOC-01, DOC-02, DOC-04, DOC-05, FRM-01, FRM-02, FRM-03, FRM-04, FRM-05, FRM-06, FRM-07, SIG-01, SIG-02, SIG-03, SIG-04, OCR-01, OCR-02, OCR-03, CVF-01, CVF-02, CVF-03, CVF-04, CVF-05, CVF-07, CVF-08, CVT-01, CVT-02, CVT-03, CVT-04, CVT-05, OPT-01, OPT-02, OPT-03, OPT-04, OPT-05, CMP-01, CMP-02, CMP-03, ACC-01, ACC-02, BAT-01, XTR-03 |
-| Beyond both | 56 | INF-01, INF-02, INF-03, INF-04, INF-05, INF-06, INF-07, INF-08, INF-09, COR-03, COR-04, COR-08, COR-10, COR-11, SEC-11, FNT-01, FNT-02, FNT-03, FNT-04, FNT-05, FNT-06, FNT-07, FNT-08, FNT-09, FNT-10, FNT-12, FNT-13, FNT-15, FNT-16, EDT-07, EDT-12, UI-03, UI-05, CMD-01, CMD-02, CMD-03, CMD-04, CMD-05, CMD-06, CMD-08, ORG-11, ORG-12, ORG-13, DOC-03, FRM-08, SIG-05, SIG-06, CVF-06, CVT-06, OPT-07, ACC-03, ACC-04, ACC-05, BAT-02, BAT-03, BAT-04 |
+| Beyond both | 57 | INF-01, INF-02, INF-03, INF-04, INF-05, INF-06, INF-07, INF-08, INF-09, INF-10, COR-03, COR-04, COR-08, COR-10, COR-11, SEC-11, FNT-01, FNT-02, FNT-03, FNT-04, FNT-05, FNT-06, FNT-07, FNT-08, FNT-09, FNT-10, FNT-12, FNT-13, FNT-15, FNT-16, EDT-07, EDT-12, UI-03, UI-05, CMD-01, CMD-02, CMD-03, CMD-04, CMD-05, CMD-06, CMD-08, ORG-11, ORG-12, ORG-13, DOC-03, FRM-08, SIG-05, SIG-06, CVF-06, CVT-06, OPT-07, ACC-03, ACC-04, ACC-05, BAT-02, BAT-03, BAT-04 |
 
-Total features: **166**.
+Total features: **167**.
 <!-- END GENERATED: parity -->
 
 **Why PDFWorkerz goes beyond both products:**
@@ -195,7 +195,7 @@ No password guessing or cracking is ever performed.
 Every feature has a stable ID. The table below is **generated** from `tracker/features.json` by `tools/gen_spec_catalog.py`, and CI fails if it drifts. Size is the look-ahead estimate in tokens used for build planning: **S** ≈ 50k, **M** ≈ 150k, **L** ≈ 400k.
 
 <!-- BEGIN GENERATED: catalog -->
-#### INF — Infrastructure & quality (9)
+#### INF — Infrastructure & quality (10)
 
 | ID | Feature | Parity | Libraries | Phase | Size |
 |---|---|---|---|---|---|
@@ -208,6 +208,7 @@ Every feature has a stable ID. The table below is **generated** from `tracker/fe
 | INF-07 | Pixel-diff visual regression harness | Beyond | PyMuPDF, numpy | P1 | M |
 | INF-08 | Cross-platform packaging (pipx install, Windows/macOS/Linux bundles) | Beyond | PyInstaller | P9 | L |
 | INF-09 | User guide and developer documentation | Beyond | MkDocs | P9 | M |
+| INF-10 | Automatic resume after a session ends abruptly (in-progress mark, recovery report) | Beyond | Python | P0 | S |
 
 #### COR — Core engine & document handling (12)
 
@@ -644,15 +645,16 @@ Build sessions are finite. Usage limits, context size and session expiry can all
 2. Before starting a task: `python tools/session_budget.py --remaining <tokens>`. A task starts only if its estimate fits within the remaining budget minus a 25% reserve.
 3. Long tasks commit to a WIP branch at natural break points. `state/checkpoint.json` records phase, task, step, branch and next action, and is pushed after every task.
 4. A new session reads the checkpoint, verifies the branch, runs `python tools/gate.py`, and resumes at `nextAction`.
-5. Actual token use per task is appended to `state/usage_log.jsonl` to recalibrate the estimates.
-6. The gate is deterministic and token-free, so it gives the same verdict whether or not an AI session is running.
+5. **Automatic resume after an abrupt end (INF-10).** A usage limit, a context overflow or an expiry can stop a session between two tool calls, with no chance to write a checkpoint. So the checkpoint is marked `in-progress` *before* the work starts (`python tools/resume.py --begin "<task>"`) and cleared only once the task is committed (`--end`). Every session begins with `python tools/resume.py`, which reports whether the session before it was cut off, what it was doing, which files it left uncommitted and which WIP branches are ahead — and then **resumes that task automatically**, without waiting to be told what it was. `--check` exits 1 when a task was left unfinished. The gate, not the checkpoint, decides what state the code is actually in: a killed session can leave `step` one step stale, but it cannot leave the gate wrong.
+6. Actual token use per task is appended to `state/usage_log.jsonl` to recalibrate the estimates.
+7. The gate is deterministic and token-free, so it gives the same verdict whether or not an AI session is running.
 
 ## 14. Roadmap
 
 <!-- BEGIN GENERATED: phases -->
 | Phase | Scope | Features | Est. tokens |
 |---|---|---|---|
-| P0 | Spec, tracker, CI workers, session protocol | 5 | ~250k |
+| P0 | Spec, tracker, CI workers, session protocol | 6 | ~300k |
 | P1 | Engine core, inspection, encryption, repair, CLI | 17 | ~2,050k |
 | P2 | Font identification & style-matched text editing | 20 | ~4,550k |
 | P3 | Web UI with click-to-edit | 15 | ~1,900k |

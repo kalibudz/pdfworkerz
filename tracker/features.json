@@ -54,6 +54,7 @@
     {"id": "INF-07", "category": "INF", "name": "Pixel-diff visual regression harness", "parity": ["Beyond"], "libs": ["PyMuPDF", "numpy"], "phase": "P1", "estTokens": "M", "status": "done"},
     {"id": "INF-08", "category": "INF", "name": "Cross-platform packaging (pipx install, Windows/macOS/Linux bundles)", "parity": ["Beyond"], "libs": ["PyInstaller"], "phase": "P9", "estTokens": "L", "status": "planned"},
     {"id": "INF-09", "category": "INF", "name": "User guide and developer documentation", "parity": ["Beyond"], "libs": ["MkDocs"], "phase": "P9", "estTokens": "M", "status": "planned"},
+    {"id": "INF-10", "category": "INF", "name": "Automatic resume after a session ends abruptly (in-progress mark, recovery report)", "parity": ["Beyond"], "libs": ["Python"], "phase": "P0", "estTokens": "S", "status": "done"},
     {"id": "COR-01", "category": "COR", "name": "Open and parse PDF 1.0-2.0 files", "parity": ["iLovePDF", "Nitro"], "libs": ["PyMuPDF", "pikepdf"], "phase": "P1", "estTokens": "M", "status": "done"},
     {"id": "COR-02", "category": "COR", "name": "Render pages to raster at any DPI", "parity": ["iLovePDF", "Nitro"], "libs": ["PyMuPDF"], "phase": "P1", "estTokens": "S", "status": "done"},
     {"id": "COR-03", "category": "COR", "name": "Document inspection report (version, fonts, images, encryption, forms, signatures, layers)", "parity": ["Beyond"], "libs": ["PyMuPDF", "pikepdf"], "phase": "P1", "estTokens": "M", "status": "done"},

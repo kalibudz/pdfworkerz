@@ -4,10 +4,37 @@ Build sessions can end at any time: usage limits, context size or session expiry
 
 ## 1. Start of every session
 
-1. Read `state/checkpoint.json`. It records `phase`, `taskId`, `step`, `branch`, `lastGreenCommit`, `nextAction` and `openQuestions`.
-2. `git status` to confirm that the branch named in the checkpoint exists locally and has no stray changes.
+**Run this first, before anything else:**
+
+```bash
+python tools/resume.py
+```
+
+It prints what the last session was doing, whether it finished, the uncommitted files, any WIP branch that is ahead, and the next action. Then:
+
+1. The checkpoint (`state/checkpoint.json`) records `phase`, `taskId`, `step`, `branch`, `lastGreenCommit`, `nextAction`, `openQuestions`, and `status` with `startedAt`.
+2. `git status` to confirm that the branch named in the checkpoint exists locally and to look over anything uncommitted before changing it.
 3. Run `python tools/gate.py` (the local review workers; GitHub Actions is manual-only because its minutes are billed). If it is red, fixing it becomes the next task.
-4. Resume at `nextAction`. Do not start something new while a checkpointed task is unfinished.
+4. **Resume at `nextAction` without being asked.** An interrupted task is picked up automatically; do not start something new while one is unfinished, and do not wait for the owner to re-describe it.
+
+### When the session before ended abruptly
+
+A usage limit, a context overflow or an expiry stops a session between two tool calls. There is no chance to write a checkpoint then, so the mark is written **before** the work instead:
+
+```bash
+python tools/resume.py --begin "EDT-13 slice 2: align bar"   # before starting
+python tools/resume.py --end                                 # after the gate is green and the work is committed
+```
+
+A session that starts and finds `status` still `in-progress` knows the one before it was cut off. `python tools/resume.py --check` exits 1 in that case, for any wrapper that wants to branch on it.
+
+Recovering, in order:
+
+1. `python tools/resume.py` — read the report in full.
+2. Look over the uncommitted files it lists. They are the interrupted task's work in progress, not stray edits: keep what is right, and do not discard anything before reading it.
+3. `git log --oneline main..wip/<id>` for any WIP branch the report shows as ahead.
+4. `python tools/gate.py` — the only trustworthy statement about where the code actually stands. The checkpoint's `step` can be one step stale, because the session died before updating it; the gate never is.
+5. Carry on from `nextAction`, then finish the task normally (section 4) and `--end` it.
 
 ## 2. Look-ahead before every task
 
@@ -24,7 +51,8 @@ python tools/session_budget.py --remaining <tokens left in this session>
 ## 3. During a task
 
 - Tasks are atomic: one feature (or one acceptance criterion of an L feature) together with its tests.
-- Work on a branch `wip/<feature-id>`. Commit at every natural break point, for example after tests are written, after the implementation passes locally, or after refactoring.
+- `python tools/resume.py --begin "<task>"` before the first change, so an abrupt end is detectable.
+- Work on a branch `wip/<feature-id>`. Commit at every natural break point, for example after tests are written, after the implementation passes locally, or after refactoring. A commit is what survives an abrupt end; unpushed work in the editor is not.
 - Before any long-running or risky step, update the checkpoint and commit to the WIP branch.
 - Sub-agents each get exactly one bounded task. The orchestrator never dispatches a sub-agent whose estimate exceeds the remaining usable budget. Sub-agents commit to their own WIP branch so partial work survives.
 
@@ -37,6 +65,7 @@ python tools/session_budget.py --remaining <tokens left in this session>
    {"date": "2026-09-26", "taskId": "INF-06", "estimate": "M", "estTokens": 150000, "actualTokens": 132000, "outcome": "done"}
    ```
 4. Commit. Push only with the owner's approval; a push is a backup and triggers no CI run.
+5. `python tools/resume.py --end`, so the next session sees a clean ending rather than an interrupted task.
 
 ## 5. Recalibration
 

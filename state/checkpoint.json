@@ -1,10 +1,10 @@
 {
   "phase": "P5",
-  "taskId": "P5 in progress: slice 1 (page organization, ORG-01..08, ORG-13) done. 74/163 features done",
-  "step": "Redaction no longer moves text elsewhere on the page: at-risk text line moves (0 0 Td, 0 0 TD, T* at zero leading, ' and \") are rewritten as explicit Tm before redaction, since MuPDF's content cleaner drops them. Reported from live use on a real proposal (a colour emoji was pulled apart 100pt from the edit).",
+  "taskId": "P5 done and signed off; live-use fixes on top (fonts, arranging, content-stream protection, Open Sans, INF-10 auto-resume)",
+  "step": "INF-10: sessions cut off by a usage limit are detected and resumed automatically (tools/resume.py, docs/SESSION_PROTOCOL.md section 1, SPEC.md section 13).",
   "branch": "main",
   "lastGreenCommit": "(this commit) local gate, Windows 11, Python 3.14.3, 14/14 steps",
-  "nextAction": "P5 signed off 2026-09-29. Next: P6 (forms, signatures, security, redaction). Gate before every commit; push only with approval.",
+  "nextAction": "Run python tools/resume.py first. Then: P6 (forms, signatures, security, redaction). Mark each task with resume.py --begin before starting and --end after committing. Gate before every commit; push only with the owner's approval.",
   "openQuestions": [
     {
       "phase": "P2",
@@ -57,5 +57,7 @@
       "text": "Owner (2026-09-30): make local hosting user-friendly through Docker -- one-command startup (no two terminals or hand-built ?token= URL) and one-click file open (file picker/drop and upload, instead of typing a server-side path; a pasted path in quotes failed as 'does not exist'). One-click open also helps the Windows app, so it can be built earlier."
     }
   ],
-  "updated": "2026-09-30"
+  "updated": "2026-09-30",
+  "status": "clean",
+  "startedAt": null
 }
