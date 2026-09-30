@@ -653,6 +653,47 @@ def test_fonts_research_route_returns_the_list(client: TestClient) -> None:
     assert row["font"] == "MysteryGrotesk" and row["times_seen"] == 1
 
 
+@pytest.mark.feature("FNT-06")
+def test_font_library_routes_add_harvest_and_list(client: TestClient, work_dir: Path) -> None:
+    from engine.fonts import research
+    from tests.engine.test_font_library import _POSTSCRIPT, _pdf_with_font, _test_font
+
+    source = _pdf_with_font(work_dir / "full.pdf", _test_font())
+    document_id = _open(client, source)
+    research.flag(_POSTSCRIPT, tier="approximate", note="look-alike", document="full.pdf")
+    research.flag("NotInThisOne", tier="fallback", note="fallback", document="other.pdf")
+
+    rows = {row["font"]: row for row in client.get(f"/fonts/research?document_id={document_id}", headers=AUTH).json()}
+    assert rows[_POSTSCRIPT]["harvestable_here"] is True
+    assert rows["NotInThisOne"]["harvestable_here"] is False
+    assert "no font named" in rows["NotInThisOne"]["harvest_problem"]
+
+    added = client.post(f"/documents/{document_id}/fonts/harvest", json={"font": _POSTSCRIPT}, headers=AUTH)
+    assert added.status_code == 200 and added.json()["postscript_name"] == _POSTSCRIPT
+    assert [row["font"] for row in client.get("/fonts/research", headers=AUTH).json()] == ["NotInThisOne"]
+    assert [font["postscript_name"] for font in client.get("/fonts/library", headers=AUTH).json()] == [_POSTSCRIPT]
+    assert "PWTestSans" in client.get("/fonts", headers=AUTH).json()["families"]
+
+    refused = client.post(f"/documents/{document_id}/fonts/harvest", json={"font": "NotHere"}, headers=AUTH)
+    assert refused.status_code == 400 and "no font named" in refused.json()["detail"]
+
+    font_file = work_dir / "mine.ttf"
+    font_file.write_bytes(_test_font(postscript="PWMine-Regular"))
+    by_path = client.post("/fonts/library", json={"path": f'"{font_file}"'}, headers=AUTH)  # pasted with quotes
+    assert by_path.status_code == 200 and by_path.json()["postscript_name"] == "PWMine-Regular"
+    assert client.delete("/fonts/library/PWMine-Regular", headers=AUTH).status_code == 204
+    assert client.delete("/fonts/library/PWMine-Regular", headers=AUTH).status_code == 400
+
+
+@pytest.mark.feature("EDT-06")
+def test_edit_span_over_the_api_is_one_history_entry(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    body = {"op": "edit_span", "page_index": 0, "span_index": 0, "new_text": "Hello, Editor.", "bold": True}
+    assert client.post(f"/documents/{document_id}/ops", json=body, headers=AUTH).status_code == 200
+    history = client.get(f"/documents/{document_id}/history", headers=AUTH).json()
+    assert [op["op"] for op in history["ops"]] == ["edit_span"]
+
+
 # -- P4: commands and recipes over the API --
 
 

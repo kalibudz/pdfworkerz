@@ -38,3 +38,14 @@ standard OFL-1.1 text with Roboto's copyright line.
 monospace (for example Noto Serif and Roboto Mono, both OFL-licensed), plus the
 other Roboto weights and italics. Nothing in `engine.fonts.match` assumes any
 particular font; adding more is just dropping more font files in.
+
+## Not here: the user's own font library
+
+Only openly licensed fonts belong in this folder: it is redistributed with the code.
+A commercial font a document uses (a bank statement's Adobe "Delta Jaeger", a company's
+licensed house font) goes in the **user's font library** instead
+(`%LOCALAPPDATA%\pdfworkerz\fonts` on Windows; see `engine/fonts/library.py`). It stays
+on that computer, never in the repository, and every edit searches it ahead of the
+system's fonts. Add to it with `pdfworkerz fonts --add FILE`, with
+`pdfworkerz fonts --harvest DOC.pdf FONTNAME` (the complete program a PDF embeds, when
+its license flags permit embedding), or from the web UI's **Fonts** dialog.

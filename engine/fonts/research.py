@@ -77,5 +77,17 @@ def flag(base_font: str, *, tier: str, note: str, document: str) -> None:
     path.write_text(json.dumps([asdict(row) for row in rows], indent=2) + "\n", encoding="utf-8")
 
 
+def resolve(base_font: str) -> bool:
+    """Take `base_font` off the list: an edit has since matched it exactly (it was added
+    to the font library, or a fix found it). Returns whether it was listed."""
+    name = split_subset_tag(base_font)[1] or base_font
+    rows = load()
+    kept = [row for row in rows if row.font != name]
+    if len(kept) == len(rows):
+        return False
+    research_file().write_text(json.dumps([asdict(row) for row in kept], indent=2) + "\n", encoding="utf-8")
+    return True
+
+
 def clear() -> None:
     research_file().unlink(missing_ok=True)

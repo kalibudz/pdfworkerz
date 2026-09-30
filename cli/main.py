@@ -21,6 +21,7 @@ from engine.commands import CommandError, parse_command
 from engine.document import Document
 from engine.edit import EditResult
 from engine.errors import PdfWorkerzError
+from engine.fonts import library as font_library
 from engine.fonts import research as font_research
 from engine.fonts.choose import available_families
 from engine.fonts.style import extract_page_spans
@@ -761,8 +762,46 @@ def fonts(
         bool, typer.Option("--research", help="Show fonts that edits could only approximate, to add later")
     ] = False,
     clear_research: Annotated[bool, typer.Option("--clear-research", help="Empty the fonts-to-research list")] = False,
+    library: Annotated[bool, typer.Option("--library", help="Show the fonts you added to your font library")] = False,
+    add: Annotated[
+        Path | None, typer.Option("--add", help="Add a .ttf/.otf font file to your font library", metavar="FILE")
+    ] = None,
+    harvest: Annotated[
+        tuple[Path, str] | None,
+        typer.Option(
+            "--harvest",
+            help="Add the complete font a PDF embeds to your font library: --harvest DOC.pdf FONTNAME",
+            metavar="DOC FONT",
+        ),
+    ] = None,
 ) -> None:
-    """List the font families you can choose (EDT-03/EDT-06), or the fonts to research."""
+    """List the font families you can choose (EDT-03/EDT-06), the fonts to research, or
+    your own font library -- and add fonts to it."""
+    try:
+        if add is not None:
+            entry = font_library.add_font_file(add)
+            typer.echo(
+                f"added {entry.postscript_name} ({entry.family} {entry.style}) to {font_library.user_fonts_dir()}"
+            )
+            return
+        if harvest is not None:
+            path, name = harvest
+            with Document.open(path) as document:
+                entry = font_library.harvest_from_document(document, name)
+            typer.echo(f"added {entry.postscript_name} ({entry.family} {entry.style}), {entry.source}")
+            typer.echo(f"library folder: {font_library.user_fonts_dir()}")
+            return
+    except PdfWorkerzError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    if library:
+        entries = font_library.list_fonts()
+        if not entries:
+            typer.echo("your font library is empty")
+        for entry in entries:
+            typer.echo(f"{entry.postscript_name}  ({entry.family} {entry.style}; from {entry.source})")
+        typer.echo(f"library folder: {font_library.user_fonts_dir()}")
+        return
     if clear_research:
         font_research.clear()
         typer.echo("fonts-to-research list cleared")

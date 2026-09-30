@@ -35,6 +35,7 @@ from fontTools.ttLib import TTFont
 
 from engine.fonts.classify import split_subset_tag
 from engine.fonts.coverage import check_coverage
+from engine.fonts.research import data_dir
 
 BUNDLED_FONTS_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "fonts"
 _FONT_EXTENSIONS = ("*.ttf", "*.otf", "*.ttc")
@@ -50,7 +51,7 @@ class FontCandidate:
     subfamily_name: str
     postscript_name: str
     source: str
-    """"bundled" | "system"."""
+    """"bundled" | "user" (engine.fonts.library) | "system"."""
 
 
 @dataclass(frozen=True)
@@ -107,32 +108,44 @@ def _read_font_names(path: Path) -> tuple[str, str, str] | None:
     return family, subfamily, postscript
 
 
-def build_font_index(*, include_system: bool = True, extra_dirs: list[Path] | None = None) -> list[FontCandidate]:
-    """FNT-06: scan the bundled fallback family, the system's fonts, and any extra
-    directories, returning every readable font found. This does real filesystem and
-    font-parsing work; callers should build it once and reuse it, not call it per edit.
-    """
-    directories = [BUNDLED_FONTS_DIR, *(extra_dirs or [])]
-    if include_system:
-        directories.extend(_system_font_dirs())
+def user_fonts_dir() -> Path:
+    """The user's own font library folder (engine.fonts.library)."""
+    return data_dir() / "fonts"
 
+
+def scan_font_directory(directory: Path, source: str) -> list[FontCandidate]:
+    """Every readable font file in `directory` (recursively)."""
     candidates: list[FontCandidate] = []
-    for directory in directories:
-        source = "bundled" if directory == BUNDLED_FONTS_DIR else "system"
-        for path in _iter_font_files(directory):
-            names = _read_font_names(path)
-            if names is None:
-                continue
-            family, subfamily, postscript = names
-            candidates.append(
-                FontCandidate(
-                    path=path,
-                    family_name=family,
-                    subfamily_name=subfamily,
-                    postscript_name=postscript,
-                    source=source,
-                )
+    for path in _iter_font_files(directory):
+        names = _read_font_names(path)
+        if names is None:
+            continue
+        family, subfamily, postscript = names
+        candidates.append(
+            FontCandidate(
+                path=path, family_name=family, subfamily_name=subfamily, postscript_name=postscript, source=source
             )
+        )
+    return candidates
+
+
+def build_font_index(
+    *, include_system: bool = True, include_user: bool = True, extra_dirs: list[Path] | None = None
+) -> list[FontCandidate]:
+    """FNT-06: scan the user's own font library, the bundled fallback family, any extra
+    directories and the system's fonts, returning every readable font found. This does
+    real filesystem and font-parsing work; callers should build it once and reuse it,
+    not call it per edit (engine.ops.text caches the slow part and rescans only the
+    small user library when it changes).
+    """
+    # The user's library first: it holds exactly the fonts added for their documents.
+    candidates = scan_font_directory(user_fonts_dir(), "user") if include_user else []
+    candidates += scan_font_directory(BUNDLED_FONTS_DIR, "bundled")
+    for directory in extra_dirs or []:
+        candidates += scan_font_directory(directory, "system")
+    if include_system:
+        for directory in _system_font_dirs():
+            candidates += scan_font_directory(directory, "system")
     return candidates
 
 
@@ -140,18 +153,46 @@ def normalize_font_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+_REGULAR_SUBFAMILIES = frozenset({"regular", "normal", "book", "roman", "plain"})
+_VENDOR_SUFFIXES = ("psmt", "mt")
+"""Monotype's PostScript-name suffixes: a PDF may call Windows' Arial "Arial" or
+"ArialMT", and its bold "Arial-BoldMT" or "Arial,Bold" -- all the same fonts."""
+
+
+def _without_vendor_suffix(key: str) -> str:
+    for suffix in _VENDOR_SUFFIXES:
+        if key.endswith(suffix) and len(key) > len(suffix) + 2:
+            return key[: -len(suffix)]
+    return key
+
+
+def _name_keys(candidate: FontCandidate) -> list[str]:
+    """Every normalized name `candidate` answers to, most specific first."""
+    keys = [normalize_font_name(candidate.postscript_name)]
+    family = normalize_font_name(candidate.family_name)
+    subfamily = normalize_font_name(candidate.subfamily_name)
+    keys.append(family + subfamily)
+    if subfamily in _REGULAR_SUBFAMILIES or not subfamily:
+        keys.append(family)  # "Arial" names Arial Regular, never Arial Bold or Arial Narrow
+    return [_without_vendor_suffix(key) for key in keys]
+
+
 def find_by_name(index: list[FontCandidate], base_font: str) -> FontCandidate | None:
     """FNT-06: an exact (normalized) name match for `base_font` (its subset tag, if any,
-    is ignored -- see engine.fonts.classify.SUBSET_TAG_PATTERN)."""
+    is ignored -- see engine.fonts.classify.SUBSET_TAG_PATTERN). "Arial", "ArialMT" and
+    "DWHDKR+Arial" all find Arial Regular; a regular-like style name ("Regular",
+    "Book", ...) counts as no style name at all."""
     _, plain_name = split_subset_tag(base_font)
-    target = normalize_font_name(plain_name)
+    target = _without_vendor_suffix(normalize_font_name(plain_name))
     if not target:
         return None
-    for candidate in index:
-        if normalize_font_name(candidate.postscript_name) == target:
-            return candidate
-        if normalize_font_name(candidate.family_name + candidate.subfamily_name) == target:
-            return candidate
+    # PostScript names first across the whole index: they identify one font exactly,
+    # where a family name alone might also match an unrelated file's loose naming.
+    for depth in range(3):
+        for candidate in index:
+            keys = _name_keys(candidate)
+            if depth < len(keys) and keys[depth] and keys[depth] == target:
+                return candidate
     return None
 
 

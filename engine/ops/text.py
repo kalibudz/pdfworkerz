@@ -32,7 +32,7 @@ from engine.edit import (
 from engine.errors import OpValidationError
 from engine.fonts.blocks import TextBlock, detect_blocks, find_block_containing
 from engine.fonts.choose import family_of, is_bold_italic, resolve_chosen_font
-from engine.fonts.match import FontCandidate, build_font_index
+from engine.fonts.match import FontCandidate, build_font_index, scan_font_directory, user_fonts_dir
 from engine.fonts.style import SpanTrace, dedupe_texttrace, extract_page_spans
 from engine.ops.base import Op, register_op
 
@@ -40,16 +40,31 @@ _TIER_ORDER = {"exact": 0, "approximate": 1, "fallback": 2}
 _SAME_ORIGIN_TOLERANCE = 0.05  # pt
 
 _font_index_cache: list[FontCandidate] | None = None
+_user_index_cache: tuple[tuple[str, int | None], list[FontCandidate]] | None = None
 
 
 def _font_index() -> list[FontCandidate]:
-    """A process-wide cache: scanning system fonts is expensive and the result
-    doesn't change within a session. A longer-lived cache belongs at the server
-    layer once one exists; this is enough for the CLI and for tests."""
-    global _font_index_cache
+    """The font index, cached per process: scanning the system's fonts is expensive and
+    doesn't change within a session. The user's own library (engine.fonts.library) is
+    small and does change -- a font added from the Fonts dialog must be used by the very
+    next edit -- so it is rescanned whenever its folder (or that folder's contents,
+    by modification time) changes."""
+    global _font_index_cache, _user_index_cache
     if _font_index_cache is None:
-        _font_index_cache = build_font_index()
-    return _font_index_cache
+        _font_index_cache = build_font_index(include_user=False)
+    folder = user_fonts_dir()
+    key = (str(folder), folder.stat().st_mtime_ns if folder.is_dir() else None)
+    if _user_index_cache is None or _user_index_cache[0] != key:
+        _user_index_cache = (key, scan_font_directory(folder, "user"))
+    return _user_index_cache[1] + _font_index_cache
+
+
+def reset_font_index() -> None:
+    """Forget the user library's cached scan: a font was added to or removed from it
+    (engine.fonts.library), and the next edit must see that even when the folder's
+    modification time is too coarse to show the change."""
+    global _user_index_cache
+    _user_index_cache = None
 
 
 def _tier_problem(result: EditResult, require_tier: str) -> str | None:
@@ -176,7 +191,9 @@ class PreviewTextOp(Op):
 
     def apply(self, document: Document) -> PreviewResult:
         span = _span_at(document, self.page_index, self.span_index)
-        resolution = resolve_font_for_span(document, self.page_index, span, self.needed_text, font_index=_font_index())
+        resolution = resolve_font_for_span(
+            document, self.page_index, span, self.needed_text, font_index=_font_index(), flag_for_research=False
+        )
         return PreviewResult(
             tier=resolution.tier,
             confidence=resolution.confidence,
@@ -415,8 +432,16 @@ class _StyleChange(Op):
             raise OpValidationError(f"{type(self).__name__}: set at least one of size, color, font, bold or italic")
 
     def _restyle(
-        self, document: Document, page_index: int, span: SpanTrace, font_index: list[FontCandidate]
+        self,
+        document: Document,
+        page_index: int,
+        span: SpanTrace,
+        font_index: list[FontCandidate],
+        text: str | None = None,
     ) -> EditResult:
+        """Redraw `span` in the changed style, with `text` in place of its own wording
+        when given (EditSpanOp: new words and a new style in one draw)."""
+        text = span.style.text if text is None else text
         chosen = None
         if self.font is not None or self.bold is not None or self.italic is not None:
             current_bold, current_italic = is_bold_italic(span.style.font, font_index)
@@ -424,14 +449,14 @@ class _StyleChange(Op):
                 self.font or family_of(span.style.font, font_index),
                 bold=current_bold if self.bold is None else self.bold,
                 italic=current_italic if self.italic is None else self.italic,
-                text=span.style.text,
+                text=text,
                 font_index=font_index,
             )
         result = replace_span_text(
             document,
             page_index,
             span,
-            span.style.text,
+            text,
             font_index=font_index,
             override_size=self.size,
             override_color=self.color,
@@ -492,6 +517,33 @@ class RestyleSpanOp(_StyleChange):
         self._check_something_changes()
         span = _span_at(document, self.page_index, self.span_index)
         return self._restyle(document, self.page_index, span, _font_index())
+
+
+@register_op
+class EditSpanOp(_StyleChange):
+    """UI-03's inspector editor: new wording and/or a new style for exactly the span the
+    user selected, drawn and verified once -- one history entry, one undo -- where a
+    replace_span_text followed by a restyle_span would be two, and the second would have
+    to find its span again after the first had redrawn the line. Any field left unset
+    keeps the span's current value."""
+
+    op: Literal["edit_span"] = "edit_span"
+    page_index: int
+    span_index: int
+    new_text: str | None = None
+
+    def apply(self, document: Document) -> EditResult:
+        span = _span_at(document, self.page_index, self.span_index)
+        restyles = any(value is not None for value in (self.size, self.color, self.font, self.bold, self.italic))
+        if not restyles and (self.new_text is None or self.new_text == span.style.text):
+            raise OpValidationError("edit_span: change the text or at least one of size, color, font, bold or italic")
+        if not restyles:
+            result = replace_span_text(
+                document, self.page_index, span, self.new_text or "", font_index=_font_index(), verify=self.verify
+            )
+            _check_tier(result, self.require_tier, where=type(self).__name__)
+            return result
+        return self._restyle(document, self.page_index, span, _font_index(), self.new_text)
 
 
 @register_op

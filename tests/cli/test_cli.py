@@ -720,3 +720,28 @@ def test_split_command_writes_the_parts(corpus: Corpus, work_dir: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert sorted(p.name for p in parts.iterdir()) == [f"multi_page.part{n}.pdf" for n in (1, 2, 3)]
+
+
+@pytest.mark.feature("FNT-06")
+def test_fonts_library_add_and_harvest(work_dir: Path) -> None:
+    from tests.engine.test_font_library import _POSTSCRIPT, _pdf_with_font, _test_font
+
+    empty = runner.invoke(app, ["fonts", "--library"])
+    assert empty.exit_code == 0 and "your font library is empty" in empty.output
+
+    source = _pdf_with_font(work_dir / "full.pdf", _test_font())
+    harvested = runner.invoke(app, ["fonts", "--harvest", str(source), _POSTSCRIPT])
+    assert harvested.exit_code == 0, harvested.output
+    assert f"added {_POSTSCRIPT}" in harvested.output
+
+    refused = runner.invoke(app, ["fonts", "--harvest", str(source), "NotHere"])
+    assert refused.exit_code == 1 and "no font named" in refused.output
+
+    font_file = work_dir / "mine.ttf"
+    font_file.write_bytes(_test_font(postscript="PWMine-Regular"))
+    added = runner.invoke(app, ["fonts", "--add", str(font_file)])
+    assert added.exit_code == 0 and "added PWMine-Regular" in added.output
+
+    listed = runner.invoke(app, ["fonts", "--library"])
+    assert _POSTSCRIPT in listed.output and "PWMine-Regular" in listed.output
+    assert "PWTestSans" in runner.invoke(app, ["fonts"]).output

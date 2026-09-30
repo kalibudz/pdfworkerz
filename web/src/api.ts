@@ -154,6 +154,31 @@ export interface HistoryOp {
   [field: string]: unknown;
 }
 
+/** Mirrors engine.fonts.research.FontToResearch, plus the per-document fields GET
+ * /fonts/research adds when given a document. */
+export interface FontToResearch {
+  font: string;
+  best_tier: string;
+  note: string;
+  times_seen: number;
+  first_seen: string;
+  last_seen: string;
+  example_document: string;
+  harvestable_here?: boolean;
+  harvest_problem?: string | null;
+}
+
+/** Mirrors engine.fonts.library.LibraryFont. */
+export interface LibraryFont {
+  postscript_name: string;
+  family: string;
+  style: string;
+  file: string;
+  source: string;
+  added: string;
+  copyright: string;
+}
+
 /** Mirrors server/app.py's HistoryResponse (UI-04). */
 export interface HistoryState {
   ops: HistoryOp[];
@@ -214,6 +239,37 @@ export class Api {
       .then((response) => response.json() as Promise<{ families: string[] }>)
       .then((body) => body.families);
     return await this.families;
+  }
+
+  /** Fonts that edits could only approximate (engine.fonts.research). With a
+   * document, each row says whether that document can supply the font. */
+  async fontsToResearch(documentId?: string): Promise<FontToResearch[]> {
+    const query = documentId ? `?${new URLSearchParams({ document_id: documentId })}` : "";
+    const response = await this.request(`/fonts/research${query}`);
+    return (await response.json()) as FontToResearch[];
+  }
+
+  /** The fonts the user added on this machine (engine.fonts.library). */
+  async fontLibrary(): Promise<LibraryFont[]> {
+    const response = await this.request("/fonts/library");
+    return (await response.json()) as LibraryFont[];
+  }
+
+  /** Copy a font file on the server's machine into the user's library. */
+  async addFontFile(path: string): Promise<LibraryFont> {
+    const response = await this.request("/fonts/library", { method: "POST", body: JSON.stringify({ path }) });
+    this.families = null; // the family list now includes it
+    return (await response.json()) as LibraryFont;
+  }
+
+  /** Copy the complete font `font` that this document embeds into the user's library. */
+  async harvestFont(documentId: string, font: string): Promise<LibraryFont> {
+    const response = await this.request(`/documents/${documentId}/fonts/harvest`, {
+      method: "POST",
+      body: JSON.stringify({ font }),
+    });
+    this.families = null;
+    return (await response.json()) as LibraryFont;
   }
 
   /** The edited document to hand to the user: keeps the original encryption, unlike documentFile. */

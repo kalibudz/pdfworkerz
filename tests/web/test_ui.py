@@ -179,8 +179,16 @@ def test_zoom_in_increases_the_rendered_canvas_size(page: Page, app_url: str, co
 
 _EXACT_DOT = "() => document.querySelector('.pw-match-dot')?.classList.contains('pw-match-exact')"
 _FALLBACK_DOT = "() => document.querySelector('.pw-match-dot')?.classList.contains('pw-match-fallback')"
-_STILL_EDITING = "() => !!document.querySelector('.pw-span-box.pw-span-editing')"
-_NOT_EDITING = "() => !document.querySelector('.pw-span-box.pw-span-editing')"
+_SELECTED = ".pw-span-box.pw-span-selected"
+_EDITOR = "#pw-edit-text"
+
+
+def _editor_value(page: Page) -> str:
+    return str(page.input_value(_EDITOR))
+
+
+def _history_count(page: Page) -> int:
+    return len(page.query_selector_all(".pw-history-entry"))
 
 
 def _open_and_click_first_span(page: Page, app_url: str, path: str) -> None:
@@ -189,7 +197,8 @@ def _open_and_click_first_span(page: Page, app_url: str, path: str) -> None:
     _open_path(page, path)
     _wait_overlay_ready(page)
     page.click(".pw-span-box")
-    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    page.wait_for_selector(_SELECTED, timeout=3000)
+    page.wait_for_function(f"() => document.activeElement?.id === '{_EDITOR[1:]}'", timeout=3000)
 
 
 @pytest.mark.feature("UI-02")
@@ -222,8 +231,8 @@ def test_span_boxes_sit_over_their_text_not_mirrored(page: Page, app_url: str, c
 def test_idle_span_boxes_do_not_draw_a_second_copy_of_the_text(page: Page, app_url: str, corpus: Corpus) -> None:
     """The canvas already shows the real glyphs. An idle box that painted
     its text too, in an approximated web font a few pixels off, doubled
-    every word on a real bank statement. Idle text must be invisible; an
-    editing box shows its text over an opaque background instead."""
+    every word on a real bank statement. A box's text stays invisible,
+    selected or not: the text is edited in the inspector, not on the page."""
     page.goto(app_url)
     page.wait_for_selector("#pw-open-path", timeout=5000)
     _open_path(page, str(corpus.simple))
@@ -231,19 +240,25 @@ def test_idle_span_boxes_do_not_draw_a_second_copy_of_the_text(page: Page, app_u
     color = page.eval_on_selector(".pw-span-box", "el => getComputedStyle(el).color")
     assert color == "rgba(0, 0, 0, 0)"
     page.click(".pw-span-box")
-    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
-    editing = page.eval_on_selector(
-        ".pw-span-box.pw-span-editing",
-        "el => [getComputedStyle(el).color, getComputedStyle(el).backgroundColor]",
-    )
-    assert editing == ["rgb(0, 0, 0)", "rgb(255, 255, 255)"]
+    page.wait_for_selector(_SELECTED, timeout=3000)
+    assert page.eval_on_selector(_SELECTED, "el => getComputedStyle(el).color") == "rgba(0, 0, 0, 0)"
 
 
 @pytest.mark.feature("UI-02")
-def test_clicking_a_span_opens_an_editable_overlay(page: Page, app_url: str, corpus: Corpus) -> None:
+def test_clicking_a_span_puts_its_text_in_the_inspector_editor(page: Page, app_url: str, corpus: Corpus) -> None:
+    """The owner's rule (2026-09-29): clicking text selects it and puts the
+    cursor in the inspector's text box, prefilled with the text and its style;
+    the page itself is never edited in place."""
     _open_and_click_first_span(page, app_url, str(corpus.simple))
-    is_editable = page.eval_on_selector(".pw-span-box.pw-span-editing", "el => el.isContentEditable")
-    assert is_editable is True
+    assert _editor_value(page) == "Hello, PDFWorkerz."
+    assert page.eval_on_selector(_SELECTED, "el => el.isContentEditable") is False
+    assert page.input_value("#pw-edit-font") == ""  # the original font, by default
+    assert page.input_value("#pw-edit-size") == "14"
+    assert page.input_value("#pw-edit-color") == "#000000"
+    assert page.is_checked("#pw-edit-bold") is False
+    font_label = page.eval_on_selector("#pw-edit-font option[value='']", "el => el.textContent")
+    assert "Original font" in font_label and "Helvetica" in font_label
+    assert page.is_disabled("#pw-edit-apply")  # nothing changed yet
 
 
 @pytest.mark.feature("UI-03")
@@ -284,30 +299,36 @@ def test_typing_new_text_updates_the_live_preview(page: Page, app_url: str, corp
 
 
 @pytest.mark.feature("UI-02")
-def test_escape_discards_the_edit(page: Page, app_url: str, corpus: Corpus) -> None:
+def test_escape_reverts_the_draft(page: Page, app_url: str, corpus: Corpus) -> None:
     _open_and_click_first_span(page, app_url, str(corpus.simple))
     original = page.eval_on_selector(".pw-span-box", "el => el.textContent")
     page.keyboard.type("Should Not Be Saved")
+    page.check("#pw-edit-bold")
+    page.focus(_EDITOR)
     page.keyboard.press("Escape")
-    page.wait_for_function(_NOT_EDITING, timeout=3000)
+    assert _editor_value(page) == original
+    assert page.is_checked("#pw-edit-bold") is False
     assert page.eval_on_selector(".pw-span-box", "el => el.textContent") == original
+    assert _history_count(page) == 0
 
 
 @pytest.mark.feature("UI-02")
-def test_clicking_away_discards_the_edit(page: Page, app_url: str, corpus: Corpus) -> None:
-    """A real bug, caught this way and not by inspection: toggling
-    contentEditable off can itself fire a synchronous blur, re-entering the
-    cancel handler before the outer call finished and crashing on a null
-    box reference. Clicking away is exactly the interaction that exercises
-    that path."""
+def test_clicking_away_keeps_the_draft(page: Page, app_url: str, corpus: Corpus) -> None:
+    """The owner's rule (2026-09-29): clicking elsewhere never throws an edit
+    away. Clicking empty page, the toolbar or the panel keeps the selection
+    and the typed draft; only Revert/Esc or choosing other text discards it."""
     _open_and_click_first_span(page, app_url, str(corpus.simple))
     original = page.eval_on_selector(".pw-span-box", "el => el.textContent")
     errors: list[str] = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))
-    page.keyboard.type("Should Not Be Saved Either")
+    page.keyboard.type("Kept While I Look Around")
     page.click(".pw-page-area", position={"x": 5, "y": 5})
-    page.wait_for_function(_NOT_EDITING, timeout=3000)
-    assert page.eval_on_selector(".pw-span-box", "el => el.textContent") == original
+    page.click(".pw-inspector h2")
+    page.wait_for_timeout(300)
+    assert _editor_value(page) == "Kept While I Look Around"
+    assert page.query_selector(_SELECTED) is not None
+    assert page.eval_on_selector(".pw-span-box", "el => el.textContent") == original  # not applied yet
+    assert _history_count(page) == 0
     assert errors == []
 
 
@@ -320,9 +341,14 @@ def test_enter_commits_an_exact_match_without_a_confirmation_dialog(page: Page, 
     page.keyboard.type("Hello, Editor.")
     page.wait_for_timeout(400)  # let the debounced preview resolve before committing
     page.keyboard.press("Enter")
-    page.wait_for_function(_NOT_EDITING, timeout=5000)
+    page.wait_for_selector(".pw-history-entry", timeout=5000)
     assert dialogs == []
-    assert page.eval_on_selector(".pw-span-box", "el => el.textContent") == "Hello, Editor."
+    page.wait_for_function(
+        "() => document.querySelector('.pw-span-box')?.textContent === 'Hello, Editor.'", timeout=5000
+    )
+    # The edited text stays selected, ready for the next change.
+    page.wait_for_selector(_SELECTED, timeout=5000)
+    assert _editor_value(page) == "Hello, Editor."
 
 
 @pytest.mark.feature("UI-02")
@@ -334,7 +360,7 @@ def test_a_fallback_match_asks_for_confirmation_before_committing(page: Page, ap
     page.keyboard.type("X")
     page.wait_for_timeout(400)
     page.keyboard.press("Enter")
-    page.wait_for_function(_NOT_EDITING, timeout=5000)
+    page.wait_for_selector(".pw-history-entry", timeout=5000)
     assert len(dialogs) == 1
     assert "fallback" in dialogs[0]
 
@@ -348,20 +374,19 @@ def test_declining_the_confirmation_leaves_the_edit_uncommitted(page: Page, app_
     page.wait_for_timeout(400)
     page.keyboard.press("Enter")
     page.wait_for_timeout(500)
-    assert page.eval_on_selector_all(".pw-span-box.pw-span-editing", "els => els.length") == 1
-    assert page.eval_on_selector(".pw-span-box.pw-span-editing", "el => el.textContent") == "X"
+    assert page.query_selector(_SELECTED) is not None
+    assert _editor_value(page) == "X"  # the draft is kept, to change or apply again
+    assert _history_count(page) == 0
 
 
 # -- UI-04 (history panel with undo/redo) --
 
 
 def _commit_edit(page: Page, app_url: str, path: str, new_text: str) -> None:
-    """Waits not just for editing to visibly end (_NOT_EDITING, which flips
-    synchronously the instant commitEdit starts -- before the network
-    request behind it, let alone viewer.ts's post-commit reloadDocument(),
-    has finished) but for a real, later effect of that reload: a history
-    entry appearing. A caller that acts right after _NOT_EDITING alone can
-    race a still-in-flight reloadDocument() -- confirmed the hard way, on
+    """Waits for a real, late effect of the commit's reload -- a history entry
+    appearing -- not merely for the request to start. A caller that acts
+    before the reload finishes can race a still-in-flight
+    reloadDocument() -- confirmed the hard way, on
     Windows CI only, by a UI-05 test that toggled Compare and then
     check()/uncheck()ed its diff checkbox: a *second*, delayed
     compare.show() call (from the edit's own reload, only now completing,
@@ -377,8 +402,8 @@ def _commit_edit(page: Page, app_url: str, path: str, new_text: str) -> None:
     page.keyboard.type(new_text)
     page.wait_for_timeout(400)  # let the debounced preview resolve before committing
     page.keyboard.press("Enter")
-    page.wait_for_function(_NOT_EDITING, timeout=5000)
     page.wait_for_selector(".pw-history-entry", timeout=5000)
+    page.wait_for_selector(_SELECTED, timeout=5000)  # the reload finished and reselected it
 
 
 _FIRST_THUMB = "document.querySelector('.pw-thumb canvas')"
@@ -401,7 +426,7 @@ def test_an_edit_rerenders_the_thumbnail_in_place(page: Page, app_url: str, corp
     page.evaluate(f"() => {{ const c = {_FIRST_THUMB}; c.dataset.kept = '1'; window.__before = c.toDataURL(); }}")
 
     page.click(".pw-span-box")
-    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    page.wait_for_selector(_SELECTED, timeout=3000)
     page.wait_for_function(_EXACT_DOT, timeout=3000)
     page.keyboard.type("Hello, Editor.")
     page.wait_for_timeout(400)  # let the debounced preview resolve before committing
@@ -539,17 +564,15 @@ def test_arrow_keys_move_the_caret_instead_of_navigating_pages_while_editing(
     page: Page, app_url: str, corpus: Corpus
 ) -> None:
     """Regression test for a real bug found while adding the shortcuts
-    below: isTypingTarget used to check only INPUT/TEXTAREA tag names,
-    missing that a click-to-edit box (overlay.ts) is a contenteditable
-    <div> -- so pressing ArrowLeft/ArrowRight to move the caret while
-    typing also navigated pages, and (via the handler's own
-    preventDefault) silently broke caret movement entirely."""
-    _open_and_click_first_span(page, app_url, str(corpus.simple))
-    page.keyboard.press("ArrowLeft")
+    below: arrow keys pressed while typing also navigated pages, and (via
+    the handler's own preventDefault) silently broke caret movement. The
+    text is typed in the inspector's textarea now; the guard must still hold."""
+    _open_and_click_first_span(page, app_url, str(corpus.multi_page))
     page.keyboard.press("ArrowLeft")
     page.keyboard.press("ArrowRight")
-    assert page.text_content(".pw-page-indicator") == "1 / 1"
-    assert page.eval_on_selector_all(".pw-span-box.pw-span-editing", "els => els.length") == 1
+    page.keyboard.press("ArrowRight")
+    assert page.text_content(".pw-page-indicator", timeout=1000).startswith("1 /")
+    assert page.query_selector(_SELECTED) is not None
 
 
 @pytest.mark.feature("UI-08")
@@ -723,10 +746,10 @@ def test_format_painter_copies_a_style_onto_clicked_text(page: Page, app_url: st
     assert _span_box_font_weight(page, "Regular text") == "normal"
 
     page.click(".pw-span-box:has-text('Bold text')")
-    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    page.wait_for_selector(_SELECTED, timeout=3000)
     page.click(".pw-copy-style")
     page.wait_for_selector(".pw-painter-status:not([hidden])", timeout=3000)
-    assert page.query_selector(".pw-span-box.pw-span-editing") is None  # arming ends the edit
+    assert page.query_selector(_SELECTED) is None  # arming ends the selection
 
     page.click(".pw-span-box:has-text('Regular text')")
     page.wait_for_selector(".pw-history-entry:has-text('Copy style')", timeout=10000)
@@ -750,9 +773,9 @@ def test_escape_cancels_an_armed_format_painter(page: Page, app_url: str, corpus
 
     page.keyboard.press("Escape")
     page.wait_for_selector(".pw-painter-status", state="hidden", timeout=3000)
-    # With the painter gone, a click edits again instead of painting.
+    # With the painter gone, a click selects again instead of painting.
     page.click(".pw-span-box:has-text('Regular text')")
-    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    page.wait_for_selector(_SELECTED, timeout=3000)
     assert page.query_selector(".pw-history-entry") is None
 
 
@@ -762,7 +785,7 @@ def _select_first_span_on(page: Page, app_url: str, path: str) -> None:
     _open_path(page, path)
     _wait_overlay_ready(page)
     page.click(".pw-span-box")
-    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    page.wait_for_selector(_SELECTED, timeout=3000)
 
 
 @pytest.mark.feature("EDT-10")
@@ -883,7 +906,7 @@ def test_a_click_on_a_handle_without_dragging_changes_nothing(page: Page, app_ur
     page.click(".pw-move-handle")
     page.wait_for_timeout(500)
     assert page.query_selector(".pw-history-entry") is None
-    assert page.query_selector(".pw-span-box.pw-span-editing") is not None  # the edit survived the press
+    assert page.query_selector(_SELECTED) is not None  # the selection survived the press
 
 
 @pytest.fixture
@@ -1028,7 +1051,7 @@ def test_text_over_an_image_is_still_editable(page: Page, app_url: str, tmp_path
     _open_image_pdf(page, app_url, path)
     span = _box(page, ".pw-span-box:has-text('Label on image')")
     page.mouse.click(span["x"] + span["width"] / 2, span["y"] + span["height"] / 2)
-    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    page.wait_for_selector(_SELECTED, timeout=3000)
 
 
 @pytest.fixture
@@ -1076,7 +1099,7 @@ def test_draw_mode_draws_a_rectangle_by_dragging(page: Page, app_url: str, corpu
     page.keyboard.press("Escape")  # leaves draw mode: text is clickable again
     page.wait_for_selector(".pw-draw-surface", state="detached", timeout=3000)
     page.click(".pw-span-box")
-    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    page.wait_for_selector(_SELECTED, timeout=3000)
 
 
 @pytest.mark.feature("EDT-09")
@@ -1315,12 +1338,10 @@ def test_change_style_makes_the_selected_text_bold(page: Page, app_url: str, sim
     _open_path(page, str(simple_copy))
     _wait_overlay_ready(page)
     page.click(".pw-span-box")
-    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
-    page.click(".pw-change-style")
-    page.wait_for_selector(".pw-style-dialog[open]", timeout=5000)
-    page.check("#pw-style-bold")
-    page.click(".pw-style-submit")
-    page.wait_for_selector(".pw-history-entry", timeout=10000)
+    page.wait_for_selector(_SELECTED, timeout=3000)
+    page.check("#pw-edit-bold")
+    page.click("#pw-edit-apply")
+    page.wait_for_selector(".pw-history-entry:has-text('bold')", timeout=10000)
     page.wait_for_function(
         "() => document.querySelector('.pw-span-box')?.textContent === 'Hello, PDFWorkerz.'", timeout=5000
     )
@@ -1536,3 +1557,77 @@ def test_dragging_and_alt_arrows_reorder_pages(page: Page, app_url: str, tmp_pat
     page.wait_for_function(
         "() => { const c = document.querySelectorAll('.pw-thumb canvas')[3]; return c.height < c.width; }", timeout=5000
     )
+
+
+# -- UI-03: the inspector's text editor and the Fonts dialog --
+
+
+@pytest.mark.feature("UI-03")
+def test_text_and_style_apply_together_as_one_history_entry(page: Page, app_url: str, simple_copy: Path) -> None:
+    dialogs: list[str] = []
+    page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
+    _open_and_click_first_span(page, app_url, str(simple_copy))
+    page.fill(_EDITOR, "Hello, Bold Editor.")
+    page.check("#pw-edit-bold")
+    page.fill("#pw-edit-size", "16")
+    assert page.is_enabled("#pw-edit-apply")
+    page.click("#pw-edit-apply")
+    page.wait_for_selector(".pw-history-entry", timeout=10000)
+    entries = page.eval_on_selector_all(".pw-history-entry", "els => els.map(e => e.textContent)")
+    assert len(entries) == 1
+    assert "Hello, Bold Editor." in entries[0] and "bold" in entries[0] and "16pt" in entries[0]
+    assert dialogs == []
+    # Reselected with its new text and style, ready for the next change.
+    page.wait_for_function(f"() => document.querySelector('{_EDITOR}')?.value === 'Hello, Bold Editor.'", timeout=5000)
+    page.wait_for_function(
+        "() => (document.querySelector('.pw-inspector')?.textContent ?? '').includes('Helvetica-Bold')", timeout=5000
+    )
+    assert page.input_value("#pw-edit-size") == "16"
+    assert page.is_disabled("#pw-edit-apply")
+
+
+@pytest.mark.feature("UI-03")
+def test_choosing_other_text_with_an_unapplied_draft_asks_first(page: Page, app_url: str, corpus: Corpus) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.bold_italic_standard))
+    _wait_overlay_ready(page)
+    page.click(".pw-span-box:has-text('Bold text')")
+    page.fill(_EDITOR, "My draft")
+
+    page.once("dialog", lambda dialog: dialog.dismiss())  # keep it
+    page.click(".pw-span-box:has-text('Regular text')")
+    page.wait_for_timeout(200)
+    assert _editor_value(page) == "My draft"
+    assert page.query_selector(".pw-span-box.pw-span-selected:has-text('Bold text')") is not None
+
+    page.once("dialog", lambda dialog: dialog.accept())  # discard it
+    page.click(".pw-span-box:has-text('Regular text')")
+    page.wait_for_function(f"() => document.querySelector('{_EDITOR}')?.value === 'Regular text'", timeout=3000)
+    assert _history_count(page) == 0
+
+
+@pytest.mark.feature("FNT-06")
+def test_fonts_dialog_adds_a_font_from_the_open_document(page: Page, app_url: str, tmp_path: Path) -> None:
+    from engine.fonts import research
+    from tests.engine.test_font_library import _POSTSCRIPT, _pdf_with_font, _test_font
+
+    source = _pdf_with_font(tmp_path / "full.pdf", _test_font())
+    research.flag(_POSTSCRIPT, tier="approximate", note="closest metric match: a look-alike", document="full.pdf")
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(source))
+    _wait_overlay_ready(page)
+
+    page.click(".pw-fonts-toggle")
+    page.wait_for_selector(f".pw-fonts-research tr[data-font='{_POSTSCRIPT}'] .pw-fonts-harvest", timeout=5000)
+    assert page.query_selector(".pw-fonts-library td:has-text('No fonts added yet.')") is not None
+    page.click(f".pw-fonts-research tr[data-font='{_POSTSCRIPT}'] .pw-fonts-harvest")
+    page.wait_for_selector(f".pw-fonts-library tr[data-font='{_POSTSCRIPT}']", timeout=10000)
+    assert "Added" in page.text_content(".pw-fonts-status")
+    assert page.query_selector(".pw-fonts-research td:has-text('Nothing to research.')") is not None
+    page.click(".pw-fonts-dialog button:has-text('Close')")
+
+    # The editor's font list now offers it.
+    page.click(".pw-span-box")
+    page.wait_for_selector("#pw-edit-font option[value='PWTestSans']", state="attached", timeout=5000)

@@ -79,6 +79,19 @@ function describeOp(op: HistoryOp): string {
       return `Reflow paragraph containing ${quote(op.match)} (${pageLabel(op)})`;
     case "replace_span_text":
       return `Replace text with ${quote(op.new_text)} (${pageLabel(op)})`;
+    case "edit_span": {
+      const changes: string[] = [];
+      if (typeof op.font === "string") changes.push(op.font);
+      if (op.bold === true) changes.push("bold");
+      if (op.bold === false) changes.push("not bold");
+      if (op.italic === true) changes.push("italic");
+      if (op.italic === false) changes.push("not italic");
+      if (typeof op.size === "number") changes.push(`${op.size}pt`);
+      if (Array.isArray(op.color)) changes.push("color");
+      const style = changes.length ? `, ${changes.join(", ")}` : "";
+      const what = typeof op.new_text === "string" ? `Edit text to ${quote(op.new_text)}` : "Restyle text";
+      return `${what} (${pageLabel(op)}${style})`;
+    }
     case "add_link":
       return `Add link ${typeof op.uri === "string" ? `to ${quote(op.uri)}` : "to a page"} (${pageLabel(op)})`;
     case "update_link":

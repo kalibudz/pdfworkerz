@@ -1,9 +1,9 @@
 {
   "phase": "P5",
   "taskId": "P5 in progress: slice 1 (page organization, ORG-01..08, ORG-13) done. 74/163 features done",
-  "step": "P5 slice 1 committed (e8757a2). A real-scenario run of the local web app (API server + built UI, driven by a browser) found and fixed a layout bug: the toolbar didn't wrap and the viewer grid gave its flexible row to the command bar (c3d3b45).",
+  "step": "Live use of the web UI on a real bank statement: inspector text editor (edit_span), document's own complete font reused (Tier 0), Arial/MT name matching, one span per line, accurate fonts-to-research list, user font library (Delta-Book harvested into the owner's library, not the repo).",
   "branch": "main",
-  "lastGreenCommit": "e8757a2 (local gate, Windows 11, Python 3.14.3, 14/14 steps, 754 tests)",
+  "lastGreenCommit": "(this commit) local gate, Windows 11, Python 3.14.3, 14/14 steps, 864 tests",
   "nextAction": "P5 signed off 2026-09-29. Next: P6 (forms, signatures, security, redaction). Gate before every commit; push only with approval.",
   "openQuestions": [
     {
@@ -50,7 +50,12 @@
       "phase": "P9",
       "kind": "todo",
       "text": "Re-verify the iLovePDF / Nitro parity tags against the vendors' current feature pages before the first release."
+    },
+    {
+      "phase": "P7",
+      "kind": "todo",
+      "text": "Owner (2026-09-30): make local hosting user-friendly through Docker -- one-command startup (no two terminals or hand-built ?token= URL) and one-click file open (file picker/drop and upload, instead of typing a server-side path; a pasted path in quotes failed as 'does not exist'). One-click open also helps the Windows app, so it can be built earlier."
     }
   ],
-  "updated": "2026-09-28"
+  "updated": "2026-09-30"
 }

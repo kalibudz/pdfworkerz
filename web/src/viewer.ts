@@ -44,9 +44,9 @@ const ZOOM_STEP = 1.15;
  * INPUTs. That gap meant pressing ArrowLeft/ArrowRight to move the caret
  * while typing inside a span *also* navigated pages and (via
  * preventDefault in the handler below) silently broke caret movement
- * entirely. `isContentEditable` is true for a contenteditable element and
- * for its descendants, covering that case without overlay.ts having to
- * know anything about this module. */
+ * entirely. Text is now edited in the inspector's TEXTAREA (UI-03), which
+ * the tag check covers; `isContentEditable` stays for any editable element
+ * added later. */
 function isTypingTarget(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLElement &&
@@ -104,6 +104,11 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   insertImageButton.className = "pw-insert-image";
   insertImageButton.textContent = "Image…";
   insertImageButton.title = "Insert an image on this page";
+  const fontsButton = document.createElement("button");
+  fontsButton.type = "button";
+  fontsButton.className = "pw-fonts-toggle";
+  fontsButton.textContent = "Fonts";
+  fontsButton.title = "Fonts to research, and your own font library";
   const spellButton = document.createElement("button");
   spellButton.type = "button";
   spellButton.className = "pw-spell-toggle";
@@ -157,6 +162,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     insertImageButton,
     drawSelect,
     spellButton,
+    fontsButton,
     compareButton,
     saveButton,
     downloadButton,
@@ -220,7 +226,9 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
 
   const inspector = createInspector(inspectorPanel, {
     onCopyStyle: () => overlay.armPainter(),
-    onChangeStyle: () => overlay.changeStyle(),
+    onDraftChange: (draft) => overlay.draftChanged(draft),
+    onApply: (draft) => overlay.apply(draft),
+    loadFamilies: () => options.api.fonts(),
     onAddLink: () => overlay.addLink(),
     onEditLink: (link) => overlay.editLink(link),
     onRemoveLink: (link) => overlay.removeLink(link),
@@ -411,6 +419,16 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   });
   drawSelect.addEventListener("change", () => shapeTool.setDrawMode((drawSelect.value || null) as DrawKind | null));
   shortcutsButton.addEventListener("click", () => shortcutsDialog.showModal());
+  // Loaded on first use: it's rarely opened, and keeps the main bundle small.
+  fontsButton.addEventListener("click", () => {
+    void import("./fontsdialog").then(({ openFontsDialog }) =>
+      openFontsDialog({
+        api: options.api,
+        documentId: options.documentId,
+        onLibraryChanged: () => inspector.reloadFamilies(),
+      }),
+    );
+  });
 
   /** EDT-03: arm, then the next click on the page picks the new text's baseline start. */
   function setAddingText(next: boolean): void {

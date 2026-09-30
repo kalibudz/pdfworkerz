@@ -22,7 +22,7 @@ from engine.fonts.match import (
 
 @pytest.fixture(scope="module")
 def bundled_index() -> list:
-    return build_font_index(include_system=False)
+    return build_font_index(include_system=False, include_user=False)
 
 
 @pytest.fixture(scope="module")
@@ -83,7 +83,7 @@ def test_find_by_name_returns_none_for_an_unknown_font(bundled_index: list) -> N
 def test_build_font_index_skips_unreadable_files(work_dir: Path, bundled_index: list) -> None:
     garbage = work_dir / "not_a_font.ttf"
     garbage.write_bytes(b"this is not a font file")
-    index = build_font_index(include_system=False, extra_dirs=[work_dir])
+    index = build_font_index(include_system=False, include_user=False, extra_dirs=[work_dir])
     assert len(index) == len(bundled_index)  # the garbage file contributed nothing, and nothing crashed
 
 

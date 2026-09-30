@@ -26,6 +26,48 @@ A phase is complete when all of its features are **done** through the evidence g
 
 ## Session log
 
+### 2026-09-30 — Live use on a real bank statement: editing and font fixes
+
+Found by the owner editing a real statement in the web UI, and fixed:
+
+- **Doubled letters on screen:** idle click boxes drew their own copy of the text in an
+  approximated web font over the rendered page. The boxes are invisible hit targets now.
+- **The document's own font was never reused (FNT-06):** the statement embeds the whole
+  Delta-Book font, but edits only looked for fonts by name, so every edit fell to a
+  look-alike. Resolution now tries the document's own program first, when its license
+  flag permits embedding and every needed glyph has a real outline. Some subsetters keep
+  the whole cmap but blank unused glyphs (the statement's Roboto did), and those fall
+  through to the full bundled Roboto instead of drawing nothing.
+- **"Arial" never matched arial.ttf (FNT-06):** name matching now treats Regular/Book as
+  no style, and ignores Monotype's MT/PSMT suffixes. It matched Arial Narrow before.
+- **Every edit failed its page check (FNT-01/FNT-12):** redaction's content cleaning
+  rewrites `Tm` line positions as `TD`/`T*`, and MuPDF then reports several lines as one
+  span. The statement's untouched five-line address block became one span on every edit,
+  failing "overlaps other text" and "misplaced". Extraction now splits spans at baseline
+  jumps. This also makes each line of such a block clickable on its own.
+- **Research list over-counted and never closed:** each keystroke's preview flagged the
+  font (Delta-Book: 52 times). Only applied edits flag now, and a font that later
+  resolves exactly is taken off the list.
+- **User font library (new, `engine/fonts/library.py`):** for fonts that can't ship with
+  PDFWorkerz. Owner's decision: Delta-Book (© Adobe) goes here, never in the repository.
+  Fonts can be added from a file or harvested from a PDF that embeds the complete font.
+  Routes are `/fonts/library` and `/documents/{id}/fonts/harvest`; the CLI adds
+  `fonts --library/--add/--harvest`; the web UI adds a **Fonts** dialog. The library is
+  rescanned whenever its folder changes.
+- **Inspector text editor (UI-02/UI-03, owner's decision):** clicking text selects it and
+  puts the cursor in the inspector's Edit text box, with the original font, size, color,
+  bold and italic as defaults. Enter applies text and style together as one `edit_span`
+  Op (one undo), and the edited text stays selected. Clicking elsewhere keeps the draft.
+  Typing on the page and the Change style… dialog are gone.
+- **Test isolation:** module-scoped fixtures ran before the per-test data folder was set,
+  so they read the real user library. The data folder is now isolated at session start.
+- **Planned (owner):** user-friendly local hosting through Docker, with one-command
+  startup and one-click file open instead of typing a path. Tracked in
+  `state/checkpoint.json`; the agreed Docker design is revisited at P7.
+- Local gate green: 14/14 steps, 864 tests. Seen, not yet explained: 3 one-off web UI
+  test failures across about 12 full web runs, each a different test timing out waiting
+  for the viewer or a history entry, and none reproduced on rerun.
+
 ### 2026-09-29 — P5: organize, page design, annotate, document structure
 
 - **Slice 1 (ORG-01..08, ORG-13):** merge, insert, move/reorder, rotate, delete,

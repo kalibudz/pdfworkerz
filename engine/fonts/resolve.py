@@ -11,7 +11,11 @@ result could not be read back as the text it was supposed to be, because
 PyMuPDF had no way to know which glyph index the requested characters
 should use). So rather than literal in-place stream surgery, "exact" match
 here always goes through FNT-08's merged subset -- built from the same,
-full font -- whenever that font can be found. The result is still the
+full font -- whenever that font can be found. The first place looked is the
+document's own embedded program: when it still has a usable ``cmap`` covering
+every character needed (a fully embedded font, as bank-statement generators
+often write, or a subset that happens to cover the edit), the fresh subset is
+cut from those bytes directly, with no external font file involved. The result is still the
 *same* font (identical outlines, weight and metrics); only the embedding
 mechanism differs from the literal description, and that is why the tier
 is still reported as "exact", not "approximate".
@@ -30,7 +34,11 @@ would otherwise take.
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
+
+from fontTools.pens.boundsPen import BoundsPen
+from fontTools.ttLib import TTFont
 
 from engine.fonts.classify import FontClassification, fingerprint_style, infer_style_from_name, split_subset_tag
 from engine.fonts.match import (
@@ -115,6 +123,44 @@ class FontResolution:
     font_bytes: bytes | None
     requires_approval: bool
     note: str
+
+
+FSTYPE_RESTRICTED = 0x0002
+"""OS/2 fsType bit 1: "Restricted License embedding" -- the font's vendor forbids
+embedding it in any document, so its program is never reused for new text."""
+
+
+def embedded_program_covers(font_bytes: bytes, characters: str) -> bool:
+    """Whether a document's own font program can draw `characters` itself: it loads,
+    its license permits embedding, its ``cmap`` maps every character, and every
+    visible character's glyph has an outline. A typical subset has no ``cmap`` at all
+    (see the module docstring); some subsetters keep the whole ``cmap`` but blank the
+    outlines of unused glyphs (found in a real statement's Roboto subsets, where "Q"
+    and "z" were mapped but empty) -- both answer False rather than draw nothing."""
+    try:
+        tt = TTFont(io.BytesIO(font_bytes), lazy=True, fontNumber=0)
+        os2 = tt.get("OS/2", None)
+        if os2 is not None and os2.fsType & FSTYPE_RESTRICTED:
+            return False
+        cmap = tt.getBestCmap() or {}
+        if not cmap:
+            return False
+        glyph_set = tt.getGlyphSet()
+        for char in set(characters):
+            if char in "\t\n\r":
+                continue
+            glyph_name = cmap.get(ord(char))
+            if glyph_name is None or glyph_name not in glyph_set:
+                return False
+            if char.isspace():
+                continue  # a space has no outline by design
+            pen = BoundsPen(glyph_set)
+            glyph_set[glyph_name].draw(pen)
+            if pen.bounds is None:
+                return False
+    except Exception:
+        return False
+    return True
 
 
 def _standard_fallback_name(bold: bool, italic: bool, family_class: str) -> str:
@@ -214,6 +260,17 @@ def resolve_font(
 
     if not classification.embedded:
         return _resolve_non_embedded(classification, already_rendered_text, needed_text, font_index)
+
+    characters = "".join(set(already_rendered_text) | set(needed_text))
+    if original_font_bytes and embedded_program_covers(original_font_bytes, characters):
+        return FontResolution(
+            tier=TIER_EXACT,
+            confidence=1.0,
+            fontname=None,
+            font_bytes=build_merged_subset(original_font_bytes, characters),
+            requires_approval=False,
+            note="the document's own embedded font, re-subset to cover the edit",
+        )
 
     exact_match = find_by_name(font_index, classification.base_font)
     if exact_match is not None:

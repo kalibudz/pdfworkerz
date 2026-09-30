@@ -7,13 +7,30 @@
  */
 
 import type { ImageInfo, LinkInfo, PreviewResult, ShapeInfo, SpanTrace } from "./api";
+import { styleFromFontName, type StyleChoice } from "./styledialog";
+
+/** UI-03: what the inspector's text editor holds -- the wording plus the style to draw
+ * it in. `font` is "" for "keep the original font". */
+export type TextDraft = StyleChoice;
 
 export interface InspectorHandle {
   /** Nothing selected -- the panel's resting state. */
   showEmpty(): void;
   /** A span was just selected, before any preview has come back for it yet.
-   * `links` are the page's links overlapping it (EDT-10). */
-  showSpan(span: SpanTrace, links?: LinkInfo[]): void;
+   * `links` are the page's links overlapping it (EDT-10). The text editor is
+   * reset to the span's own text and style unless `keepDraft` (the same span,
+   * shown again after a zoom or re-render). */
+  showSpan(span: SpanTrace, links?: LinkInfo[], keepDraft?: boolean): void;
+  /** Put the cursor in the text editor, with its text selected. */
+  focusEditor(): void;
+  /** The editor's draft differs from the selected span's text and style. */
+  isDirty(): boolean;
+  /** The draft as it stands. */
+  draft(): TextDraft;
+  /** Say what an edit is doing (null clears); `busy` locks the editor meanwhile. */
+  setStatus(message: string | null, busy?: boolean): void;
+  /** The font families changed (a font was added to the library): reload the list. */
+  reloadFamilies(): void;
   /** The latest preview result for the currently-shown span, or null while
    * one is in flight (SPEC.md never guesses at a match tier it hasn't
    * actually computed). */
@@ -45,8 +62,12 @@ export type ImageAction = "replace" | "crop" | "delete";
 export interface InspectorOptions {
   /** EDT-07: the "Copy style" button was pressed for the shown span. */
   onCopyStyle?: () => void;
-  /** EDT-06: the "Change style…" button was pressed for the shown span. */
-  onChangeStyle?: () => void;
+  /** UI-03: the text editor's draft changed (typed, or a style control changed). */
+  onDraftChange?: (draft: TextDraft) => void;
+  /** UI-03: Apply (or Enter) -- commit the draft to the selected span. */
+  onApply?: (draft: TextDraft) => void;
+  /** The font families the editor's font list offers (GET /fonts). */
+  loadFamilies?: () => Promise<string[]>;
   /** EDT-10: add a link over the shown span. */
   onAddLink?: () => void;
   /** EDT-10: retarget, or remove, one of the shown span's links. */
@@ -137,6 +158,189 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   empty.textContent = "Click a span of text on the page to inspect it.";
   container.appendChild(empty);
 
+  // UI-03: the text editor. Clicking a span puts the cursor here; nothing typed is lost
+  // by clicking elsewhere -- only Revert, Esc, or choosing different text discards it.
+  const editor = document.createElement("div");
+  editor.className = "pw-edit-section";
+  editor.hidden = true;
+  const editHeading = document.createElement("h3");
+  editHeading.className = "pw-inspector-subheading";
+  editHeading.textContent = "Edit text";
+  const editText = document.createElement("textarea");
+  editText.id = "pw-edit-text";
+  editText.rows = 2;
+  editText.setAttribute("aria-label", "Replacement text");
+  const editFont = document.createElement("select");
+  editFont.id = "pw-edit-font";
+  const keepFontOption = document.createElement("option");
+  keepFontOption.value = "";
+  editFont.appendChild(keepFontOption);
+  let familiesLoaded = false;
+  const editSize = document.createElement("input");
+  editSize.type = "number";
+  editSize.id = "pw-edit-size";
+  editSize.min = "1";
+  editSize.max = "400";
+  editSize.step = "0.5";
+  const editColor = document.createElement("input");
+  editColor.type = "color";
+  editColor.id = "pw-edit-color";
+  const editBold = document.createElement("input");
+  editBold.type = "checkbox";
+  editBold.id = "pw-edit-bold";
+  const editItalic = document.createElement("input");
+  editItalic.type = "checkbox";
+  editItalic.id = "pw-edit-italic";
+  function editField(label: string, control: HTMLElement, className = "pw-edit-field"): HTMLLabelElement {
+    const wrapper = document.createElement("label");
+    wrapper.className = className;
+    const caption = document.createElement("span");
+    caption.textContent = label;
+    wrapper.append(caption, control);
+    return wrapper;
+  }
+  const styleRow = document.createElement("div");
+  styleRow.className = "pw-edit-style-row";
+  styleRow.append(
+    editField("Size", editSize),
+    editField("Color", editColor),
+    editField("Bold", editBold, "pw-edit-check"),
+    editField("Italic", editItalic, "pw-edit-check"),
+  );
+  const editButtons = document.createElement("div");
+  editButtons.className = "pw-edit-buttons";
+  const applyButton = panelButton("Apply", "pw-edit-apply", () => apply());
+  applyButton.id = "pw-edit-apply";
+  applyButton.title = "Apply the change to the page (Enter)";
+  const revertButton = panelButton("Revert", "pw-edit-revert", () => revert());
+  revertButton.id = "pw-edit-revert";
+  revertButton.title = "Go back to the text and style on the page (Esc)";
+  editButtons.append(applyButton, revertButton);
+  const editStatus = document.createElement("p");
+  editStatus.className = "pw-edit-status";
+  editStatus.setAttribute("role", "status");
+  editStatus.hidden = true;
+  const editHint = document.createElement("p");
+  editHint.className = "pw-hint";
+  editHint.textContent = "Enter applies, Esc reverts. Each piece of text is one line.";
+  editor.append(
+    editHeading,
+    editField("Text", editText, "pw-edit-field pw-edit-text-field"),
+    editField("Font", editFont),
+    styleRow,
+    editButtons,
+    editStatus,
+    editHint,
+  );
+  container.appendChild(editor);
+
+  let original: TextDraft | null = null;
+
+  function readDraft(): TextDraft {
+    return {
+      text: editText.value,
+      font: editFont.value,
+      size: Number(editSize.value) || (original?.size ?? 0),
+      color: fromHexColor(editColor.value),
+      bold: editBold.checked,
+      italic: editItalic.checked,
+    };
+  }
+
+  function writeDraft(draft: TextDraft): void {
+    editText.value = draft.text;
+    editFont.value = draft.font;
+    editSize.value = String(Math.round(draft.size * 10) / 10);
+    editColor.value = toHexColor(draft.color).toLowerCase();
+    editBold.checked = draft.bold;
+    editItalic.checked = draft.italic;
+  }
+
+  function isDirty(): boolean {
+    if (!original) {
+      return false;
+    }
+    const draft = readDraft();
+    return (
+      draft.text !== original.text ||
+      draft.font !== original.font ||
+      Math.abs(draft.size - original.size) > 0.05 ||
+      toHexColor(draft.color) !== toHexColor(original.color) ||
+      draft.bold !== original.bold ||
+      draft.italic !== original.italic
+    );
+  }
+
+  let busy = false;
+
+  function refreshDirty(): void {
+    applyButton.disabled = busy || !isDirty();
+    editor.classList.toggle("pw-edit-dirty", isDirty());
+  }
+
+  function draftChanged(): void {
+    refreshDirty();
+    options.onDraftChange?.(readDraft());
+  }
+
+  function apply(): void {
+    if (!busy && isDirty()) {
+      options.onApply?.(readDraft());
+    }
+  }
+
+  function revert(): void {
+    if (original && !busy) {
+      writeDraft(original);
+      draftChanged();
+    }
+  }
+
+  for (const control of [editText, editSize, editColor]) {
+    control.addEventListener("input", draftChanged);
+  }
+  for (const control of [editFont, editBold, editItalic]) {
+    control.addEventListener("change", draftChanged);
+  }
+  editor.addEventListener("keydown", (event) => {
+    const onControl = event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement;
+    if (event.key === "Enter" && onControl) {
+      event.preventDefault(); // one span is one line: Enter applies, never a line break
+      apply();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      revert();
+    }
+  });
+
+  async function loadFamilies(): Promise<void> {
+    if (familiesLoaded || !options.loadFamilies) {
+      return;
+    }
+    familiesLoaded = true;
+    try {
+      const chosen = editFont.value;
+      for (const family of await options.loadFamilies()) {
+        const option = document.createElement("option");
+        option.value = family;
+        option.textContent = family;
+        editFont.appendChild(option);
+      }
+      editFont.value = chosen;
+    } catch {
+      familiesLoaded = false; // try again the next time text is selected
+    }
+  }
+
+  /** Forget the loaded font list: a font was added to the library. */
+  function reloadFamilies(): void {
+    editFont.replaceChildren(keepFontOption);
+    familiesLoaded = false;
+    if (!editor.hidden) {
+      void loadFamilies();
+    }
+  }
+
   const fields = document.createElement("div");
   fields.hidden = true;
   container.appendChild(fields);
@@ -165,9 +369,7 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   const actions = document.createElement("div");
   actions.className = "pw-inspector-actions";
   actions.hidden = true;
-  const changeStyleButton = panelButton("Change style…", "pw-change-style", () => options.onChangeStyle?.());
-  changeStyleButton.title = "Change this text's font, weight, size or color";
-  actions.append(copyStyleButton, changeStyleButton);
+  actions.append(copyStyleButton);
 
   // EDT-10: links over the selected span.
   const linksHeading = document.createElement("h3");
@@ -257,6 +459,7 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   container.appendChild(shapeSection);
 
   function showShape(shape: ShapeInfo): void {
+    hideEditor();
     empty.hidden = true;
     fields.hidden = true;
     actions.hidden = true;
@@ -271,6 +474,7 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   }
 
   function showImage(image: ImageInfo): void {
+    hideEditor();
     empty.hidden = true;
     fields.hidden = true;
     actions.hidden = true;
@@ -308,7 +512,14 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   painterStatus.hidden = true;
   container.appendChild(painterStatus);
 
+  function hideEditor(): void {
+    editor.hidden = true;
+    original = null;
+    setStatus(null);
+  }
+
   function showEmpty(): void {
+    hideEditor();
     empty.hidden = false;
     fields.hidden = true;
     actions.hidden = true;
@@ -316,8 +527,21 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     shapeSection.hidden = true;
   }
 
-  function showSpan(span: SpanTrace, links: LinkInfo[] = []): void {
+  function showSpan(span: SpanTrace, links: LinkInfo[] = [], keepDraft = false): void {
     showLinks(links);
+    keepFontOption.textContent = `Original font (${span.style.font.replace(/^[A-Z]{6}\+/, "")})`;
+    const kept = keepDraft && original ? readDraft() : null;
+    original = {
+      text: span.style.text,
+      font: "",
+      size: span.style.size,
+      color: span.style.color,
+      ...styleFromFontName(span.style.font),
+    };
+    writeDraft(kept ?? original);
+    editor.hidden = false;
+    setStatus(null);
+    void loadFamilies();
     empty.hidden = true;
     fields.hidden = false;
     actions.hidden = false;
@@ -354,6 +578,21 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     matchRow.row.title = preview.note;
   }
 
+  function focusEditor(): void {
+    editText.focus();
+    editText.select();
+  }
+
+  function setStatus(message: string | null, isBusy = false): void {
+    busy = isBusy;
+    editStatus.hidden = message === null;
+    editStatus.textContent = message ?? "";
+    for (const control of [editText, editFont, editSize, editColor, editBold, editItalic, revertButton]) {
+      control.disabled = isBusy;
+    }
+    refreshDirty();
+  }
+
   function setPainter(sourceText: string | null): void {
     painterStatus.hidden = sourceText === null;
     painterStatus.textContent =
@@ -361,5 +600,17 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   }
 
   showEmpty();
-  return { showEmpty, showSpan, setPreview, setPainter, showImage, showShape };
+  return {
+    showEmpty,
+    showSpan,
+    focusEditor,
+    isDirty,
+    draft: readDraft,
+    setStatus,
+    reloadFamilies,
+    setPreview,
+    setPainter,
+    showImage,
+    showShape,
+  };
 }

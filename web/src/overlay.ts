@@ -5,19 +5,19 @@
  * span's own PDF-space bbox converted through pdf.js's own viewport
  * transform (`convertToViewportRectangle`) rather than hand-rolled math --
  * that transform already accounts for the page's rotation and the PDF/CSS
- * y-axis flip pdf.js itself renders through. Clicking a box turns it
- * `contenteditable`, styled with the detected size and color exactly and
- * an *approximated* font family/weight/style from the font's name (the
- * exact embedded typeface isn't loaded as a web font here -- a real,
- * intentional simplification, not a silent one: see README.md).
+ * y-axis flip pdf.js itself renders through. The boxes are only hit
+ * targets: their text is invisible (style.css), since the rendered page
+ * already shows the real glyphs.
  *
- * Typing debounces into PreviewTextOp calls that drive the inspector's
- * live "Match" field; Enter commits through ReplaceSpanTextOp (asking for
- * confirmation first when the preview says the match needs approval,
- * exactly what `requires_approval` already means -- SPEC.md section 5.3);
- * Escape discards. A committed edit's exact new state (including how the
- * commit rearranges span indices) is never guessed at here -- the caller
- * just reloads everything (`onCommitted`).
+ * Clicking a box selects that span: it is outlined, gets the paragraph
+ * move/resize handles, and the inspector's text editor (UI-03) takes the
+ * cursor, prefilled with the span's text and detected style. All typing
+ * happens there; clicking elsewhere never discards it. Edits to the draft
+ * debounce into PreviewTextOp calls for the live "Match" field; Apply (or
+ * Enter) commits text and style together as one edit_span Op -- tried with
+ * the exact font first, asking before anything weaker (approval.ts). The
+ * caller reloads everything after a commit (`onCommitted`), and the edited
+ * span is selected again so edits can follow one another.
  */
 
 import type * as pdfjsLib from "pdfjs-dist";
@@ -25,9 +25,9 @@ import type * as pdfjsLib from "pdfjs-dist";
 import type { Api, HistoryOp, LinkInfo, SpanTrace } from "./api";
 import { applyWithApproval, confirmVerified } from "./approval";
 import { attachBlockHandles } from "./blockdrag";
-import type { InspectorHandle } from "./inspector";
+import type { InspectorHandle, TextDraft } from "./inspector";
 import { toHexColor } from "./inspector";
-import { openStyleDialog, styleFromFontName } from "./styledialog";
+import { styleFromFontName } from "./styledialog";
 
 export interface OverlayOptions {
   api: Api;
@@ -40,10 +40,9 @@ export interface OverlayOptions {
 }
 
 export interface OverlayHandle {
-  /** Rebuilds every span's hit box for a freshly (re)rendered page.
-   * Discards any edit in progress -- its span index belongs to the page
-   * state before this render, which by the time a caller has a new
-   * viewport to hand over is already gone. */
+  /** Rebuilds every span's hit box for a freshly (re)rendered page. The
+   * selection (and its unapplied draft) survives when the same span is
+   * still there unchanged -- a zoom, say; otherwise it is cleared. */
   update(pageIndex: number, spans: SpanTrace[], viewport: pdfjsLib.PageViewport, links?: LinkInfo[]): void;
   /** EDT-07: arm the format painter with the span currently being edited
    * as its source; the next span clicked (on any page) gets its style.
@@ -56,8 +55,10 @@ export interface OverlayHandle {
   /** EDT-10: prompt for a new target for `link`. */
   editLink(link: LinkInfo): void;
   removeLink(link: LinkInfo): void;
-  /** EDT-06: ask for a new font, weight, slant, size or color for the selected span. */
-  changeStyle(): void;
+  /** UI-03: commit the inspector editor's draft to the selected span. */
+  apply(draft: TextDraft): void;
+  /** UI-03: the inspector editor's draft changed -- refresh the Match preview. */
+  draftChanged(draft: TextDraft): void;
 }
 
 interface SpanRef {
@@ -146,27 +147,16 @@ export function bboxToRect(
   return { left, top, width: Math.abs(x1 - x0), height: Math.abs(y1 - y0) };
 }
 
-function selectAllContents(el: HTMLElement): void {
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  const selection = window.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-}
-
 export function createOverlay(layer: HTMLElement, options: OverlayOptions): OverlayHandle {
-  let activeBox: HTMLElement | null = null;
-  let originalText = "";
+  /** The box on the page for the selected span. */
+  let selectedBox: HTMLElement | null = null;
+  /** The span being edited (in the inspector) right now -- also what "Copy style" copies from. */
+  let selected: SpanRef | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let latestRequestId = 0;
-  // Guards against a real, confirmed browser behavior: toggling
-  // contentEditable off on a focused element can itself fire `blur` --
-  // without this, that blur's handler would call cancelEdit() and revert
-  // the box's text back to originalText while commitEdit's own save is
-  // still in flight, discarding the edit before its result is even back.
   let committing = false;
-  /** The span being edited right now -- what "Copy style" copies from. */
-  let selected: SpanRef | null = null;
+  /** After a commit reloads the page: select the edited span again, found by its new text. */
+  let reselectAfterCommit: { pageIndex: number; spanIndex: number; text: string } | null = null;
   /** EDT-07: armed format painter source. Survives page changes and
    * update() (cross-page painting is supported); cleared once applied or
    * cancelled, and on any document change, which makes its index stale. */
@@ -236,7 +226,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
   }
 
   function addLink(): void {
-    const span = selected; // captured first: the prompt blurs the box, which clears `selected`
+    const span = selected;
     if (!span) {
       return;
     }
@@ -269,7 +259,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       return;
     }
     const source = selected;
-    cancelEdit();
+    clearSelection();
     painterSource = source;
     layer.classList.add("pw-painting");
     options.inspector.setPainter(source.text);
@@ -311,31 +301,15 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }
   });
 
-  function cancelEdit(): void {
-    if (committing) {
-      return;
-    }
+  function clearSelection(): void {
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
-    // Confirmed the hard way: setting contentEditable to false on a
-    // focused element can itself fire a synchronous `blur`, which re-enters
-    // this same function through box.onblur below *before* this call
-    // finishes -- that reentrant call sees (and nulls out) the shared
-    // activeBox first, so reading it again afterwards would crash on a
-    // null box. Taking a local copy and clearing activeBox immediately,
-    // before touching the box at all, makes a reentrant call a harmless
-    // no-op instead.
-    const box = activeBox;
-    activeBox = null;
+    selectedBox?.classList.remove("pw-span-selected");
+    selectedBox = null;
     selected = null;
     removeHandles();
-    if (box) {
-      box.contentEditable = "false";
-      box.textContent = originalText;
-      box.classList.remove("pw-span-editing");
-    }
     options.inspector.showEmpty();
   }
 
@@ -360,84 +334,105 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }, PREVIEW_DEBOUNCE_MS);
   }
 
-  async function commitEdit(box: HTMLElement, pageIndex: number, spanIndex: number): Promise<void> {
-    const newText = box.textContent ?? "";
-    if (newText === originalText) {
-      cancelEdit();
+  /** The Match row for a draft: the engine's own preview while the original font is
+   * kept; a font the user chose is exactly that font, by definition. */
+  function previewDraft(draft: TextDraft): void {
+    const span = selected;
+    if (!span) {
       return;
     }
-
-    const preview = await options.api.previewText(options.documentId, pageIndex, spanIndex, newText);
-    if (preview.requires_approval) {
-      const proceed = window.confirm(
-        `This edit will use a ${preview.tier} font match rather than the original font exactly ` +
-          `(${preview.note}). Continue?`,
-      );
-      if (!proceed) {
-        return;
-      }
+    if (draft.font) {
+      latestRequestId++; // any preview still in flight is for the old choice
+      options.inspector.setPreview({
+        tier: "exact",
+        confidence: 1,
+        requires_approval: false,
+        note: `${draft.font}, chosen by you`,
+      });
+      return;
     }
+    queuePreview(span.pageIndex, span.spanIndex, draft.text);
+  }
 
+  /** The edit_span Op for a draft: only what actually changed is sent. */
+  function editOpFor(span: SpanRef, draft: TextDraft): HistoryOp {
+    const op: HistoryOp = { op: "edit_span", page_index: span.pageIndex, span_index: span.spanIndex };
+    if (draft.text !== span.text) op.new_text = draft.text;
+    if (draft.font) op.font = draft.font;
+    if (Math.abs(draft.size - span.style.size) > 0.05) op.size = draft.size;
+    if (toHexColor(draft.color) !== toHexColor(span.style.color)) op.color = draft.color;
+    const current = styleFromFontName(span.style.font);
+    if (draft.bold !== current.bold) op.bold = draft.bold;
+    if (draft.italic !== current.italic) op.italic = draft.italic;
+    return op;
+  }
+
+  async function commit(draft: TextDraft): Promise<void> {
+    const span = selected;
+    if (!span || committing) {
+      return;
+    }
+    if (!draft.text.trim()) {
+      options.inspector.setStatus("The text can't be empty. To remove it, use: delete \"…\" in the command bar.");
+      return;
+    }
     committing = true;
-    box.contentEditable = "false";
-    box.classList.remove("pw-span-editing");
+    options.inspector.setStatus("Applying…", true);
+    let applied: { result: unknown } | null = null;
     try {
-      const result = await options.api.replaceSpanText(options.documentId, pageIndex, spanIndex, newText, "fallback");
-      await confirmVerified(options.api, options.documentId, result);
+      applied = await applyWithApproval(options.api, options.documentId, editOpFor(span, draft));
+      if (applied) {
+        await confirmVerified(options.api, options.documentId, applied.result);
+      }
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "The edit could not be saved.");
       committing = false;
-      box.contentEditable = "true";
-      box.classList.add("pw-span-editing");
-      box.focus();
+      options.inspector.setStatus(error instanceof Error ? error.message : "The edit could not be saved.");
+      options.inspector.focusEditor();
       return;
     }
     committing = false;
-    activeBox = null;
-    selected = null;
-    removeHandles();
+    if (!applied) {
+      options.inspector.setStatus(null); // the user declined the weaker font: the draft stays
+      options.inspector.focusEditor();
+      return;
+    }
+    reselectAfterCommit = { pageIndex: span.pageIndex, spanIndex: span.spanIndex, text: draft.text };
     options.onCommitted();
   }
 
-  function startEdit(box: HTMLElement, pageIndex: number, spanIndex: number, text: string, span: SpanTrace): void {
-    if (activeBox && activeBox !== box) {
-      cancelEdit();
-    }
-    activeBox = box;
-    originalText = text;
-    selected = { pageIndex, spanIndex, text, bbox: span.style.bbox, style: span.style };
+  function select(box: HTMLElement, pageIndex: number, spanIndex: number, span: SpanTrace, keepDraft: boolean): void {
+    selectedBox?.classList.remove("pw-span-selected");
+    selectedBox = box;
+    box.classList.add("pw-span-selected");
+    selected = { pageIndex, spanIndex, text: span.style.text, bbox: span.style.bbox, style: span.style };
     attachHandlesFor(box, selected);
-
-    box.contentEditable = "true";
-    box.classList.add("pw-span-editing");
-    box.focus();
-    selectAllContents(box);
-
     options.inspector.showSpan(
       span,
       pageLinks.filter((link) => overlaps(link.rect, span.style.bbox)),
+      keepDraft,
     );
-    queuePreview(pageIndex, spanIndex, text);
+    previewDraft(options.inspector.draft());
+  }
 
-    box.oninput = () => queuePreview(pageIndex, spanIndex, box.textContent ?? "");
-    box.onkeydown = (event: KeyboardEvent) => {
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        void commitEdit(box, pageIndex, spanIndex);
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        cancelEdit();
+  function onSpanClick(box: HTMLElement, pageIndex: number, spanIndex: number, span: SpanTrace): void {
+    if (painterSource) {
+      void applyPainter({ pageIndex, spanIndex, text: span.style.text, bbox: span.style.bbox, style: span.style });
+      return;
+    }
+    if (committing) {
+      return;
+    }
+    const same = selected?.pageIndex === pageIndex && selected.spanIndex === spanIndex;
+    if (!same && options.inspector.isDirty() && selected) {
+      if (!window.confirm(`Discard your unapplied change to “${selected.text}”?`)) {
+        options.inspector.focusEditor();
+        return;
       }
-    };
-    box.onblur = () => {
-      // A click landing outside every span box (blurring without a new one
-      // taking over -- startEdit above already handles switching boxes)
-      // discards the edit rather than leaving an orphaned editable box
-      // with no visible way to commit or cancel it.
-      if (activeBox === box) {
-        cancelEdit();
-      }
-    };
+    }
+    if (!same) {
+      select(box, pageIndex, spanIndex, span, false);
+    }
+    options.inspector.focusEditor();
   }
 
   function update(
@@ -446,8 +441,15 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     viewport: pdfjsLib.PageViewport,
     links: LinkInfo[] = [],
   ): void {
-    cancelEdit();
+    // A zoom or re-render of the same page keeps the selection and its draft when the
+    // span is still there, unchanged; after a commit the edited span is found by its
+    // new text. Anything else (another page, the text changed underneath) clears it.
+    const previous = selected;
+    const reselect = reselectAfterCommit;
+    reselectAfterCommit = null;
     removeHandles();
+    selectedBox = null;
+    selected = null;
     layer.innerHTML = "";
     currentPageIndex = pageIndex;
     currentViewport = viewport;
@@ -467,6 +469,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       layer.appendChild(outline);
     }
 
+    const boxes: HTMLElement[] = [];
     for (const [spanIndex, span] of spans.entries()) {
       const rect = bboxToRect(viewport, span.style.bbox);
       const box = document.createElement("div");
@@ -476,60 +479,40 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       box.style.width = `${rect.width}px`;
       box.style.height = `${rect.height}px`;
       box.style.fontSize = `${span.style.size * viewport.scale}px`;
-      box.style.color = toHexColor(span.style.color);
+      // Invisible (style.css), but sized and weighted like the real text, so the
+      // box's own text matches what it covers (and tools can read its style).
       box.style.fontFamily = approximateFontFamily(span.style.font);
       box.style.fontWeight = approximateFontWeight(span.style.font);
       box.style.fontStyle = approximateFontStyle(span.style.font);
       box.textContent = span.style.text;
-      box.addEventListener("click", () => {
-        if (painterSource) {
-          void applyPainter({ pageIndex, spanIndex, text: span.style.text, bbox: span.style.bbox, style: span.style });
-        } else {
-          startEdit(box, pageIndex, spanIndex, span.style.text, span);
-        }
-      });
+      box.title = "Click to edit this text in the inspector";
+      box.addEventListener("click", () => onSpanClick(box, pageIndex, spanIndex, span));
       layer.appendChild(box);
+      boxes.push(box);
     }
-  }
 
-  /** EDT-06: the dialog's choices become a restyle_span Op carrying only what changed. */
-  async function changeStyle(): Promise<void> {
-    const span = selected; // captured first: the dialog takes focus, which clears `selected`
-    if (!span) {
-      return;
-    }
-    const current = styleFromFontName(span.style.font);
-    const families = await options.api.fonts();
-    const choice = await openStyleDialog({
-      title: `Change style of “${span.text}”`,
-      families,
-      keepFontLabel: `Keep current font (${span.style.font.replace(/^[A-Z]{6}\+/, "")})`,
-      initial: { font: "", size: span.style.size, color: span.style.color, ...current },
-      submitLabel: "Apply",
-    });
-    if (!choice) {
-      return;
-    }
-    const op: HistoryOp = { op: "restyle_span", page_index: span.pageIndex, span_index: span.spanIndex };
-    if (choice.font) op.font = choice.font;
-    if (Math.abs(choice.size - span.style.size) > 0.05) op.size = choice.size;
-    if (toHexColor(choice.color) !== toHexColor(span.style.color)) op.color = choice.color;
-    if (choice.bold !== current.bold) op.bold = choice.bold;
-    if (choice.italic !== current.italic) op.italic = choice.italic;
-    if (Object.keys(op).length === 3) {
-      return; // nothing changed
-    }
-    try {
-      const applied = await applyWithApproval(options.api, options.documentId, op);
-      if (!applied) {
-        return;
+    const keep =
+      previous &&
+      previous.pageIndex === pageIndex &&
+      spans[previous.spanIndex]?.style.text === previous.text &&
+      !reselect;
+    if (keep) {
+      select(boxes[previous.spanIndex], pageIndex, previous.spanIndex, spans[previous.spanIndex], true);
+    } else if (reselect && reselect.pageIndex === pageIndex) {
+      // The edited span usually keeps its index; if the redraw moved it, find it by text.
+      const found =
+        spans[reselect.spanIndex]?.style.text === reselect.text
+          ? reselect.spanIndex
+          : spans.findIndex((span) => span.style.text === reselect.text);
+      if (found >= 0) {
+        select(boxes[found], pageIndex, found, spans[found], false);
+        options.inspector.setStatus("Applied. Undo with Ctrl+Z.");
+      } else {
+        options.inspector.showEmpty();
       }
-      await confirmVerified(options.api, options.documentId, applied.result);
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "The style could not be changed.");
-      return;
+    } else {
+      options.inspector.showEmpty();
     }
-    options.onCommitted();
   }
 
   return {
@@ -539,6 +522,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     addLink,
     editLink,
     removeLink,
-    changeStyle: () => void changeStyle(),
+    apply: (draft) => void commit(draft),
+    draftChanged: previewDraft,
   };
 }

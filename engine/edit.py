@@ -441,10 +441,18 @@ def _find_font_entry(page: pymupdf.Page, basefont: str) -> tuple[int, str] | Non
 
 
 def resolve_font_for_span(
-    document: Document, page_index: int, span: SpanTrace, needed_text: str, *, font_index: list[FontCandidate]
+    document: Document,
+    page_index: int,
+    span: SpanTrace,
+    needed_text: str,
+    *,
+    font_index: list[FontCandidate],
+    flag_for_research: bool = True,
 ) -> FontResolution:
     """The FontResolution (engine.fonts.resolve) for drawing `needed_text` in the
     same style as `span`. Shared by replace, restyle and insert-near-reference.
+    `flag_for_research` is False for a preview: only an edit actually made counts
+    toward the fonts-to-research list (engine.fonts.research), not every keystroke.
     """
     page = document.raw[page_index]
     style = span.style
@@ -469,11 +477,15 @@ def resolve_font_for_span(
         needed_text=needed_text,
         font_index=font_index,
     )
+    if not flag_for_research:
+        return resolution
     if resolution.tier != TIER_EXACT:
         # Owner's rule: fall back to the closest match, and flag the font so it can be added
         # to PDFWorkerz's own library later (engine.fonts.research).
         source = document.source_path.name if document.source_path else "(unsaved document)"
         font_research.flag(style.font, tier=resolution.tier, note=resolution.note, document=source)
+    else:
+        font_research.resolve(style.font)  # matched exactly now: no longer needs research
     return resolution
 
 

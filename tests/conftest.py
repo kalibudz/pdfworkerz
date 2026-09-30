@@ -10,6 +10,8 @@ missing evidence.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -56,6 +58,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "feature(id, criterion=1): the feature this test proves")
+    # Before any fixture runs: _isolated_data_dir gives each test its own data folder,
+    # but module- and session-scoped fixtures are set up before it, and one that built a
+    # font index from the real user data folder picked up the user's own font library.
+    os.environ["PDFWORKERZ_DATA_DIR"] = tempfile.mkdtemp(prefix="pdfworkerz-test-data-")
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

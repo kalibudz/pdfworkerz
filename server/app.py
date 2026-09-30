@@ -35,6 +35,7 @@ import base64
 import dataclasses
 import secrets
 import uuid
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
@@ -61,6 +62,7 @@ from engine.errors import (
     SaveNotPossibleError,
     WrongPasswordError,
 )
+from engine.fonts import library as font_library
 from engine.fonts import research as font_research
 from engine.fonts.choose import available_families
 from engine.ops.annotations import PageAnnotationsOp
@@ -393,9 +395,51 @@ def fonts() -> dict[str, list[str]]:
 
 
 @router.get("/fonts/research")
-def fonts_to_research() -> list[dict[str, Any]]:
-    """Fonts that edits could only approximate, to add to PDFWorkerz's own library later."""
-    return [dataclasses.asdict(row) for row in font_research.load()]
+def fonts_to_research(request: Request, document_id: str | None = None) -> list[dict[str, Any]]:
+    """Fonts that edits could only approximate, to add to the user's font library. With
+    `document_id`, each row also says whether that document embeds it completely enough
+    to add from there (`harvestable_here`, and `harvest_problem` when it doesn't)."""
+    journal = _get_journal(request, document_id) if document_id else None
+    rows = []
+    for row in font_research.load():
+        item: dict[str, Any] = dataclasses.asdict(row)
+        if journal is not None:
+            problem = font_library.harvestable(journal.document, row.font)
+            item.update(harvestable_here=problem is None, harvest_problem=problem)
+        rows.append(item)
+    return rows
+
+
+class AddFontRequest(BaseModel):
+    path: str
+
+
+class HarvestFontRequest(BaseModel):
+    font: str
+
+
+@router.get("/fonts/library")
+def fonts_in_library() -> list[dict[str, Any]]:
+    """The fonts the user added on this machine (engine.fonts.library)."""
+    return [dataclasses.asdict(entry) for entry in font_library.list_fonts()]
+
+
+@router.post("/fonts/library")
+def add_font_to_library(body: AddFontRequest) -> dict[str, Any]:
+    """Copy a font file on this machine into the user's font library."""
+    return dataclasses.asdict(font_library.add_font_file(Path(body.path.strip().strip('"'))))
+
+
+@router.post("/documents/{document_id}/fonts/harvest")
+def harvest_font(body: HarvestFontRequest, journal: JournalDep) -> dict[str, Any]:
+    """Copy the complete font program this document embeds into the user's font library."""
+    return dataclasses.asdict(font_library.harvest_from_document(journal.document, body.font))
+
+
+@router.delete("/fonts/library/{postscript_name}", status_code=204)
+def remove_font_from_library(postscript_name: str) -> Response:
+    font_library.remove_font(postscript_name)
+    return Response(status_code=204)
 
 
 @router.get("/documents/{document_id}/download")

@@ -3309,6 +3309,132 @@
     },
     {
       "additionalProperties": false,
+      "description": "UI-03's inspector editor: new wording and/or a new style for exactly the span the\nuser selected, drawn and verified once -- one history entry, one undo -- where a\nreplace_span_text followed by a restyle_span would be two, and the second would have\nto find its span again after the first had redrawn the line. Any field left unset\nkeeps the span's current value.",
+      "properties": {
+        "size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "font": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font"
+        },
+        "bold": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bold"
+        },
+        "italic": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Italic"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        },
+        "op": {
+          "const": "edit_span",
+          "default": "edit_span",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "span_index": {
+          "title": "Span Index",
+          "type": "integer"
+        },
+        "new_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "New Text"
+        }
+      },
+      "required": [
+        "page_index",
+        "span_index"
+      ],
+      "title": "EditSpanOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "EDT-03: add new text at `position` (a baseline point), either matching the style of\nan existing span (`reference_match`) or in an explicit style (`font` and `size`, plus\noptional `color`, `bold`, `italic`). With both, the explicit fields override the\nmatched style. Nothing existing is touched.",
       "properties": {
         "op": {

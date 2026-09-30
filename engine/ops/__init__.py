@@ -68,7 +68,15 @@ from engine.ops.structure import (
     SetPageLabelsOp,
     UpdateBookmarkOp,
 )
-from engine.ops.text import DeleteTextOp, InsertTextOp, ReflowTextOp, ReplaceTextOp, RestyleSpanOp, RestyleTextOp
+from engine.ops.text import (
+    DeleteTextOp,
+    EditSpanOp,
+    InsertTextOp,
+    ReflowTextOp,
+    ReplaceTextOp,
+    RestyleSpanOp,
+    RestyleTextOp,
+)
 
 __all__ = [
     "AddAnnotationShapeOp",
@@ -96,6 +104,7 @@ __all__ = [
     "DrawShapeOp",
     "DuplicatePagesOp",
     "EditShapeOp",
+    "EditSpanOp",
     "ExtractAttachmentOp",
     "ExtractPagesOp",
     "FindBlankPagesOp",

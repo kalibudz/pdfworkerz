@@ -23,10 +23,11 @@ from fontTools.ttLib import TTFont
 from engine.fonts.match import FontCandidate, find_by_name
 
 
-def build_merged_subset(full_font_path: Path, characters: str) -> bytes:
+def build_merged_subset(full_font: Path | bytes, characters: str) -> bytes:
     """A fresh, valid subset font program covering exactly `characters`, cut from
-    the full font at `full_font_path`. Always includes a .notdef glyph."""
-    tt = TTFont(full_font_path)
+    the full font at `full_font` -- a file path, or a font program's own bytes (a
+    document's complete embedded font). Always includes a .notdef glyph."""
+    tt = TTFont(io.BytesIO(full_font) if isinstance(full_font, bytes) else full_font)
     options = subset.Options()
     options.glyph_names = True
     options.notdef_glyph = True

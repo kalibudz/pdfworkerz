@@ -32,6 +32,7 @@ rather than guessing.
 from __future__ import annotations
 
 import io
+import itertools
 import math
 from collections.abc import Iterator
 from typing import Any
@@ -138,8 +139,48 @@ class SpanTrace(BaseModel):
     1:1 with texttrace's spans; ``style`` is always populated regardless."""
 
 
+_NEW_LINE_FRACTION = 0.5
+"""A baseline jump of more than this fraction of the font size starts a new line (a
+superscript's rise stays well under it)."""
+
+
+def _split_lines(span: dict[str, Any]) -> list[dict[str, Any]]:
+    """Split one texttrace span into one span per baseline.
+
+    MuPDF breaks spans at ``Tm`` but not at ``TD``/``T*``/``'`` line moves, so a block
+    written as "line, next line, next line" comes back as one span across several
+    lines. Content streams rewritten by PyMuPDF's cleaning (which every redaction
+    runs) turn ``Tm`` lines into exactly that form -- found on a real bank statement,
+    where editing any word merged the untouched five-line address block into one span.
+    Splitting here keeps spans the same before and after an edit, and keeps each
+    line separately clickable."""
+    chars = span["chars"]
+    if len(chars) < 2:
+        return [span]
+    dx, dy = span["dir"]
+    limit = span["size"] * _NEW_LINE_FRACTION
+    pieces: list[list[Any]] = [[chars[0]]]
+    for previous, char in itertools.pairwise(chars):
+        # Distance between the two origins perpendicular to the writing direction.
+        offset = abs(-dy * (char[2][0] - previous[2][0]) + dx * (char[2][1] - previous[2][1]))
+        if offset > limit:
+            pieces.append([char])
+        else:
+            pieces[-1].append(char)
+    if len(pieces) == 1:
+        return [span]
+    lines = []
+    for piece in pieces:
+        boxes = [c[3] for c in piece]
+        bbox = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+        lines.append({**span, "chars": tuple(piece), "bbox": bbox})
+    return lines
+
+
 def dedupe_texttrace(spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse fill+stroke pairs (identical geometry, different paint `type`) to one entry."""
+    """The page's spans as PDFWorkerz addresses them: fill+stroke pairs (identical
+    geometry, different paint `type`) collapsed to one entry, and every span that
+    runs across several lines split into one span per line (see _split_lines)."""
     seen: set[tuple[Any, ...]] = set()
     deduped = []
     for span in spans:
@@ -147,7 +188,7 @@ def dedupe_texttrace(spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if key in seen:
             continue
         seen.add(key)
-        deduped.append(span)
+        deduped.extend(_split_lines(span))
     return deduped
 
 

@@ -489,9 +489,9 @@ Every feature has a stable ID. The table below is **generated** from `tracker/fe
 
 ### 8.2 Click-to-edit
 
-1. Hovering shows span boxes. Clicking places a caret in an overlay text box drawn in the detected font and size, so what the user types looks like the result.
-2. The inspector shows the detected style and the match tier (Exact / High / Approximate / Low).
-3. Pressing Enter commits the edit as a `replace_text` Op. Escape cancels. Approximate or Low tiers ask for confirmation first.
+1. Hovering shows span boxes. Clicking selects the span and puts the caret in the inspector's **Edit text** box, prefilled with the span's text and its detected style: the original font (the default), size, color, bold and italic. All typing happens there, never on the page (owner's decision, 2026-09-29): clicking elsewhere keeps the draft, and choosing other text with an unapplied draft asks first.
+2. The inspector shows the detected style and the match tier (Exact / High / Approximate / Low), live as the draft changes.
+3. Pressing Enter (or Apply) commits text and style together as one `edit_span` Op: one history entry, one undo. The edited span stays selected. Escape (or Revert) restores the draft. A weaker tier than Exact asks for confirmation first.
 4. Selecting a block exposes move, resize, reflow, style change and format painter. Images and shapes offer replace, crop, resize and delete.
 
 ### 8.3 Command bar (deterministic, no AI)

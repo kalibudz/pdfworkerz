@@ -321,11 +321,11 @@ button {
   border-radius: 2px;
 }
 
-/* At rest a box is only a hit target: the rendered page already shows the
- * real glyphs, and drawing the text again in an approximated web font on
- * top of them doubled every word. Its inline color applies once editing. */
-.pw-span-box:not(.pw-span-editing) {
-  color: transparent !important;
+/* A box is only a hit target: the rendered page already shows the real glyphs,
+ * and drawing the text again in an approximated web font on top of them doubled
+ * every word. The text itself is edited in the inspector (UI-03), never here. */
+.pw-span-box {
+  color: transparent;
 }
 
 .pw-span-box:hover {
@@ -333,13 +333,9 @@ button {
   background: rgba(47, 111, 235, 0.08);
 }
 
-.pw-span-box.pw-span-editing {
+.pw-span-box.pw-span-selected {
   outline: 2px solid var(--accent);
-  /* Opaque, and page-colored rather than theme-colored, so it hides the
-   * rendered glyphs underneath and dark text stays readable in dark mode. */
-  background: #fff;
-  box-shadow: var(--shadow);
-  cursor: text;
+  background: rgba(47, 111, 235, 0.12);
 }
 
 /* -- UI-03: inspector panel -- */
@@ -609,6 +605,71 @@ button {
   pointer-events: none;
   border-bottom: 2px dashed var(--accent);
   opacity: 0.7;
+}
+
+/* UI-03: the inspector's text editor. */
+.pw-edit-section {
+  margin-bottom: 8px;
+}
+.pw-edit-section .pw-inspector-subheading {
+  margin-top: 0;
+}
+.pw-edit-field {
+  display: grid;
+  grid-template-columns: 3.5em 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+}
+.pw-edit-text-field {
+  align-items: start;
+}
+.pw-edit-field textarea,
+.pw-edit-field select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+}
+.pw-edit-field textarea {
+  resize: vertical;
+  font-size: 0.95rem;
+}
+.pw-edit-style-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 0.85rem;
+}
+.pw-edit-style-row .pw-edit-field {
+  display: flex;
+  margin: 0;
+}
+.pw-edit-style-row input[type="number"] {
+  width: 4.5em;
+}
+.pw-edit-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pw-edit-buttons {
+  display: flex;
+  gap: 8px;
+}
+.pw-edit-dirty .pw-edit-apply:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.pw-edit-status {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 .pw-inspector-subheading {
@@ -975,4 +1036,55 @@ button {
 .pw-thumb.pw-drop-target canvas {
   outline: 3px dashed var(--accent);
   outline-offset: 2px;
+}
+
+/* The Fonts dialog: fonts to research and the user's font library. */
+.pw-fonts-dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 20px 24px;
+  width: min(720px, calc(100vw - 32px));
+}
+.pw-fonts-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+.pw-fonts-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+.pw-fonts-dialog h3 {
+  margin: 16px 0 4px;
+  font-size: 0.9rem;
+}
+.pw-fonts-dialog table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.pw-fonts-dialog td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.pw-fonts-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pw-fonts-status:empty {
+  display: none;
+}
+.pw-fonts-status {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.pw-fonts-add-file {
+  margin-top: 12px;
+}
+.pw-fonts-dialog form {
+  text-align: right;
+  margin-top: 12px;
 }
