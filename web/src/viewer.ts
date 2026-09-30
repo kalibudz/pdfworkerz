@@ -13,7 +13,7 @@
  * up-front renders it may never scroll to.
  */
 
-import type { Api } from "./api";
+import type { Api, SelectMode } from "./api";
 import { createCommandBar } from "./commandbar";
 import { createComparePanel } from "./compare";
 import { createHistoryPanel } from "./history";
@@ -40,6 +40,36 @@ const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
 const ZOOM_STEP = 1.15;
 
+/** EDT-16: what one click on text selects. The last choice is remembered per browser. */
+const SELECT_MODE_KEY = "pdfworkerz.selectMode";
+const SELECT_MODES: readonly { mode: SelectMode; label: string; key: string; title: string }[] = [
+  { mode: "block", label: "Block", key: "b", title: "Select whole paragraphs (B)" },
+  { mode: "line", label: "Line", key: "l", title: "Select single lines (L)" },
+  { mode: "word", label: "Word", key: "w", title: "Select single words (W)" },
+];
+
+function isSelectMode(value: string | null): value is SelectMode {
+  return value === "block" || value === "line" || value === "word";
+}
+
+/** Defaults to "line" when no choice was ever made or storage isn't available. */
+function loadSelectMode(): SelectMode {
+  try {
+    const stored = window.localStorage.getItem(SELECT_MODE_KEY);
+    return isSelectMode(stored) ? stored : "line";
+  } catch {
+    return "line";
+  }
+}
+
+function storeSelectMode(mode: SelectMode): void {
+  try {
+    window.localStorage.setItem(SELECT_MODE_KEY, mode);
+  } catch {
+    // Storage unavailable: the choice won't survive a reload, but still works for this session.
+  }
+}
+
 /** UI-08: a real, pre-existing bug found while adding more global shortcuts
  * below -- this used to check only INPUT/TEXTAREA tag names, missing that
  * overlay.ts's click-to-edit boxes are `contenteditable` `<div>`s, not
@@ -53,6 +83,14 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLElement &&
     (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+  );
+}
+
+/** Any form control -- a <select> included, where letter keys choose an option. */
+function isFormControl(target: EventTarget | null): boolean {
+  return (
+    isTypingTarget(target) ||
+    (target instanceof HTMLElement && ["SELECT", "OPTION"].includes(target.tagName))
   );
 }
 
@@ -138,6 +176,35 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   shortcutsButton.title = "Keyboard shortcuts (?)";
   shortcutsButton.setAttribute("aria-label", "Keyboard shortcuts");
   const shortcutsDialog = createShortcutsDialog();
+  // EDT-16: Block | Line | Word, a radio group: one is always chosen.
+  const selectModeGroup = document.createElement("div");
+  selectModeGroup.className = "pw-select-mode";
+  selectModeGroup.setAttribute("role", "radiogroup");
+  selectModeGroup.setAttribute("aria-label", "What a click on text selects");
+  const selectModeButtons = new Map<SelectMode, HTMLButtonElement>();
+  for (const { mode, label, title: hint } of SELECT_MODES) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.title = hint;
+    button.dataset.mode = mode;
+    button.setAttribute("role", "radio");
+    button.addEventListener("click", () => void setSelectMode(mode));
+    selectModeButtons.set(mode, button);
+    selectModeGroup.appendChild(button);
+  }
+  // Arrow keys move within the group, as in any radio group.
+  selectModeGroup.addEventListener("keydown", (event) => {
+    const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+    if (!step) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation(); // not a page turn or a nudge
+    const order = SELECT_MODES.map((m) => m.mode);
+    const next = order[(order.indexOf(selectMode) + step + order.length) % order.length];
+    void setSelectMode(next).then(() => selectModeButtons.get(selectMode)?.focus());
+  });
   const alignSelect = document.createElement("select");
   alignSelect.className = "pw-align-select";
   alignSelect.title = "Align or distribute the selected objects (Shift+click or drag a box to select several)";
@@ -184,6 +251,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     addTextButton,
     insertImageButton,
     drawSelect,
+    selectModeGroup,
     alignSelect,
     spellButton,
     fontsButton,
@@ -322,6 +390,34 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   let comparing = false;
   let currentViewport: Awaited<ReturnType<PageRenderer["render"]>> = null;
   let addingText = false;
+  let selectMode: SelectMode = loadSelectMode();
+
+  function showSelectMode(): void {
+    for (const [mode, button] of selectModeButtons) {
+      const chosen = mode === selectMode;
+      button.setAttribute("aria-checked", String(chosen));
+      button.classList.toggle("pw-active", chosen);
+      button.tabIndex = chosen ? 0 : -1;
+    }
+  }
+
+  /** EDT-16: changing the mode clears the selection and redraws the page's text boxes. */
+  async function setSelectMode(next: SelectMode): Promise<void> {
+    if (next === selectMode) {
+      return;
+    }
+    if (inspector.isDirty() && !window.confirm("Discard your unapplied text change and switch selection mode?")) {
+      return;
+    }
+    selectMode = next;
+    storeSelectMode(next);
+    showSelectMode();
+    overlay.setMode(next);
+    arrange.clear();
+    await renderCurrentPage();
+  }
+  showSelectMode();
+  overlay.setMode(selectMode);
   // Page operations (delete, insert, merge, ...) change the page count, so it is state, not an option.
   let pageCount = options.pageCount;
   let thumbnails = createThumbnailRail(thumbRail, pageCount, (pageNumber) => void goToPage(pageNumber), movePage);
@@ -352,21 +448,37 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     updateActiveThumbnail();
     if (viewport) {
       const pageIndex = currentPage - 1; // pdf.js pages are 1-based; the API's page_index is 0-based
-      const [spans, links, images, shapes, blocks] = await Promise.all([
+      const mode = selectMode;
+      // Spans as well as units: the units say what a click selects, the spans carry the styles.
+      const [spans, links, images, shapes, units] = await Promise.all([
         options.api.pageSpans(options.documentId, pageIndex),
         options.api.pageLinks(options.documentId, pageIndex),
         options.api.pageImages(options.documentId, pageIndex),
         options.api.pageShapes(options.documentId, pageIndex),
-        options.api.pageBlocks(options.documentId, pageIndex),
+        options.api.pageTextUnits(options.documentId, pageIndex, mode),
       ]);
+      if (mode !== selectMode || pageIndex !== currentPage - 1) {
+        return; // the mode or the page changed meanwhile: that change's own render draws the page
+      }
       editLayer.style.width = `${mainCanvas.width}px`;
       editLayer.style.height = `${mainCanvas.height}px`;
-      overlay.update(pageIndex, spans, viewport, links);
+      overlay.update(pageIndex, units, spans, viewport, links);
       // After overlay.update, which clears the layer; shapes before images so
       // images stack above shapes, and both stay under the text (style.css).
       shapeTool.update(pageIndex, shapes, viewport);
       imageTool.update(pageIndex, images, viewport);
-      arrange.update(pageIndex, viewport, blocks, images, shapes);
+      arrange.update(pageIndex, viewport, units, images, shapes);
+      // The inspector follows the shared selection: a moved or copied unit may have a new
+      // index, and a just-edited unit should answer to the arrow keys and Delete.
+      const texts = arrange.selectedText();
+      if (texts.length === 1 && arrange.count() === 1 && overlay.selectedIndex() !== texts[0] && !inspector.isDirty()) {
+        overlay.selectIndex(texts[0]);
+      } else if (arrange.count() === 0) {
+        const index = overlay.selectedIndex();
+        if (index !== null) {
+          arrange.selectOnly("text", index);
+        }
+      }
       await spellTool.update(pageIndex, viewport);
     }
   }
@@ -653,6 +765,14 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     } else if (!modifier && event.key.toLowerCase() === "c") {
       event.preventDefault();
       void setComparing(!comparing);
+    } else if (!modifier && !event.altKey && !event.shiftKey && !isFormControl(event.target)) {
+      // EDT-16: B / L / W choose what a click on text selects -- but not while a menu
+      // (Align, Draw) has focus, where a letter picks an option.
+      const choice = SELECT_MODES.find((m) => m.key === event.key.toLowerCase());
+      if (choice) {
+        event.preventDefault();
+        void setSelectMode(choice.mode);
+      }
     }
   };
   window.addEventListener("keydown", keyHandler);
@@ -684,6 +804,7 @@ const SHORTCUTS: readonly [string, string][] = [
   ["Ctrl+Z", "Undo"],
   ["Ctrl+Shift+Z / Ctrl+Y", "Redo"],
   ["C", "Before/after compare view"],
+  ["B / L / W", "Click selects a whole block / a line / a word"],
   ["Enter", "Commit the text being edited"],
   ["Esc", "Discard an edit, cancel a tool, close a menu; in an unchanged text box, return the keyboard to the page"],
   ["Shift+click / drag on empty page", "Select several objects"],

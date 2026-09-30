@@ -1,10 +1,10 @@
 {
   "phase": "P5",
-  "taskId": "P5 done and signed off; live-use fixes on top (fonts, arranging, content-stream protection, Open Sans, INF-10 auto-resume)",
-  "step": "INF-10: sessions cut off by a usage limit are detected and resumed automatically (tools/resume.py, docs/SESSION_PROTOCOL.md section 1, SPEC.md section 13).",
+  "taskId": "P5 complete: 40/40 features done. 105/170 total",
+  "step": "Nitro-style Select Block / Line / Word (EDT-16..19, owner's request 2026-09-30). A toolbar toggle picks what one click selects; Line and Word now support everything Block already did (edit, restyle, drag, nudge, align, copy/paste/duplicate, delete). Built with parallel sub-agents against a contract frozen in SPEC.md 8.2 item 6: engine/fonts/units.py (deterministic line/word grouping from glyphs, served at GET .../pages/{p}/text_units), engine/edit.py (rewrite_line_hunks, per-run LineRestyle, move_glyph_ranges, delete_line_words), engine/fonts/blocks.py (EDT-19: paragraph detection now groups lines by their dominant style, so a bold word or superscript no longer splits a paragraph; a mixed paragraph keeps every run's style on move/copy/delete, and a re-wrap that must flatten it always says so and asks for approval). Two independent-review rounds found and fixed 9 real defects, most seriously silent style loss on a mixed-style line edit/restyle and two-column pages (narrow gutter) being detected as one paragraph so reflow deleted the other column. Rebased onto main's INF-10 auto-resume and content-stream-protection work (f055efd, 03ee622); engine/edit.py merged cleanly.",
   "branch": "main",
-  "lastGreenCommit": "(this commit) local gate, Windows 11, Python 3.14.3, 14/14 steps",
-  "nextAction": "Run python tools/resume.py first. Then: P6 (forms, signatures, security, redaction). Mark each task with resume.py --begin before starting and --end after committing. Gate before every commit; push only with the owner's approval.",
+  "lastGreenCommit": "(this commit, after rebasing wip/EDT-16 onto main) local gate, Windows 11, Python 3.14.3, 14/14 steps",
+  "nextAction": "Run python tools/resume.py first (INF-10). Then: rebuild the C:\\Users\\hi-ka\\PDFeditor-work clone, restart both servers, and give the owner a fresh sample for live review of Block/Line/Word. Then P6 (forms, signatures, security, redaction). Mark each task with resume.py --begin before starting and --end after committing. Gate before every commit; push only with the owner's approval.",
   "openQuestions": [
     {
       "phase": "P2",
@@ -55,6 +55,21 @@
       "phase": "P7",
       "kind": "todo",
       "text": "Owner (2026-09-30): make local hosting user-friendly through Docker -- one-command startup (no two terminals or hand-built ?token= URL) and one-click file open (file picker/drop and upload, instead of typing a server-side path; a pasted path in quotes failed as 'does not exist'). One-click open also helps the Windows app, so it can be built earlier."
+    },
+    {
+      "phase": "P5",
+      "kind": "limitation",
+      "text": "EDT-17: a font/size restyle of a word or line with more than one style run redraws the whole unit in one style (the run at the edit's anchor) when the styles genuinely can't be kept -- e.g. bold toggled on text whose own font family had to be guessed rather than read by name. This is never silent: the result names the runs affected and sets requires_approval."
+    },
+    {
+      "phase": "P5",
+      "kind": "limitation",
+      "text": "EDT-17/18: reordering words or rewriting most of a mixed-style line gives the new words the style of the run at their position, not the meaning the person intended (e.g. swapping two words can make the wrong one bold)."
+    },
+    {
+      "phase": "P5",
+      "kind": "limitation",
+      "text": "Moving or duplicating a line/word onto another line's baseline is flagged for approval, but if approved, later plain-text extraction can merge the two lines' glyphs into one garbled line -- pre-existing extraction behaviour, not specific to EDT-16..19."
     }
   ],
   "updated": "2026-09-30",

@@ -52,10 +52,10 @@ The parity tags reflect features that iLovePDF and Nitro PDF Pro advertise publi
 | Benchmark | Features covered | Feature IDs |
 |---|---|---|
 | iLovePDF | 48 | COR-01, COR-02, SEC-01, SEC-04, SEC-05, SEC-08, EDT-01, EDT-03, EDT-04, EDT-08, EDT-09, UI-01, UI-02, UI-06, UI-07, ORG-01, ORG-02, ORG-03, ORG-04, ORG-05, ORG-06, ORG-07, ORG-09, DES-01, DES-04, ANN-01, ANN-03, SIG-01, OCR-01, OCR-02, OCR-04, CVF-01, CVF-02, CVF-03, CVF-04, CVF-07, CVT-01, CVT-02, CVT-03, CVT-04, CVT-05, OPT-01, OPT-02, OPT-06, CMP-01, CMP-02, XTR-01, XTR-02 |
-| Nitro PDF Pro | 106 | COR-01, COR-02, COR-05, COR-06, COR-07, COR-09, COR-12, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-09, SEC-10, FNT-11, FNT-14, FNT-17, FNT-18, EDT-01, EDT-02, EDT-03, EDT-04, EDT-05, EDT-06, EDT-08, EDT-09, EDT-10, EDT-11, EDT-13, EDT-14, EDT-15, UI-01, UI-02, UI-04, UI-06, UI-07, UI-08, UI-09, CMD-07, ORG-01, ORG-02, ORG-03, ORG-04, ORG-05, ORG-06, ORG-07, ORG-08, ORG-09, ORG-10, DES-01, DES-02, DES-03, DES-04, DES-05, DES-06, ANN-01, ANN-02, ANN-03, ANN-04, ANN-05, ANN-06, DOC-01, DOC-02, DOC-04, DOC-05, FRM-01, FRM-02, FRM-03, FRM-04, FRM-05, FRM-06, FRM-07, SIG-01, SIG-02, SIG-03, SIG-04, OCR-01, OCR-02, OCR-03, CVF-01, CVF-02, CVF-03, CVF-04, CVF-05, CVF-07, CVF-08, CVT-01, CVT-02, CVT-03, CVT-04, CVT-05, OPT-01, OPT-02, OPT-03, OPT-04, OPT-05, CMP-01, CMP-02, CMP-03, ACC-01, ACC-02, BAT-01, XTR-03 |
+| Nitro PDF Pro | 110 | COR-01, COR-02, COR-05, COR-06, COR-07, COR-09, COR-12, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-09, SEC-10, FNT-11, FNT-14, FNT-17, FNT-18, EDT-01, EDT-02, EDT-03, EDT-04, EDT-05, EDT-06, EDT-08, EDT-09, EDT-10, EDT-11, EDT-13, EDT-14, EDT-15, EDT-16, EDT-17, EDT-18, EDT-19, UI-01, UI-02, UI-04, UI-06, UI-07, UI-08, UI-09, CMD-07, ORG-01, ORG-02, ORG-03, ORG-04, ORG-05, ORG-06, ORG-07, ORG-08, ORG-09, ORG-10, DES-01, DES-02, DES-03, DES-04, DES-05, DES-06, ANN-01, ANN-02, ANN-03, ANN-04, ANN-05, ANN-06, DOC-01, DOC-02, DOC-04, DOC-05, FRM-01, FRM-02, FRM-03, FRM-04, FRM-05, FRM-06, FRM-07, SIG-01, SIG-02, SIG-03, SIG-04, OCR-01, OCR-02, OCR-03, CVF-01, CVF-02, CVF-03, CVF-04, CVF-05, CVF-07, CVF-08, CVT-01, CVT-02, CVT-03, CVT-04, CVT-05, OPT-01, OPT-02, OPT-03, OPT-04, OPT-05, CMP-01, CMP-02, CMP-03, ACC-01, ACC-02, BAT-01, XTR-03 |
 | Beyond both | 57 | INF-01, INF-02, INF-03, INF-04, INF-05, INF-06, INF-07, INF-08, INF-09, INF-10, COR-03, COR-04, COR-08, COR-10, COR-11, SEC-11, FNT-01, FNT-02, FNT-03, FNT-04, FNT-05, FNT-06, FNT-07, FNT-08, FNT-09, FNT-10, FNT-12, FNT-13, FNT-15, FNT-16, EDT-07, EDT-12, UI-03, UI-05, CMD-01, CMD-02, CMD-03, CMD-04, CMD-05, CMD-06, CMD-08, ORG-11, ORG-12, ORG-13, DOC-03, FRM-08, SIG-05, SIG-06, CVF-06, CVT-06, OPT-07, ACC-03, ACC-04, ACC-05, BAT-02, BAT-03, BAT-04 |
 
-Total features: **167**.
+Total features: **171**.
 <!-- END GENERATED: parity -->
 
 **Why PDFWorkerz goes beyond both products:**
@@ -266,7 +266,7 @@ Every feature has a stable ID. The table below is **generated** from `tracker/fe
 | FNT-17 | Justified reflow, and moving later content when a paragraph grows | Nitro | PyMuPDF | P5 | L |
 | FNT-18 | Right-to-left and vertical text editing | Nitro | PyMuPDF, fontTools | P8 | L |
 
-#### EDT — Edit content (15)
+#### EDT — Edit content (19)
 
 | ID | Feature | Parity | Libraries | Phase | Size |
 |---|---|---|---|---|---|
@@ -285,6 +285,10 @@ Every feature has a stable ID. The table below is **generated** from `tracker/fe
 | EDT-13 | Select several objects (Shift+click, marquee); align and distribute text blocks, images and shapes | Nitro | PyMuPDF, TypeScript | P5 | M |
 | EDT-14 | Smart guides that snap dragged objects to other objects and the page; arrow-key nudging | Nitro | TypeScript | P5 | M |
 | EDT-15 | Copy, paste, duplicate and delete page objects (text blocks, images, shapes), across pages | Nitro | PyMuPDF, TypeScript | P5 | M |
+| EDT-16 | Select text by block, line or word (Nitro-style selection mode) | Nitro | PyMuPDF, TypeScript | P5 | M |
+| EDT-17 | Edit and restyle a single line or word in place | Nitro | PyMuPDF, TypeScript | P5 | L |
+| EDT-18 | Move, nudge, align, copy, paste, duplicate and delete single lines and words | Nitro | PyMuPDF, TypeScript | P5 | L |
+| EDT-19 | Line-aware text blocks: paragraphs stay whole after in-line edits | Nitro | PyMuPDF | P5 | M |
 
 #### UI — User interface (9)
 
@@ -504,6 +508,38 @@ Every feature has a stable ID. The table below is **generated** from `tracker/fe
    - **Keys:** arrows nudge 1pt (10pt with Shift). Ctrl+C, Ctrl+V and Ctrl+D copy, paste and duplicate, and Delete removes.
    - **Undo:** each action is one Op (`move_objects`, `duplicate_objects` or `delete_objects`), so one undo reverses it.
    - **Text editing:** clicking text still puts the cursor in the inspector. Esc in an unchanged text box hands the keyboard back to the page.
+6. Selection mode, Nitro-style (EDT-16..19, owner's request 2026-09-30):
+   - **Modes:** a toolbar toggle, **Block | Line | Word** (keys B, L and W), decides what one click selects. The default is Line, and the last choice is remembered per browser. Changing mode clears the selection.
+   - **Parity:** every mode supports everything the others do: edit text and style in the inspector, drag, nudge, align, copy, paste, duplicate and delete. Each action is one Op and one undo.
+   - **Units:** the server computes the units, so the browser never duplicates the grouping rules.
+     - A **line** is every glyph on one baseline (within half the largest font size), whatever its style runs. A gap wider than 1.6× the font size splits it into columns.
+     - A **word** is a maximal run of non-space glyphs on a line. It may cross style runs, and punctuation stays with its word.
+     - A **block** is a paragraph of lines (EDT-19). A line joins the paragraph by its main style, so a bold word or superscript inside it doesn't split the paragraph.
+   - **Fidelity:** only the glyphs of the unit being changed are redrawn.
+     - Editing, moving or deleting a word or line leaves every other glyph where it was. The exception is the rest of the same line, which shifts only when the unit's width changes, following the line's alignment. The shift stops at a column gutter (a gap between style runs wider than 0.8× the font size), so text in the next column never moves.
+     - Block detection uses the same gutter rule, so two columns stay separate paragraphs even when a Line unit spans the gutter.
+     - Editing a word or line keeps the style of every run whose text didn't change. New text takes the style of the run it is typed into.
+     - Deleting a word also removes one adjacent space.
+     - Moving, copying or deleting a block keeps every run's own font, size and color. Re-wrapping a block with mixed styles (a width change, reflow, or a block text edit) redraws it in the block's main style. That is never silent: the result names the runs that lost their style, and the edit asks for approval.
+   - **Contract** (all boxes in MuPDF page space: points, y-down, relative to the crop box):
+
+     ```
+     GET /documents/{id}/pages/{p}/text_units?granularity=block|line|word  ->  TextUnit[]
+     TextUnit = { granularity, index, text, bbox:[x0,y0,x1,y1], origin:[x,y], rotation_degrees,
+                  span_indices:int[], segments:[{span_index,start,end}], line_index:int|null }
+       index: block -> its first span index (the same value /blocks' span_indices[0] gives);
+              line/word -> position in that granularity's list, in reading order
+       segments: [start, end) character ranges within spans; line_index: words only
+     ObjectRef (move/duplicate/delete_objects) += unit: "block"|"line"|"word" = "block",
+                                                  expect_text: str | null
+       index is a span index for unit "block", else a unit index; unit is only for kind "text"
+     delete_objects += close_gap: bool = true   (words only)
+     edit_text_unit: page_index, unit, index, expect_text, new_text: str | null,
+                     size / color / font / bold / italic (as edit_span),
+                     block only: align "left"|"justify" = "left", grow = false, allow_overflow = false
+     ```
+
+     `expect_text` guards against a stale index, the same way `correct_word` does. It is required when `unit` is "line" or "word", and optional for "block". If the unit at `index` no longer has that text, the Op is refused with `OpValidationError`.
 
 ### 8.3 Command bar (deterministic, no AI)
 
@@ -659,7 +695,7 @@ Build sessions are finite. Usage limits, context size and session expiry can all
 | P2 | Font identification & style-matched text editing | 20 | ~4,550k |
 | P3 | Web UI with click-to-edit | 15 | ~1,900k |
 | P4 | Command bar & recipes | 8 | ~900k |
-| P5 | Organize, page design, annotate, document structure | 36 | ~3,350k |
+| P5 | Organize, page design, annotate, document structure | 40 | ~4,450k |
 | P6 | Forms, signatures, security, redaction | 21 | ~2,200k |
 | P7 | OCR, scans, conversions | 21 | ~2,800k |
 | P8 | Optimize, compare, accessibility, batch, extras | 21 | ~3,100k |

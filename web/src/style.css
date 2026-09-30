@@ -1121,3 +1121,53 @@ button {
   background: rgba(47, 111, 235, 0.08);
   z-index: 5;
 }
+
+/* -- EDT-16: selection mode (Block | Line | Word) -- */
+
+.pw-select-mode {
+  display: inline-flex;
+}
+
+.pw-toolbar .pw-select-mode button {
+  border-radius: 0;
+  margin: 0;
+}
+
+.pw-toolbar .pw-select-mode button + button {
+  border-left-width: 0;
+}
+
+.pw-toolbar .pw-select-mode button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.pw-toolbar .pw-select-mode button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+/* A block's box covers several lines: its (invisible) text wraps inside it. */
+.pw-span-box.pw-unit-block {
+  white-space: normal;
+  overflow: hidden;
+}
+
+.pw-unit-kind {
+  font-weight: normal;
+  color: var(--accent);
+}
+
+.pw-unit-kind:not(:empty)::before {
+  content: "· ";
+}
+
+.pw-mixed-note {
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+/* A word's move handle sits beside it, over the end of the word before: it has to be
+ * on top of the text boxes (z-index 1) and spelling marks (2) to be grabbed. */
+.pw-move-handle,
+.pw-resize-handle {
+  z-index: 3;
+}

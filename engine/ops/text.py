@@ -11,6 +11,8 @@ instead of drawing with it.
 
 from __future__ import annotations
 
+import dataclasses
+import difflib
 import math
 import re
 from typing import Literal
@@ -20,20 +22,25 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from engine.document import Document
 from engine.edit import (
     EditResult,
+    LineRestyle,
     anchored_position,
     copy_span_style,
     insert_styled_text,
     insert_text_near,
     move_resize_block,
+    recolor_line_range,
     reflow_block,
     replace_span_text,
     resolve_font_for_span,
+    rewrite_line_hunks,
 )
 from engine.errors import OpValidationError
 from engine.fonts.blocks import TextBlock, detect_blocks, find_block_containing
-from engine.fonts.choose import family_of, is_bold_italic, resolve_chosen_font
+from engine.fonts.choose import family_is_inferred, family_of, is_bold_italic, resolve_chosen_font
 from engine.fonts.match import FontCandidate, build_font_index, scan_font_directory, user_fonts_dir
+from engine.fonts.resolve import FontResolution
 from engine.fonts.style import SpanTrace, dedupe_texttrace, extract_page_spans
+from engine.fonts.units import TextLine, group_lines, split_words, text_units
 from engine.ops.base import Op, register_op
 
 _TIER_ORDER = {"exact": 0, "approximate": 1, "fallback": 2}
@@ -272,7 +279,8 @@ class CopyStyleOp(Op):
 
 
 def _block_at(document: Document, page_index: int, span_index: int) -> TextBlock:
-    """The block containing the span at `span_index`. detect_blocks needs its
+    """The block containing the span at `span_index` (EDT-19: the paragraph its whole
+    line belongs to, whatever style runs the line is in). detect_blocks needs its
     lines consecutive; content-stream order gives that for freshly authored
     pages but not after an edit (redrawn text is appended to the end of the
     stream), while top-to-bottom order gives it after an edit but can
@@ -287,7 +295,7 @@ def _block_at(document: Document, page_index: int, span_index: int) -> TextBlock
     blocks = [block for block in candidates if block is not None]
     if not blocks:
         raise OpValidationError("the span could not be placed in a text block")
-    return max(blocks, key=lambda block: len(block.lines))
+    return max(blocks, key=lambda block: (len(block.rows), len(block.lines)))
 
 
 @register_op
@@ -431,6 +439,36 @@ class _StyleChange(Op):
         if all(value is None for value in (self.size, self.color, self.font, self.bold, self.italic)):
             raise OpValidationError(f"{type(self).__name__}: set at least one of size, color, font, bold or italic")
 
+    def _restyles(self) -> bool:
+        return any(value is not None for value in (self.size, self.color, self.font, self.bold, self.italic))
+
+    def _chosen_font(self, span: SpanTrace, text: str, font_index: list[FontCandidate]) -> FontResolution | None:
+        """The font to draw `text` in when the family, weight or slant is being changed:
+        `span`'s own family, weight and slant with the requested ones put in their place.
+        None when none of the three is set -- the text then keeps its font."""
+        if self.font is None and self.bold is None and self.italic is None:
+            return None
+        current_bold, current_italic = is_bold_italic(span.style.font, font_index)
+        family = self.font or family_of(span.style.font, font_index)
+        chosen = resolve_chosen_font(
+            family,
+            bold=current_bold if self.bold is None else self.bold,
+            italic=current_italic if self.italic is None else self.italic,
+            text=text,
+            font_index=font_index,
+        )
+        if self.font is None and family_is_inferred(span.style.font, font_index):
+            # A weight or slant change on a font whose family is unknown draws it in a guessed
+            # family: a different typeface, so it is approximate and needs the user's approval.
+            chosen = dataclasses.replace(
+                chosen,
+                tier="approximate" if chosen.tier == "exact" else chosen.tier,
+                requires_approval=True,
+                note=f"{chosen.note}; the text's own font ({span.style.font}) is not a known family, "
+                f"so {family} was used in its place",
+            )
+        return chosen
+
     def _restyle(
         self,
         document: Document,
@@ -442,16 +480,7 @@ class _StyleChange(Op):
         """Redraw `span` in the changed style, with `text` in place of its own wording
         when given (EditSpanOp: new words and a new style in one draw)."""
         text = span.style.text if text is None else text
-        chosen = None
-        if self.font is not None or self.bold is not None or self.italic is not None:
-            current_bold, current_italic = is_bold_italic(span.style.font, font_index)
-            chosen = resolve_chosen_font(
-                self.font or family_of(span.style.font, font_index),
-                bold=current_bold if self.bold is None else self.bold,
-                italic=current_italic if self.italic is None else self.italic,
-                text=text,
-                font_index=font_index,
-            )
+        chosen = self._chosen_font(span, text, font_index)
         result = replace_span_text(
             document,
             page_index,
@@ -688,13 +717,310 @@ class ReflowTextOp(Op):
             align=self.align,
             grow=self.grow,
         )
-        # Report every problem at once: checking overflow first used to hide a weak font match behind it.
-        problems = []
-        if not self.allow_overflow and "overflow:" in results[-1].note:
-            problems.append(results[-1].note)
-        weak = next((p for p in (_tier_problem(r, self.require_tier) for r in results) if p), None)
-        if weak:
-            problems.append(weak)
-        if problems:
-            raise OpValidationError(f"{type(self).__name__}: " + "; ".join(problems))
+        _check_reflow(results, self.require_tier, self.allow_overflow, where=type(self).__name__)
+        return results
+
+
+def _check_reflow(results: list[EditResult], require_tier: str, allow_overflow: bool, *, where: str) -> None:
+    """Refuse a reflow that left text undrawn (unless overflow is allowed) or fell to a weaker
+    font tier than required. Every problem is reported at once: checking overflow first used
+    to hide a weak font match behind it."""
+    problems = []
+    if results and not allow_overflow and "overflow:" in results[-1].note:
+        problems.append(results[-1].note)
+    weak = next((p for p in (_tier_problem(r, require_tier) for r in results) if p), None)
+    if weak:
+        problems.append(weak)
+    if problems:
+        raise OpValidationError(f"{where}: " + "; ".join(problems))
+
+
+_MIN_KEPT_MATCH = 3
+"""Unchanged stretches shorter than this between two changes, within one style run, are
+redrawn with them: one hunk reads better than a word rebuilt from single-letter pieces."""
+
+_StyleKey = tuple[str, float, tuple[float, float, float]] | None
+
+
+def _style_of(span: SpanTrace) -> _StyleKey:
+    return span.style.font, round(span.style.size, 2), span.style.color
+
+
+def _unit_hunks(
+    line: TextLine, styles: list[_StyleKey], start: int, end: int, new_text: str, *, restyle: bool
+) -> list[tuple[int, int, str]]:
+    """The hunks (start, end, text) -- offsets into the line's text -- that turn
+    ``line.text[start:end]`` into `new_text`.
+
+    Each separate change is its own hunk (difflib), so an edit in two places redraws two
+    places, each in its own run's style, and the text between them keeps its glyphs. A
+    same-length replacement across runs of different styles is split at the run boundary,
+    so every letter keeps its run's style. With `restyle`, the unchanged text becomes
+    hunks too -- one per style run, and split at gaps the PDF drew no space for, so each
+    run is restyled from its own style and the gaps between words keep their width."""
+    old = line.text[start:end]
+    matcher = difflib.SequenceMatcher(None, old, new_text, autojunk=False)
+
+    def style(i: int) -> _StyleKey:
+        return styles[start + i]
+
+    def one_style(i1: int, i2: int) -> bool:
+        return len({style(i) for i in range(i1, i2) if style(i) is not None}) <= 1
+
+    changes: list[tuple[int, int, str]] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        replacement = new_text[j1:j2]
+        if changes:
+            p1, p2, previous = changes[-1]
+            if i1 - p2 < _MIN_KEPT_MATCH and one_style(p1, i2):
+                changes[-1] = (p1, i2, previous + old[p2:i1] + replacement)
+                continue
+        changes.append((i1, i2, replacement))
+
+    hunks: list[tuple[int, int, str]] = []
+    for i1, i2, replacement in changes:
+        if i2 - i1 == len(replacement) and not one_style(i1, i2):
+            cut = i1
+            for i in range(i1 + 1, i2 + 1):
+                if i == i2 or (style(i) is not None and style(i) != style(i - 1)):
+                    hunks.append((cut, i, replacement[cut - i1 : i - i1]))
+                    cut = i
+        else:
+            hunks.append((i1, i2, replacement))
+
+    if restyle:
+        covered = {i for i1, i2, _r in hunks for i in range(i1, i2)}
+        inserted_at = {i1 for i1, i2, _r in hunks if i1 == i2}
+        run: list[int] = []
+        for i in range(len(old) + 1):
+            breaks = (
+                i == len(old)
+                or i in covered
+                or i in inserted_at
+                or style(i) is None
+                or bool(run and style(i) != style(run[-1]))
+            )
+            if breaks and run:
+                hunks.append((run[0], run[-1] + 1, old[run[0] : run[-1] + 1]))
+                run = []
+            if i < len(old) and i not in covered and style(i) is not None:
+                run.append(i)
+        # An insertion between two restyled runs, or at an end, is its own hunk already.
+    return sorted((start + i1, start + i2, text) for i1, i2, text in hunks)
+
+
+@register_op
+class EditTextUnitOp(_StyleChange):
+    """EDT-17: new wording and/or a new style for one text unit -- the block, line or word
+    the user selected (SPEC.md 8.2 item 6) -- as one Op, so one history entry and one undo.
+
+    `index` is a span index for a block and the unit's index among the page's lines or
+    words otherwise (GET .../text_units). `expect_text` is the unit's text as the UI last
+    saw it: if the unit at `index` no longer has that text, the Op is refused rather than
+    editing whatever is there now. Any field left unset keeps the unit's current value.
+
+    A **word** or **line** is edited in place: each separate change is redrawn in the
+    style of its own run (an insertion in the style of the character it follows), and
+    everything else keeps its glyphs and styles (_unit_hunks). The rest of that line shifts
+    only when a width changed, following the line's alignment; no other line is touched. A
+    color-only restyle redraws each glyph where it is. A font, weight, slant or size change
+    restyles every run from its own style: `size` is the size the unit's largest run takes,
+    and every other run (a superscript, say) scales in proportion; a weight or slant change
+    is made within each run's own family. `expect_text` is required for a word or line.
+    Emptying a word or line is refused: delete it (delete_objects).
+
+    A **block** is re-wrapped across its own lines (reflow_block), with `align`, `grow` and
+    `allow_overflow` as in reflow_text; these three are for blocks only."""
+
+    op: Literal["edit_text_unit"] = "edit_text_unit"
+    page_index: int
+    unit: Literal["block", "line", "word"]
+    index: int
+    expect_text: str | None = None
+    new_text: str | None = None
+    align: Literal["left", "justify"] = "left"
+    grow: bool = False
+    allow_overflow: bool = False
+
+    @model_validator(mode="after")
+    def _guarded(self) -> EditTextUnitOp:
+        if self.unit != "block" and self.expect_text is None:
+            raise ValueError(f"expect_text is required for a {self.unit}: the unit's text as last seen")
+        return self
+
+    def _check_expected(self, text: str) -> None:
+        if self.expect_text is not None and self.expect_text != text:
+            raise OpValidationError(
+                f"edit_text_unit: the {self.unit} at index {self.index} is now {text!r}, not "
+                f"{self.expect_text!r}; check the page again"
+            )
+
+    def _checked_text(self, current: str) -> str:
+        """The text to draw: `new_text`, or the unit's own for a restyle."""
+        text = current if self.new_text is None else self.new_text
+        if not text.strip():
+            raise OpValidationError(
+                f"edit_text_unit: the new text is empty; to remove the {self.unit}, delete it (delete_objects)"
+            )
+        return text
+
+    def apply(self, document: Document) -> EditResult | list[EditResult]:
+        if self.size is not None and self.size <= 0:
+            raise OpValidationError("edit_text_unit: size must be positive")
+        if self.unit == "block":
+            return self._edit_block(document)
+        if self.align != "left" or self.grow or self.allow_overflow:
+            raise OpValidationError('edit_text_unit: align, grow and allow_overflow are only for unit "block"')
+
+        spans = extract_page_spans(document.raw, self.page_index)
+        lines = group_lines(spans)
+        if self.unit == "line":
+            if not 0 <= self.index < len(lines):
+                raise OpValidationError(
+                    f"page {self.page_index} has {len(lines)} line(s); index {self.index} is out of range"
+                )
+            line = lines[self.index]
+            start, end = 0, len(line.text)
+        else:
+            words = split_words(lines)
+            if not 0 <= self.index < len(words):
+                raise OpValidationError(
+                    f"page {self.page_index} has {len(words)} word(s); index {self.index} is out of range"
+                )
+            word = words[self.index]
+            line = lines[word.line_index]
+            start, end = word.line_start, word.line_end
+        current = line.text[start:end]
+        self._check_expected(current)
+        unit_spans = [spans[entry[0]] for entry in line.glyph_map[start:end] if entry is not None]
+        if (without_no_ops := self._without_no_ops(unit_spans, current)) is not None:
+            return without_no_ops.apply(document)
+        new_text = self._checked_text(current)
+        if "\n" in new_text or "\r" in new_text:
+            raise OpValidationError(f"edit_text_unit: a {self.unit} is one line; the new text has a line break")
+        restyles = self._restyles()
+        if new_text == current and not restyles:
+            raise OpValidationError(
+                "edit_text_unit: change the text or at least one of size, color, font, bold or italic"
+            )
+
+        font_index = _font_index()
+        only_color = all(value is None for value in (self.size, self.font, self.bold, self.italic))
+        if new_text == current and only_color:
+            # Same glyphs, same places, new color: nothing on the line can move.
+            assert self.color is not None  # nosec B101 -- type narrowing: only_color with no text change implies a color
+            result = recolor_line_range(
+                document, self.page_index, line, start, end, self.color, font_index=font_index, verify=self.verify
+            )
+        else:
+            glyphs = [None if entry is None else spans[entry[0]] for entry in line.glyph_map]
+            styles = [None if span is None else _style_of(span) for span in glyphs]
+            hunks = _unit_hunks(line, styles, start, end, new_text, restyle=restyles)
+            scale = None
+            if self.size is not None:
+                # The unit's largest run takes the new size; the others keep their proportion.
+                largest = max(span.style.size for span in glyphs[start:end] if span is not None)
+                scale = self.size / largest
+            changes_font = self.font is not None or self.bold is not None or self.italic is not None
+            restyle = LineRestyle(
+                size_scale=scale,
+                color=self.color,
+                font_for=(lambda span, text: self._chosen_font(span, text, font_index)) if changes_font else None,
+            )
+            result = rewrite_line_hunks(
+                document, self.page_index, line, hunks, restyle=restyle, font_index=font_index, verify=self.verify
+            )
+        _check_tier(result, self.require_tier, where=type(self).__name__)
+        return result
+
+    def _without_no_ops(self, unit_spans: list[SpanTrace], current: str) -> EditTextUnitOp | None:
+        """This Op without a bold or italic request the unit already meets (bold on text that
+        is all bold): None when there is none. Such a request alone is refused -- it would
+        redraw the text unchanged and report that nothing visible happened."""
+        font_index = _font_index()
+        styles = [is_bold_italic(span.style.font, font_index) for span in unit_spans]
+        dropped: dict[str, None] = {}
+        met: list[str] = []
+        for field, position, word in (("bold", 0, "bold"), ("italic", 1, "italic")):
+            wanted = getattr(self, field)
+            if wanted is not None and styles and all(style[position] == wanted for style in styles):
+                dropped[field] = None
+                met.append(word if wanted else f"not {word}")
+        if not dropped:
+            return None
+        remaining = self.model_copy(update=dropped)
+        text_changes = self.new_text is not None and self.new_text != current
+        if not remaining._restyles() and not text_changes and (self.unit != "block" or self.align == "left"):
+            raise OpValidationError(f"edit_text_unit: the {self.unit} is already {' and '.join(met)}")
+        return remaining
+
+    def _recolor_block(self, document: Document, block: TextBlock) -> list[EditResult]:
+        """C4: a color-only change to a block recolors each of its lines in place, so every
+        run keeps its own font and size -- re-wrapping would redraw it in one style."""
+        assert self.color is not None  # nosec B101 -- type narrowing: only called for a color-only change
+        members = {span.style.span_index for span in block.lines}
+        spans = extract_page_spans(document.raw, self.page_index)
+        keys = [
+            (line.origin, line.text)
+            for line in group_lines(spans)
+            if {segment.span_index for segment in line.segments} <= members
+        ]
+        results: list[EditResult] = []
+        for origin, text in keys:
+            lines = group_lines(extract_page_spans(document.raw, self.page_index))
+            line = next(
+                (c for c in lines if c.text == text and math.dist(c.origin, origin) < _SAME_ORIGIN_TOLERANCE), None
+            )
+            if line is None:
+                raise OpValidationError(f"edit_text_unit: the line {text!r} changed while the block was recolored")
+            results.append(
+                recolor_line_range(
+                    document,
+                    self.page_index,
+                    line,
+                    0,
+                    len(line.text),
+                    self.color,
+                    font_index=_font_index(),
+                    verify=self.verify,
+                )
+            )
+        for result in results:
+            _check_tier(result, self.require_tier, where=type(self).__name__)
+        return results
+
+    def _edit_block(self, document: Document) -> list[EditResult]:
+        block = _block_at(document, self.page_index, self.index)
+        spans = extract_page_spans(document.raw, self.page_index)
+        # The same text GET .../text_units reports for the block this span is in.
+        unit = next((u for u in text_units(spans, "block") if self.index in u.span_indices), None)
+        current = unit.text if unit is not None else block.text
+        self._check_expected(current)
+        if (without_no_ops := self._without_no_ops(list(block.lines), current)) is not None:
+            return without_no_ops._edit_block(document)
+        new_text = self._checked_text(block.text)
+        only_color = self.color is not None and all(v is None for v in (self.size, self.font, self.bold, self.italic))
+        if only_color and new_text in (current, block.text) and self.align == "left" and not self.grow:
+            return self._recolor_block(document, block)
+        if new_text in (current, block.text) and not self._restyles() and self.align == "left" and not self.grow:
+            raise OpValidationError(
+                "edit_text_unit: change the text, the alignment or at least one of size, color, font, bold or italic"
+            )
+        font_index = _font_index()
+        results = reflow_block(
+            document,
+            self.page_index,
+            block,
+            new_text,
+            font_index=font_index,
+            verify=self.verify,
+            align=self.align,
+            grow=self.grow,
+            override_font=self._chosen_font(block.dominant, new_text, font_index),
+            override_size=self.size,
+            override_color=self.color,
+        )
+        _check_reflow(results, self.require_tier, self.allow_overflow, where=type(self).__name__)
         return results

@@ -85,6 +85,7 @@ function describeOp(op: HistoryOp): string {
       return `Reflow paragraph containing ${quote(op.match)} (${pageLabel(op)})`;
     case "replace_span_text":
       return `Replace text with ${quote(op.new_text)} (${pageLabel(op)})`;
+    case "edit_text_unit": // EDT-17: the same fields, addressed by block, line or word
     case "edit_span": {
       const changes: string[] = [];
       if (typeof op.font === "string") changes.push(op.font);

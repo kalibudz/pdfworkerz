@@ -11,7 +11,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P2 | Font identification & style-matched text editing | ✅ Done: 20/20 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes; FNT-11/FNT-14 re-scoped (FNT-17/18 planned) |
 | P3 | Web UI with click-to-edit | ✅ Done: 15/15 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes |
 | P4 | Command bar & recipes | ✅ Done: 8/8 features proven by tests | Independent reviewer: signed off 2026-09-29 after two rounds of fixes |
-| P5 | Organize, page design, annotate, document structure | ✅ Done: 33/33 features proven by tests | Independent reviewer: signed off 2026-09-29 after two rounds of fixes |
+| P5 | Organize, page design, annotate, document structure | ✅ Done: 40/40 features proven by tests | Independent reviewer: signed off 2026-09-29 (EDT-01..15) and 2026-09-30 after two rounds of fixes (EDT-16..19) |
 | P6 | Forms, signatures, security, redaction | Planned | |
 | P7 | OCR, scans, conversions | Planned | |
 | P8 | Optimize, compare, accessibility, batch, extras | Planned | |
@@ -25,6 +25,59 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-09-30 (latest) — Select Block / Line / Word (EDT-16..19)
+
+- **Owner's request:** Nitro PDF's paragraph/line/word selection granularity. A toolbar
+  toggle now picks what one click selects; Line and Word support everything Block already
+  did (edit, restyle, drag, nudge, align, copy/paste/duplicate, delete), not just a subset.
+- Built with three parallel sub-agents against a contract frozen in SPEC.md §8.2 item 6
+  before any of them started, then two rounds of an independent reviewer plus fixes:
+  - **`engine/fonts/units.py`** (new): deterministic line and word grouping straight from
+    `SpanTrace` glyphs -- rows grouped by baseline (0.5x the larger font size), split into
+    columns at a gap over 1.6x size, words as maximal non-space glyph runs that can cross
+    style runs or spans. Served at `GET .../pages/{p}/text_units?granularity=`.
+  - **`engine/edit.py`**: new primitives for line/word editing and moving --
+    `rewrite_line_hunks` (word/line text edits, multiple changed regions in one pass,
+    each kept in its own run's style), per-run restyling (`LineRestyle`, proportional size
+    scaling that keeps a superscript's rise, per-family bold/italic), `move_glyph_ranges`
+    and `delete_line_words` (alignment-aware gap closing). A spike confirmed MuPDF's
+    existing per-glyph redaction leaves every other glyph on a `Tj`/`TJ` exactly in place,
+    so no fallback redraw was needed for removal.
+  - **`engine/fonts/blocks.py`** (EDT-19): paragraph detection now groups *lines* (a line's
+    own dominant style), not single-style spans, so a bold word or superscript no longer
+    splits a paragraph apart. Moving, copying or deleting a mixed-style paragraph keeps
+    every run's own font; re-wrapping one (a width change, reflow, or a block text edit)
+    redraws it in the paragraph's main style, but never silently -- the result names the
+    runs that lost their style and asks for approval.
+  - **Web UI**: a Block / Line / Word toggle (`B`/`L`/`W` keys, remembered per browser,
+    defaults to Line); the Inspector marks style fields that differ across a mixed unit as
+    "(mixed)"; arranging, drag handles and the clipboard all work per unit.
+  - `expect_text` is required on a line/word Op (optional for block), the same stale-index
+    guard `correct_word` already used.
+- **Two review rounds found and fixed nine real defects** before this looked done:
+  editing or restyling a mixed-style line could silently drop a bold run's style with no
+  warning (the two most serious); leading-character deletion was wrongly refused; an
+  appended letter took the wrong run's style; the same text selected at the same spot on
+  two pages was only acted on for the first; an edit could push text past the page edge
+  unnoticed; two text columns with a gutter narrower than the line-split threshold (about
+  12pt at 10pt type -- an ordinary two-column layout) were detected as one paragraph, so
+  reflowing one column silently deleted the other; a paragraph's own line order could be
+  skipped over after a resize; moving a word onto its neighbour wasn't flagged as an
+  overlap; bold or italic on a nameless embedded font silently substituted Helvetica.
+  All nine now have regression tests.
+- 110 new tests across engine, server and web (plus updates to three existing web tests
+  whose paragraph handles now belong to Block mode); full local gate 14/14 (ruff, mypy
+  --strict, both spec-sync checks, pytest + coverage, the evidence gate, bandit, pip-audit,
+  npm audit, both builds). EDT-16..19 moved to "done" by the evidence gate (40/40 in P5,
+  now 105/170 total).
+- **Known limitations, documented rather than silently accepted:** a font/size restyle of
+  a mixed word or line still redraws it in one style when the styles can't be kept without
+  losing meaning (e.g. bold toggled on text whose own family had to be guessed); moving or
+  duplicating text onto another line's baseline still lets later plain-text extraction
+  merge the two lines (pre-existing extraction behaviour); reordering or rewriting most of
+  a mixed line gives new words the style of the run at their position rather than tracking
+  meaning through the edit.
 
 ### 2026-09-30 — INF-10: a session cut off mid-task resumes itself
 

@@ -6,21 +6,46 @@
  * only ever renders whatever it's told to.
  */
 
-import type { ImageInfo, LinkInfo, PreviewResult, ShapeInfo, SpanTrace } from "./api";
+import type { ImageInfo, LinkInfo, PreviewResult, SelectMode, ShapeInfo, SpanTrace, TextUnit } from "./api";
 import { styleFromFontName, type StyleChoice } from "./styledialog";
 
+/** A style control of the text editor. */
+export type StyleField = "font" | "size" | "color" | "bold" | "italic";
+
 /** UI-03: what the inspector's text editor holds -- the wording plus the style to draw
- * it in. `font` is "" for "keep the original font". */
-export type TextDraft = StyleChoice;
+ * it in. `font` is "" for "keep the original font". EDT-16: `mixed` lists the style
+ * fields that differ across the selected unit's spans and that the user has not
+ * touched -- those keep each span's own value and must not be sent. */
+export interface TextDraft extends StyleChoice {
+  mixed: StyleField[];
+}
+
+const UNIT_LABELS: Record<SelectMode, string> = { block: "Block", line: "Line", word: "Word" };
+
+/** EDT-16: the style fields that are not the same across every one of `spans`. */
+export function mixedStyleFields(spans: SpanTrace[]): StyleField[] {
+  const differs = (value: (s: SpanTrace) => string): boolean => new Set(spans.map(value)).size > 1;
+  const fields: StyleField[] = [];
+  if (differs((s) => s.style.font)) fields.push("font");
+  if (differs((s) => s.style.size.toFixed(1))) fields.push("size");
+  if (differs((s) => toHexColor(s.style.color))) fields.push("color");
+  if (differs((s) => String(styleFromFontName(s.style.font).bold))) fields.push("bold");
+  if (differs((s) => String(styleFromFontName(s.style.font).italic))) fields.push("italic");
+  return fields;
+}
 
 export interface InspectorHandle {
   /** Nothing selected -- the panel's resting state. */
   showEmpty(): void;
-  /** A span was just selected, before any preview has come back for it yet.
-   * `links` are the page's links overlapping it (EDT-10). The text editor is
-   * reset to the span's own text and style unless `keepDraft` (the same span,
-   * shown again after a zoom or re-render). */
-  showSpan(span: SpanTrace, links?: LinkInfo[], keepDraft?: boolean): void;
+  /** EDT-16: a unit of text (block, line or word) was just selected, before any
+   * preview has come back for it. `spans` are the unit's own spans, first one
+   * first: the editor starts from the unit's text and the first span's style,
+   * and style fields that differ across `spans` show as "(mixed)". `links` are
+   * the page's links overlapping it (EDT-10). The draft is reset unless
+   * `keepDraft` (the same unit, shown again after a zoom or re-render). */
+  showUnit(unit: TextUnit, spans: SpanTrace[], links?: LinkInfo[], keepDraft?: boolean): void;
+  /** EDT-16: the format painter is span-level; Word mode turns its button off. */
+  setPainterEnabled(enabled: boolean): void;
   /** Put the cursor in the text editor, with its text selected. */
   focusEditor(): void;
   /** The editor's draft differs from the selected span's text and style. */
@@ -155,7 +180,7 @@ export function createInspector(container: HTMLElement, options: InspectorOption
 
   const empty = document.createElement("p");
   empty.className = "pw-hint";
-  empty.textContent = "Click a span of text on the page to inspect it.";
+  empty.textContent = "Click text on the page to inspect it. Block, Line or Word in the toolbar decides how much one click selects.";
   container.appendChild(empty);
 
   // UI-03: the text editor. Clicking a span puts the cursor here; nothing typed is lost
@@ -165,7 +190,11 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   editor.hidden = true;
   const editHeading = document.createElement("h3");
   editHeading.className = "pw-inspector-subheading";
-  editHeading.textContent = "Edit text";
+  editHeading.textContent = "Edit text ";
+  // EDT-16: which kind of unit is selected -- Block, Line or Word.
+  const unitKind = document.createElement("span");
+  unitKind.className = "pw-unit-kind";
+  editHeading.appendChild(unitKind);
   const editText = document.createElement("textarea");
   editText.id = "pw-edit-text";
   editText.rows = 2;
@@ -199,11 +228,18 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     wrapper.append(caption, control);
     return wrapper;
   }
+  // EDT-16: "(mixed)" beside the color control while the unit's spans differ in color.
+  const colorMixed = document.createElement("span");
+  colorMixed.className = "pw-mixed-note";
+  colorMixed.textContent = "(mixed)";
+  colorMixed.hidden = true;
+  const colorField = editField("Color", editColor);
+  colorField.appendChild(colorMixed);
   const styleRow = document.createElement("div");
   styleRow.className = "pw-edit-style-row";
   styleRow.append(
     editField("Size", editSize),
-    editField("Color", editColor),
+    colorField,
     editField("Bold", editBold, "pw-edit-check"),
     editField("Italic", editItalic, "pw-edit-check"),
   );
@@ -223,7 +259,7 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   const editHint = document.createElement("p");
   editHint.className = "pw-hint";
   editHint.textContent =
-    "Enter applies, Esc reverts. Each piece of text is one line. Esc again returns the keyboard to the page: arrows nudge, Delete removes.";
+    "Enter applies, Esc reverts. Esc again returns the keyboard to the page: arrows nudge, Delete removes.";
   editor.append(
     editHeading,
     editField("Text", editText, "pw-edit-field pw-edit-text-field"),
@@ -236,6 +272,8 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   container.appendChild(editor);
 
   let original: TextDraft | null = null;
+  /** EDT-16: the style fields still showing "(mixed)": untouched since the unit was shown. */
+  let mixed = new Set<StyleField>();
 
   function readDraft(): TextDraft {
     return {
@@ -245,7 +283,28 @@ export function createInspector(container: HTMLElement, options: InspectorOption
       color: fromHexColor(editColor.value),
       bold: editBold.checked,
       italic: editItalic.checked,
+      mixed: [...mixed],
     };
+  }
+
+  const mixedControls = [
+    ["size", editSize],
+    ["color", editColor],
+    ["bold", editBold],
+    ["italic", editItalic],
+  ] as const;
+
+  function showMixed(): void {
+    editSize.placeholder = mixed.has("size") ? "(mixed)" : "";
+    if (mixed.has("size")) {
+      editSize.value = "";
+    }
+    colorMixed.hidden = !mixed.has("color");
+    editBold.indeterminate = mixed.has("bold");
+    editItalic.indeterminate = mixed.has("italic");
+    for (const [field, control] of mixedControls) {
+      control.toggleAttribute("data-mixed", mixed.has(field));
+    }
   }
 
   function writeDraft(draft: TextDraft): void {
@@ -255,6 +314,8 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     editColor.value = toHexColor(draft.color).toLowerCase();
     editBold.checked = draft.bold;
     editItalic.checked = draft.italic;
+    mixed = new Set(draft.mixed);
+    showMixed();
   }
 
   function isDirty(): boolean {
@@ -262,7 +323,10 @@ export function createInspector(container: HTMLElement, options: InspectorOption
       return false;
     }
     const draft = readDraft();
+    // A "(mixed)" field the user touched counts even if it now equals the first span's value.
+    const touchedMixed = original.mixed.some((field) => !mixed.has(field));
     return (
+      touchedMixed ||
       draft.text !== original.text ||
       draft.font !== original.font ||
       Math.abs(draft.size - original.size) > 0.05 ||
@@ -297,6 +361,17 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     }
   }
 
+  // Touching a "(mixed)" control makes that field one value for the whole unit.
+  for (const [field, control] of mixedControls) {
+    control.addEventListener(control === editSize || control === editColor ? "input" : "change", () => {
+      if (mixed.delete(field)) {
+        if (field === "size" && !editSize.value && original) {
+          editSize.value = String(Math.round(original.size * 10) / 10);
+        }
+        showMixed();
+      }
+    });
+  }
   for (const control of [editText, editSize, editColor]) {
     control.addEventListener("input", draftChanged);
   }
@@ -306,7 +381,7 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   editor.addEventListener("keydown", (event) => {
     const onControl = event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement;
     if (event.key === "Enter" && onControl) {
-      event.preventDefault(); // one span is one line: Enter applies, never a line break
+      event.preventDefault(); // Enter applies, never a line break
       apply();
     } else if (event.key === "Escape") {
       event.preventDefault();
@@ -534,16 +609,26 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     shapeSection.hidden = true;
   }
 
-  function showSpan(span: SpanTrace, links: LinkInfo[] = [], keepDraft = false): void {
+  function showUnit(unit: TextUnit, spans: SpanTrace[], links: LinkInfo[] = [], keepDraft = false): void {
+    const span = spans[0];
+    if (!span) {
+      showEmpty();
+      return;
+    }
     showLinks(links);
-    keepFontOption.textContent = `Original font (${span.style.font.replace(/^[A-Z]{6}\+/, "")})`;
+    unitKind.textContent = UNIT_LABELS[unit.granularity];
+    const mixedFields = mixedStyleFields(spans);
+    keepFontOption.textContent = mixedFields.includes("font")
+      ? "Original fonts (mixed)"
+      : `Original font (${span.style.font.replace(/^[A-Z]{6}\+/, "")})`;
     const kept = keepDraft && original ? readDraft() : null;
     original = {
-      text: span.style.text,
+      text: unit.text,
       font: "",
       size: span.style.size,
       color: span.style.color,
       ...styleFromFontName(span.style.font),
+      mixed: mixedFields,
     };
     writeDraft(kept ?? original);
     editor.hidden = false;
@@ -555,17 +640,18 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     imageSection.hidden = true;
     shapeSection.hidden = true;
 
-    fontRow.text.textContent = formatFontName(span.style.font);
-    sizeRow.text.textContent = `${span.style.size.toFixed(1)} pt`;
+    const shown = (field: StyleField, value: string): string => (mixedFields.includes(field) ? "(mixed)" : value);
+    fontRow.text.textContent = shown("font", formatFontName(span.style.font));
+    sizeRow.text.textContent = shown("size", `${span.style.size.toFixed(1)} pt`);
     colorSwatch.style.backgroundColor = toHexColor(span.style.color);
-    colorRow.text.textContent = ` ${toHexColor(span.style.color)}`;
+    colorRow.text.textContent = ` ${shown("color", toHexColor(span.style.color))}`;
 
     const state = span.text_state;
     spacingRow.text.textContent = state
       ? `Tc ${state.char_spacing.toFixed(2)}  Tz ${state.horizontal_scale.toFixed(0)}%`
       : "not available for this span";
 
-    rotationRow.text.textContent = `${span.style.rotation_degrees.toFixed(0)}°`;
+    rotationRow.text.textContent = `${unit.rotation_degrees.toFixed(0)}°`;
 
     matchDot.className = "pw-match-dot";
     matchRow.text.textContent = " …";
@@ -600,6 +686,13 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     refreshDirty();
   }
 
+  function setPainterEnabled(enabled: boolean): void {
+    copyStyleButton.disabled = !enabled;
+    copyStyleButton.title = enabled
+      ? "Format painter: copy this text's font, size and color onto other text"
+      : "The format painter copies one style run: switch to Line or Block mode to use it";
+  }
+
   function setPainter(sourceText: string | null): void {
     painterStatus.hidden = sourceText === null;
     painterStatus.textContent =
@@ -609,7 +702,8 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   showEmpty();
   return {
     showEmpty,
-    showSpan,
+    showUnit,
+    setPainterEnabled,
     focusEditor,
     isDirty,
     draft: readDraft,

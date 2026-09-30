@@ -4,7 +4,7 @@ Importing this package registers every built-in Op, including the text
 Ops in engine.ops.text (EDT-01..EDT-04, EDT-06, EDT-07, FNT-11) and the link Ops in
 engine.ops.links (EDT-10) and the image Ops in engine.ops.images (EDT-08) and
 the shape Ops in engine.ops.shapes (EDT-09) and the spell-check Ops
-in engine.ops.spellcheck (EDT-11) -- importing
+in engine.ops.spellcheck (EDT-11) and the text-unit query in engine.ops.units (EDT-16) -- importing
 engine.ops.base alone would not run their @register_op decorators.
 """
 
@@ -78,6 +78,7 @@ from engine.ops.text import (
     RestyleSpanOp,
     RestyleTextOp,
 )
+from engine.ops.units import PageTextUnitsOp
 
 __all__ = [
     "AddAnnotationShapeOp",
@@ -135,6 +136,7 @@ __all__ = [
     "PageLinksOp",
     "PageNumbersOp",
     "PageShapesOp",
+    "PageTextUnitsOp",
     "ReflowTextOp",
     "RemoveAttachmentOp",
     "RemoveBlankPagesOp",

@@ -1,5 +1,5 @@
 /**
- * EDT-13..EDT-15: one selection across text blocks, images and shapes, and what
+ * EDT-13..EDT-15: one selection across text, images and shapes, and what
  * can be done with it, the way Nitro does it:
  *
  * - Click an object to select it; Shift+click adds or removes; drag on empty page
@@ -12,14 +12,18 @@
  * - Ctrl+C / Ctrl+V copy and paste (onto the page shown), Ctrl+D duplicates,
  *   Delete removes.
  *
- * Text is selected as whole blocks (paragraphs): the unit a move redraws. Every
- * change is one move_objects / duplicate_objects / delete_objects Op -- one undo --
- * and afterwards the same objects, at their new places, are selected again.
+ * EDT-16/EDT-18: text is selected in the toolbar's mode -- whole blocks
+ * (paragraphs), lines or words, as the server groups them (GET .../text_units).
+ * Every text ref carries its `unit` and `expect_text`, so the server refuses a
+ * stale index instead of changing the wrong text. Every change is one
+ * move_objects / duplicate_objects / delete_objects Op -- one undo -- and
+ * afterwards the same objects, at their new places, are selected again: text
+ * by its unit, text and moved origin, anything else by its moved rectangle.
  */
 
 import type * as pdfjsLib from "pdfjs-dist";
 
-import type { Api, BlockInfo, HistoryOp, ImageInfo, ShapeInfo } from "./api";
+import { ApiError, type Api, type HistoryOp, type ImageInfo, type ObjectRef, type SelectMode, type ShapeInfo, type TextUnit } from "./api";
 import { applyWithApproval, confirmVerified } from "./approval";
 import { bboxToRect, viewportToMupdfPoint } from "./overlay";
 import { alignOffsets, snap, type AlignAction, type Box } from "./snap";
@@ -28,8 +32,12 @@ export type ObjectKind = "text" | "image" | "shape";
 
 interface PageObject {
   kind: ObjectKind;
-  /** For text: the block's first span index; images and shapes: their own index. */
+  /** Text: the unit's index (a block's is its first span index); images and shapes: their own index. */
   index: number;
+  /** Text only: what the index counts, the unit's text and its first glyph's origin (page points). */
+  unit?: SelectMode;
+  text?: string;
+  origin?: [number, number];
   spanIndices: number[];
   /** Page points, MuPDF space (y down). */
   pageRect: [number, number, number, number];
@@ -49,11 +57,12 @@ export interface ArrangeOptions {
 }
 
 export interface ArrangeHandle {
-  /** Call after the text, image and shape tools have drawn their boxes. */
+  /** Call after the text, image and shape tools have drawn their boxes. `units`
+   * are the page's text units in the current selection mode. */
   update(
     pageIndex: number,
     viewport: pdfjsLib.PageViewport,
-    blocks: BlockInfo[],
+    units: TextUnit[],
     images: ImageInfo[],
     shapes: ShapeInfo[],
   ): void;
@@ -64,6 +73,10 @@ export interface ArrangeHandle {
   selectOnly(kind: ObjectKind, index: number): void;
   /** For a single object's own drag: snap its (dx, dy) and draw guides. */
   snapper(kind: ObjectKind, index: number): DragSnapper;
+  /** EDT-18: move one object by (dx, dy) page points, as a single-item move_objects. */
+  move(kind: ObjectKind, index: number, dxPt: number, dyPt: number): void;
+  /** The indices of the selected text units. */
+  selectedText(): number[];
   count(): number;
   clear(): void;
   align(action: AlignAction): void;
@@ -80,7 +93,18 @@ const NUDGE_IDLE_MS = 400;
 const PASTE_OFFSET_PT = 10;
 const PAGE_MARGIN_PT = 36;
 const REFIND_TOLERANCE_PT = 2.5;
+/** A text unit is found again by its text and its first glyph's origin, this close. */
+const ORIGIN_TOLERANCE_PT = 1;
 const MARQUEE_THRESHOLD_PX = 4;
+
+/** An object to select again after a change: where it should be now. */
+interface Wanted {
+  kind: ObjectKind;
+  pageRect: [number, number, number, number];
+  unit?: SelectMode;
+  text?: string;
+  origin?: [number, number];
+}
 
 function unionBox(boxes: Box[]): Box {
   return {
@@ -97,9 +121,10 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
   let viewport: pdfjsLib.PageViewport | null = null;
   let objects: PageObject[] = [];
   let selected: PageObject[] = [];
-  let clipboard: { pageIndex: number; items: { kind: ObjectKind; index: number }[] } | null = null;
+  /** Full refs (unit and expect_text included), so a paste finds exactly what was copied. */
+  let clipboard: { pageIndex: number; items: ObjectRef[] } | null = null;
   /** After a change: the objects to select again, by kind and where they should now be. */
-  let reselect: { kind: ObjectKind; pageRect: [number, number, number, number] }[] | null = null;
+  let reselect: Wanted[] | null = null;
   let busy = false;
   let nudge = { dx: 0, dy: 0, timer: null as ReturnType<typeof setTimeout> | null };
 
@@ -108,21 +133,20 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
   }
 
   function find(kind: ObjectKind, index: number): PageObject | undefined {
-    return objects.find((o) => o.kind === kind && (o.index === index || (kind === "text" && o.spanIndices.includes(index))));
+    return objects.find((o) => o.kind === kind && o.index === index);
   }
 
   function isSelected(object: PageObject): boolean {
     return selected.some((s) => key(s) === key(object));
   }
 
-  /** Every element on the layer that shows `object` (a text block has one per line). */
+  /** The element on the layer that shows `object` (overlay.ts draws one box per text unit). */
   function elementsOf(object: PageObject): HTMLElement[] {
-    if (object.kind === "text") {
-      return object.spanIndices
-        .map((i) => layer.querySelector<HTMLElement>(`.pw-span-box[data-span-index="${i}"]`))
-        .filter((el): el is HTMLElement => el !== null);
-    }
-    const box = layer.querySelector<HTMLElement>(`.pw-${object.kind}-box[data-index="${object.index}"]`);
+    const selector =
+      object.kind === "text"
+        ? `.pw-span-box[data-unit-index="${object.index}"]`
+        : `.pw-${object.kind}-box[data-index="${object.index}"]`;
+    const box = layer.querySelector<HTMLElement>(selector);
     return box ? [box] : [];
   }
 
@@ -213,16 +237,27 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
     return [result.dx, result.dy];
   }
 
-  function refs(items: PageObject[], offsets?: [number, number][]): Record<string, unknown>[] {
+  function refs(items: PageObject[], offsets?: [number, number][]): ObjectRef[] {
     return items.map((object, i) => ({
       kind: object.kind,
       page_index: pageIndex,
       index: object.index,
+      ...(object.kind === "text" && object.unit ? { unit: object.unit, expect_text: object.text ?? null } : {}),
       ...(offsets ? { dx: offsets[i][0], dy: offsets[i][1] } : {}),
     }));
   }
 
-  async function send(op: HistoryOp, next: { kind: ObjectKind; pageRect: [number, number, number, number] }[]): Promise<void> {
+  /** The server refused a text ref because that unit's text (or the page's units) changed. */
+  function isStaleRef(error: unknown): boolean {
+    return (
+      error instanceof ApiError &&
+      error.status === 400 &&
+      (/check the page again/.test(error.detail) || /index \d+ is out of range/.test(error.detail))
+    );
+  }
+
+  /** `staleMessage`: what to say instead of the server's words when a ref turned out stale. */
+  async function send(op: HistoryOp, next: Wanted[], staleMessage?: string): Promise<void> {
     if (busy) {
       return;
     }
@@ -235,7 +270,13 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
       await confirmVerified(options.api, options.documentId, applied.result);
       reselect = next;
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "The change could not be made.");
+      window.alert(
+        staleMessage && isStaleRef(error)
+          ? staleMessage
+          : error instanceof Error
+            ? error.message
+            : "The change could not be made.",
+      );
       return;
     } finally {
       busy = false;
@@ -245,9 +286,15 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
     options.onCommitted();
   }
 
-  function shifted(object: PageObject, dx: number, dy: number): { kind: ObjectKind; pageRect: [number, number, number, number] } {
+  function shifted(object: PageObject, dx: number, dy: number): Wanted {
     const [x0, y0, x1, y1] = object.pageRect;
-    return { kind: object.kind, pageRect: [x0 + dx, y0 + dy, x1 + dx, y1 + dy] };
+    return {
+      kind: object.kind,
+      pageRect: [x0 + dx, y0 + dy, x1 + dx, y1 + dy],
+      unit: object.unit,
+      text: object.text,
+      origin: object.origin ? [object.origin[0] + dx, object.origin[1] + dy] : undefined,
+    };
   }
 
   function moveSelection(dxPt: number, dyPt: number): void {
@@ -259,6 +306,14 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
       { op: "move_objects", items: refs(items), dx: dxPt, dy: dyPt },
       items.map((o) => shifted(o, dxPt, dyPt)),
     );
+  }
+
+  function move(kind: ObjectKind, index: number, dxPt: number, dyPt: number): void {
+    const object = find(kind, index);
+    if (!object || (dxPt === 0 && dyPt === 0)) {
+      return;
+    }
+    void send({ op: "move_objects", items: refs([object]), dx: dxPt, dy: dyPt }, [shifted(object, dxPt, dyPt)]);
   }
 
   function groupDrag(event: MouseEvent): void {
@@ -356,26 +411,38 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
     const modifier = event.ctrlKey || event.metaKey;
     const lower = event.key.toLowerCase();
     if (modifier && lower === "c" && selected.length) {
-      clipboard = { pageIndex, items: selected.map((o) => ({ kind: o.kind, index: o.index })) };
+      clipboard = { pageIndex, items: refs(selected) };
       return true;
     }
     if (modifier && (lower === "v" || lower === "d")) {
-      const source = lower === "d" ? (selected.length ? { pageIndex, items: selected.map((o) => ({ kind: o.kind, index: o.index })) } : null) : clipboard;
+      const source = lower === "d" ? (selected.length ? { pageIndex, items: refs(selected) } : null) : clipboard;
       if (!source || busy) {
         return Boolean(source);
       }
       const target = lower === "d" ? pageIndex : options.currentPage();
       const offset = target === source.pageIndex ? PASTE_OFFSET_PT : 0;
-      const originals = source.pageIndex === pageIndex ? source.items.map((i) => find(i.kind, i.index)) : [];
+      // The copies land where the originals are, shifted: they are selected there afterwards.
+      const originals =
+        source.pageIndex === pageIndex
+          ? source.items.map((ref) =>
+              objects.find(
+                (o) =>
+                  o.kind === ref.kind &&
+                  o.index === ref.index &&
+                  (ref.kind !== "text" || (o.unit === ref.unit && o.text === ref.expect_text)),
+              ),
+            )
+          : [];
       void send(
         {
           op: "duplicate_objects",
-          items: source.items.map((i) => ({ kind: i.kind, page_index: source.pageIndex, index: i.index })),
+          items: source.items,
           dx: offset,
           dy: offset,
           target_page_index: target,
         },
         originals.filter((o): o is PageObject => o !== undefined).map((o) => shifted(o, offset, offset)),
+        lower === "v" ? "The copied text has changed since you copied it. Select it and copy it again." : undefined,
       );
       return true;
     }
@@ -462,23 +529,29 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
   function update(
     nextPageIndex: number,
     nextViewport: pdfjsLib.PageViewport,
-    blocks: BlockInfo[],
+    units: TextUnit[],
     images: ImageInfo[],
     shapes: ShapeInfo[],
   ): void {
     const samePage = nextPageIndex === pageIndex;
-    const previous = samePage ? selected.map((o) => ({ kind: o.kind, pageRect: o.pageRect })) : [];
+    const previous: Wanted[] = samePage ? selected.map((o) => shifted(o, 0, 0)) : [];
     pageIndex = nextPageIndex;
     viewport = nextViewport;
     const make = (kind: ObjectKind, index: number, spanIndices: number[], rect: [number, number, number, number]): PageObject => {
       const r = bboxToRect(nextViewport, rect);
       return { kind, index, spanIndices, pageRect: rect, box: { left: r.left, top: r.top, right: r.left + r.width, bottom: r.top + r.height } };
     };
+    const makeText = (u: TextUnit): PageObject => ({
+      ...make("text", u.index, u.span_indices, u.bbox),
+      unit: u.granularity,
+      text: u.text,
+      origin: u.origin,
+    });
     const shapeBoxes = new Set(
       [...layer.querySelectorAll<HTMLElement>(".pw-shape-box")].map((el) => Number(el.dataset.index)),
     );
     objects = [
-      ...blocks.map((b) => make("text", b.span_indices[0], b.span_indices, b.bbox)),
+      ...units.map(makeText),
       ...images.map((i) => make("image", i.index, [], i.rect)),
       // Only shapes the shape tool made selectable (not page backgrounds).
       ...shapes.filter((s) => shapeBoxes.has(s.index)).map((s) => make("shape", s.index, [], s.rect)),
@@ -487,9 +560,21 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
     // same objects as before, if they are still where they were (a zoom, say).
     const wanted = reselect ?? previous;
     reselect = null;
-    const near = (a: number[], b: number[]): boolean => a.every((v, i) => Math.abs(v - b[i]) <= REFIND_TOLERANCE_PT);
+    const near = (a: readonly number[], b: readonly number[], tolerance = REFIND_TOLERANCE_PT): boolean =>
+      a.every((v, i) => Math.abs(v - b[i]) <= tolerance);
+    // Text: the same unit and text at the (moved) origin; anything else, or text that
+    // changed shape, by its (moved) rectangle.
+    const byText = (w: Wanted): PageObject | undefined => {
+      const origin = w.origin;
+      if (w.kind !== "text" || !origin || w.text === undefined) {
+        return undefined;
+      }
+      return objects.find(
+        (o) => o.kind === "text" && o.unit === w.unit && o.text === w.text && !!o.origin && near(o.origin, origin, ORIGIN_TOLERANCE_PT),
+      );
+    };
     const found = wanted
-      .map((w) => objects.find((o) => o.kind === w.kind && near(o.pageRect, w.pageRect)))
+      .map((w) => byText(w) ?? objects.find((o) => o.kind === w.kind && o.unit === w.unit && near(o.pageRect, w.pageRect)))
       .filter((o): o is PageObject => o !== undefined);
     setSelection([...new Map(found.map((o) => [key(o), o])).values()]);
   }
@@ -499,6 +584,8 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
     pointerDown,
     selectOnly,
     snapper,
+    move,
+    selectedText: () => selected.filter((o) => o.kind === "text").map((o) => o.index),
     count: () => selected.length,
     clear: () => setSelection([]),
     align,

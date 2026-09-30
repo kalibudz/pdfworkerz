@@ -846,54 +846,73 @@ def _drag(page: Page, selector: str, dx: float, dy: float) -> None:
     page.mouse.up()
 
 
-def _span_top(page: Page, text: str) -> float:
-    return float(
-        page.evaluate(
-            "t => parseFloat([...document.querySelectorAll('.pw-span-box')]"
-            ".find(b => b.textContent === t)?.style.top ?? 'NaN')",
-            text,
+def _use_block_mode(page: Page) -> None:
+    """EDT-16: the paragraph handles (move + resize, `move_text_block`) belong to Block
+    mode; the default, Line, moves one line. Set before the app loads, as a returning
+    user's remembered choice would be."""
+    page.add_init_script("window.localStorage.setItem('pdfworkerz.selectMode', 'block')")
+
+
+_PARAGRAPH_BOX = ".pw-span-box:has-text('line one')"
+_LINE_THREE = "And this is line three, the last."
+
+
+def _paragraph_rect(page: Page) -> dict[str, float]:
+    """The box of the block holding the fixture's three-line paragraph (layer pixels)."""
+    return dict(
+        page.eval_on_selector(
+            _PARAGRAPH_BOX, "el => ({ top: parseFloat(el.style.top), height: parseFloat(el.style.height) })"
         )
     )
 
 
 @pytest.mark.feature("EDT-05")
 def test_dragging_the_move_handle_moves_the_whole_paragraph(page: Page, app_url: str, corpus: Corpus) -> None:
+    _use_block_mode(page)
     page.goto(app_url)
     page.wait_for_selector("#pw-open-path", timeout=5000)
     _open_path(page, str(corpus.paragraph))
     _wait_overlay_ready(page)
-    line_three = "And this is line three, the last."
-    before = _span_top(page, line_three)
+    # One box for the whole paragraph: all three lines move together.
+    assert _LINE_THREE in (page.text_content(_PARAGRAPH_BOX) or "")
+    before = _paragraph_rect(page)["top"]
 
-    page.click(".pw-span-box:has-text('line one')")
+    page.click(_PARAGRAPH_BOX)
     page.wait_for_selector(".pw-move-handle", timeout=3000)
     _drag(page, ".pw-move-handle", 0, 300)
 
     page.wait_for_selector(".pw-history-entry:has-text('Move paragraph')", timeout=10000)
     page.wait_for_function(
-        "([t, before]) => { const b = [...document.querySelectorAll('.pw-span-box')].find(x => x.textContent === t);"
-        " return b && parseFloat(b.style.top) > before + 250; }",
-        arg=[line_three, before],
+        "([t, before]) => [...document.querySelectorAll('.pw-span-box.pw-unit-block')]"
+        ".some(b => b.textContent.includes(t) && parseFloat(b.style.top) > before + 250)",
+        arg=[_LINE_THREE, before],
         timeout=5000,
     )
 
 
 @pytest.mark.feature("EDT-05")
 def test_dragging_the_resize_handle_rewraps_the_paragraph(page: Page, app_url: str, corpus: Corpus) -> None:
+    _use_block_mode(page)
     page.goto(app_url)
     page.wait_for_selector("#pw-open-path", timeout=5000)
     _open_path(page, str(corpus.paragraph))
     _wait_overlay_ready(page)
-    count_before = page.locator(".pw-span-box").count()
+    height_before = _paragraph_rect(page)["height"]
 
-    page.click(".pw-span-box:has-text('line one')")
+    page.click(_PARAGRAPH_BOX)
     page.wait_for_selector(".pw-resize-handle", timeout=3000)
-    handle_width = page.locator(".pw-span-box:has-text('line one')").bounding_box()
+    handle_width = page.locator(_PARAGRAPH_BOX).bounding_box()
     assert handle_width is not None
     _drag(page, ".pw-resize-handle", -handle_width["width"] / 2, 0)
 
     page.wait_for_selector(".pw-history-entry:has-text('Resize paragraph')", timeout=10000)
-    page.wait_for_function(f"() => document.querySelectorAll('.pw-span-box').length > {count_before}", timeout=5000)
+    # Half as wide, so it wraps onto more lines: the paragraph's box gets taller.
+    page.wait_for_function(
+        "([t, before]) => [...document.querySelectorAll('.pw-span-box.pw-unit-block')]"
+        ".some(b => b.textContent.includes(t) && parseFloat(b.style.height) > before * 1.4)",
+        arg=["line one", height_before],
+        timeout=5000,
+    )
 
 
 @pytest.mark.feature("EDT-05")
@@ -1685,6 +1704,7 @@ def test_edited_text_can_be_moved_without_an_approval_prompt(page: Page, app_url
     """The reported bug: after editing text, moving it asked to accept a look-alike font."""
     dialogs: list[str] = []
     page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
+    _use_block_mode(page)
     _open_arrange(page, app_url, arrange_pdf)
     page.click(".pw-span-box:has-text('Alpha heading')")
     page.fill(_EDITOR, "Alpha title")

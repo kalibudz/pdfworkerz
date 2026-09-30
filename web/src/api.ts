@@ -67,6 +67,76 @@ export interface SpanStyle {
   rotation_degrees: number;
   ascender: number;
   descender: number;
+  /** Each glyph's position (engine.fonts.style.CharBox); optional so older payloads still type-check. */
+  chars?: CharBox[];
+}
+
+/** Mirrors engine.fonts.style.CharBox. */
+export interface CharBox {
+  char: string;
+  origin: [number, number];
+  bbox: [number, number, number, number];
+}
+
+/** EDT-16: what one click selects (SPEC.md section 8.2 item 6). */
+export type SelectMode = "block" | "line" | "word";
+
+/** EDT-16: one selectable unit of text, computed by the server (the frozen
+ * TextUnit contract, SPEC.md section 8.2 item 6). Boxes are MuPDF page space:
+ * points, y-down, relative to the crop box. `index` is the block's first span
+ * index for "block", else the unit's position in that granularity's list. */
+export interface TextUnit {
+  granularity: SelectMode;
+  index: number;
+  text: string;
+  bbox: [number, number, number, number];
+  origin: [number, number];
+  rotation_degrees: number;
+  span_indices: number[];
+  /** [start, end) character ranges within spans. */
+  segments: { span_index: number; start: number; end: number }[];
+  /** Words only: the line the word is on. */
+  line_index: number | null;
+}
+
+/** An ObjectRef inside move_objects / duplicate_objects / delete_objects items. */
+export interface ObjectRef {
+  kind: "text" | "image" | "shape";
+  page_index: number;
+  /** A span index for unit "block", else a unit index. */
+  index: number;
+  /** Text only; the server's default is "block". */
+  unit?: SelectMode;
+  /** Refuses the Op when the unit at `index` no longer has this text. */
+  expect_text?: string | null;
+  dx?: number;
+  dy?: number;
+}
+
+/** EDT-17: the edit_text_unit Op's fields (as edit_span, addressed by unit). */
+export interface EditTextUnitOp {
+  op: "edit_text_unit";
+  page_index: number;
+  unit: SelectMode;
+  index: number;
+  expect_text: string;
+  new_text?: string | null;
+  size?: number;
+  color?: [number, number, number];
+  font?: string;
+  bold?: boolean;
+  italic?: boolean;
+  /** Block only. */
+  align?: "left" | "justify";
+  grow?: boolean;
+  allow_overflow?: boolean;
+}
+
+/** EDT-18: delete_objects' fields; `close_gap` only matters for words. */
+export interface DeleteObjectsOp {
+  op: "delete_objects";
+  items: ObjectRef[];
+  close_gap?: boolean;
 }
 
 /** Mirrors engine.fonts.style.TextState field-for-field (FNT-02); absent
@@ -251,6 +321,13 @@ export class Api {
   async pageBlocks(documentId: string, pageIndex: number): Promise<BlockInfo[]> {
     const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/blocks`);
     return (await response.json()) as BlockInfo[];
+  }
+
+  /** EDT-16: the page's text split into blocks, lines or words, by the server. */
+  async pageTextUnits(documentId: string, pageIndex: number, granularity: SelectMode): Promise<TextUnit[]> {
+    const params = new URLSearchParams({ granularity });
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/text_units?${params}`);
+    return (await response.json()) as TextUnit[];
   }
 
   /** Fonts that edits could only approximate (engine.fonts.research). With a

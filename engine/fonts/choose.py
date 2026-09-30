@@ -45,6 +45,16 @@ def family_of(base_font: str, font_index: list[FontCandidate]) -> str:
     return {"serif": "Times", "monospace": "Courier"}.get(fingerprint.family_class, "Helvetica")
 
 
+def family_is_inferred(base_font: str, font_index: list[FontCandidate]) -> bool:
+    """Whether family_of had to guess: the font isn't in the index and its name doesn't
+    name the standard family it fell back to (a nameless embedded font, "(null)", say).
+    Making such text bold swaps in a different typeface, which the user should confirm."""
+    if find_by_name(font_index, base_font) is not None:
+        return False
+    plain = normalize_font_name(split_subset_tag(base_font)[1])
+    return not plain.startswith(normalize_font_name(family_of(base_font, font_index)))
+
+
 def is_bold_italic(base_font: str, font_index: list[FontCandidate]) -> tuple[bool, bool]:
     found = find_by_name(font_index, base_font)
     if found is not None:

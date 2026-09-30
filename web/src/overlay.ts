@@ -1,33 +1,37 @@
 /**
  * UI-02: the click-to-edit overlay (SPEC.md section 8.2).
  *
- * One absolutely-positioned box per span, sized and positioned from the
- * span's own PDF-space bbox converted through pdf.js's own viewport
- * transform (`convertToViewportRectangle`) rather than hand-rolled math --
+ * One absolutely-positioned box per text unit -- a block, a line or a word,
+ * whichever the toolbar's selection mode says (EDT-16); the server computes
+ * the units (GET .../text_units), this module never groups text itself. Each
+ * box is sized and positioned from the unit's own PDF-space bbox converted
+ * through pdf.js's own viewport transform rather than hand-rolled math --
  * that transform already accounts for the page's rotation and the PDF/CSS
  * y-axis flip pdf.js itself renders through. The boxes are only hit
  * targets: their text is invisible (style.css), since the rendered page
  * already shows the real glyphs.
  *
- * Clicking a box selects that span: it is outlined, gets the paragraph
- * move/resize handles, and the inspector's text editor (UI-03) takes the
- * cursor, prefilled with the span's text and detected style. All typing
- * happens there; clicking elsewhere never discards it. Edits to the draft
- * debounce into PreviewTextOp calls for the live "Match" field; Apply (or
- * Enter) commits text and style together as one edit_span Op -- tried with
- * the exact font first, asking before anything weaker (approval.ts). The
- * caller reloads everything after a commit (`onCommitted`), and the edited
- * span is selected again so edits can follow one another.
+ * Clicking a box selects that unit: it is outlined, gets its drag handles
+ * (move and resize for a block, move only for a line or word), and the
+ * inspector's text editor (UI-03) takes the cursor, prefilled with the
+ * unit's text and detected style. All typing happens there; clicking
+ * elsewhere never discards it. Edits to the draft debounce into
+ * PreviewTextOp calls for the live "Match" field; Apply (or Enter) commits
+ * text and style together as one edit_text_unit Op (EDT-17) carrying
+ * `expect_text` and only the fields that changed -- tried with the exact
+ * font first, asking before anything weaker (approval.ts). The caller
+ * reloads everything after a commit (`onCommitted`), and the edited unit is
+ * selected again so edits can follow one another.
  */
 
 import type * as pdfjsLib from "pdfjs-dist";
 
-import type { Api, HistoryOp, LinkInfo, SpanTrace } from "./api";
+import type { Api, HistoryOp, LinkInfo, SelectMode, SpanTrace, TextUnit } from "./api";
 import { applyWithApproval, confirmVerified } from "./approval";
 import { attachBlockHandles } from "./blockdrag";
 import type { ArrangeHandle } from "./arrange";
-import type { InspectorHandle, TextDraft } from "./inspector";
-import { toHexColor } from "./inspector";
+import type { InspectorHandle, StyleField, TextDraft } from "./inspector";
+import { mixedStyleFields, toHexColor } from "./inspector";
 import { styleFromFontName } from "./styledialog";
 
 export interface OverlayOptions {
@@ -37,39 +41,68 @@ export interface OverlayOptions {
   documentId: string;
   inspector: InspectorHandle;
   /** The document changed server-side (an edit committed) -- reload
-   * everything: document bytes, this page's spans, the render, the
-   * thumbnail. Span indices are not assumed stable across this. */
+   * everything: document bytes, this page's units and spans, the render, the
+   * thumbnail. Indices are not assumed stable across this. */
   onCommitted: () => void;
 }
 
 export interface OverlayHandle {
-  /** Rebuilds every span's hit box for a freshly (re)rendered page. The
-   * selection (and its unapplied draft) survives when the same span is
+  /** Rebuilds every unit's hit box for a freshly (re)rendered page. `units`
+   * are in the current selection mode; `spans` supply their styles. The
+   * selection (and its unapplied draft) survives when the same unit is
    * still there unchanged -- a zoom, say; otherwise it is cleared. */
-  update(pageIndex: number, spans: SpanTrace[], viewport: pdfjsLib.PageViewport, links?: LinkInfo[]): void;
-  /** EDT-07: arm the format painter with the span currently being edited
-   * as its source; the next span clicked (on any page) gets its style.
-   * A no-op when nothing is selected. */
+  update(
+    pageIndex: number,
+    units: TextUnit[],
+    spans: SpanTrace[],
+    viewport: pdfjsLib.PageViewport,
+    links?: LinkInfo[],
+  ): void;
+  /** EDT-16: the selection mode changed: the selection is dropped, and Word
+   * mode turns the (span-level) format painter off. */
+  setMode(mode: SelectMode): void;
+  /** The selected unit's index, or null. */
+  selectedIndex(): number | null;
+  /** Show the unit with this index as selected (the shared selection landed
+   * on it after a move or a copy). The keyboard stays where it is. */
+  selectIndex(index: number): void;
+  /** EDT-07: arm the format painter with the selected unit's first span as
+   * its source; the next text clicked (on any page) gets its style.
+   * A no-op when nothing is selected, and in Word mode. */
   armPainter(): void;
   /** EDT-07: drop an armed painter -- the document changed underneath it. */
   cancelPainter(): void;
-  /** EDT-10: prompt for a target and link the selected span to it. */
+  /** EDT-10: prompt for a target and link the selected unit to it. */
   addLink(): void;
   /** EDT-10: prompt for a new target for `link`. */
   editLink(link: LinkInfo): void;
   removeLink(link: LinkInfo): void;
-  /** UI-03: commit the inspector editor's draft to the selected span. */
+  /** UI-03: commit the inspector editor's draft to the selected unit. */
   apply(draft: TextDraft): void;
   /** UI-03: the inspector editor's draft changed -- refresh the Match preview. */
   draftChanged(draft: TextDraft): void;
 }
 
+/** The selected unit, as it was when selected. */
+interface UnitRef {
+  pageIndex: number;
+  unit: SelectMode;
+  index: number;
+  text: string;
+  origin: [number, number];
+  bbox: [number, number, number, number];
+  /** The unit's first span: where its style, and the Match preview, come from. */
+  firstSpan: number;
+  style: SpanTrace["style"];
+  /** Style fields that differ across the unit's spans. */
+  mixed: StyleField[];
+}
+
+/** EDT-07: the format painter works on one style run (span). */
 interface SpanRef {
   pageIndex: number;
   spanIndex: number;
   text: string;
-  bbox: [number, number, number, number];
-  style: SpanTrace["style"];
 }
 
 type LinkTarget = { uri: string } | { target_page: number };
@@ -93,7 +126,16 @@ function overlaps(a: readonly number[], b: readonly number[]): boolean {
   return a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
 }
 
+function overlapArea(a: readonly number[], b: readonly number[]): number {
+  const width = Math.min(a[2], b[2]) - Math.max(a[0], b[0]);
+  const height = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
+  return Math.max(0, width) * Math.max(0, height);
+}
+
 const PREVIEW_DEBOUNCE_MS = 300;
+/** After a commit, the edited unit is the one with the new text whose origin is this close. */
+const RESELECT_ORIGIN_PT = 0.5;
+const UNIT_NOUNS: Record<SelectMode, string> = { block: "paragraph", line: "line", word: "word" };
 
 function approximateFontFamily(fontName: string): string {
   const lower = fontName.toLowerCase();
@@ -151,20 +193,24 @@ export function bboxToRect(
 }
 
 export function createOverlay(layer: HTMLElement, options: OverlayOptions): OverlayHandle {
-  /** The box on the page for the selected span. */
+  /** The box on the page for the selected unit. */
   let selectedBox: HTMLElement | null = null;
-  /** The span being edited (in the inspector) right now -- also what "Copy style" copies from. */
-  let selected: SpanRef | null = null;
+  /** The unit being edited (in the inspector) right now. */
+  let selected: UnitRef | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let latestRequestId = 0;
   let committing = false;
-  /** After a commit reloads the page: select the edited span again, found by its new text. */
-  let reselectAfterCommit: { pageIndex: number; spanIndex: number; text: string } | null = null;
+  /** After a commit reloads the page: select the edited unit again, found by its new text and place. */
+  let reselectAfterCommit: UnitRef | null = null;
   /** EDT-07: armed format painter source. Survives page changes and
    * update() (cross-page painting is supported); cleared once applied or
    * cancelled, and on any document change, which makes its index stale. */
   let painterSource: SpanRef | null = null;
+  let mode: SelectMode = "line";
   let pageLinks: LinkInfo[] = [];
+  let pageUnits: TextUnit[] = [];
+  let pageSpans: SpanTrace[] = [];
+  let boxes: HTMLElement[] = [];
   let currentPageIndex = 0;
   let currentViewport: pdfjsLib.PageViewport | null = null;
   let detachHandles: (() => void) | null = null;
@@ -174,13 +220,17 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     detachHandles = null;
   }
 
+  function spansOf(unit: TextUnit): SpanTrace[] {
+    return unit.span_indices.map((i) => pageSpans[i]).filter((span): span is SpanTrace => span !== undefined);
+  }
+
   /** EDT-05: the handle drag is in layer pixels; the Op wants page points. */
-  async function moveBlock(span: SpanRef, fields: { dx?: number; dy?: number; width?: number }): Promise<void> {
+  async function moveBlock(unit: UnitRef, fields: { dx?: number; dy?: number; width?: number }): Promise<void> {
     try {
       const applied = await applyWithApproval(options.api, options.documentId, {
         op: "move_text_block",
-        page_index: span.pageIndex,
-        span_index: span.spanIndex,
+        page_index: unit.pageIndex,
+        span_index: unit.firstSpan,
         ...fields,
       });
       if (!applied) {
@@ -194,10 +244,37 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     options.onCommitted();
   }
 
-  function attachHandlesFor(box: HTMLElement, span: SpanRef): void {
+  /** EDT-18: a line or a word moves as a single-item move_objects, guarded by expect_text. */
+  async function moveUnit(unit: UnitRef, dx: number, dy: number): Promise<void> {
+    if (options.arrange) {
+      options.arrange.move("text", unit.index, dx, dy); // also selects it again where it lands
+      return;
+    }
+    try {
+      const applied = await applyWithApproval(options.api, options.documentId, {
+        op: "move_objects",
+        items: [{ kind: "text", page_index: unit.pageIndex, index: unit.index, unit: unit.unit, expect_text: unit.text }],
+        dx,
+        dy,
+      });
+      if (!applied) {
+        return;
+      }
+      await confirmVerified(options.api, options.documentId, applied.result);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The text could not be moved.");
+      return;
+    }
+    options.onCommitted();
+  }
+
+  function attachHandlesFor(box: HTMLElement, unit: UnitRef): void {
     removeHandles();
+    const isBlock = unit.unit === "block";
     detachHandles = attachBlockHandles(layer, box, {
-      snapper: options.arrange?.snapper("text", span.spanIndex),
+      snapper: options.arrange?.snapper("text", unit.index),
+      resizable: isBlock,
+      noun: UNIT_NOUNS[unit.unit],
       onMove: (dxPx, dyPx) => {
         const viewport = currentViewport;
         if (!viewport) {
@@ -206,7 +283,11 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
         const origin = { x: parseFloat(box.style.left), y: parseFloat(box.style.top) };
         const [x0, y0] = viewportToMupdfPoint(viewport, origin.x, origin.y);
         const [x1, y1] = viewportToMupdfPoint(viewport, origin.x + dxPx, origin.y + dyPx);
-        void moveBlock(span, { dx: x1 - x0, dy: y1 - y0 });
+        if (isBlock) {
+          void moveBlock(unit, { dx: x1 - x0, dy: y1 - y0 });
+        } else {
+          void moveUnit(unit, x1 - x0, y1 - y0);
+        }
       },
       onResize: (rightEdgePx) => {
         const viewport = currentViewport;
@@ -214,7 +295,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
           return;
         }
         const [rightX] = viewportToMupdfPoint(viewport, rightEdgePx, parseFloat(box.style.top));
-        void moveBlock(span, { width: rightX - span.bbox[0] });
+        void moveBlock(unit, { width: rightX - unit.bbox[0] });
       },
     });
   }
@@ -230,13 +311,13 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
   }
 
   function addLink(): void {
-    const span = selected;
-    if (!span) {
+    const unit = selected;
+    if (!unit) {
       return;
     }
     const target = parseLinkTarget(window.prompt("Link to a URL (https://…, mailto:…) or a page number:") ?? "");
     if (target) {
-      void applyLinkOp({ op: "add_link", page_index: span.pageIndex, rect: span.bbox, ...target });
+      void applyLinkOp({ op: "add_link", page_index: unit.pageIndex, rect: unit.bbox, ...target });
     }
   }
 
@@ -259,10 +340,10 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
   }
 
   function armPainter(): void {
-    if (!selected) {
+    if (!selected || mode === "word") {
       return;
     }
-    const source = selected;
+    const source: SpanRef = { pageIndex: selected.pageIndex, spanIndex: selected.firstSpan, text: selected.style.text };
     clearSelection();
     painterSource = source;
     layer.classList.add("pw-painting");
@@ -296,6 +377,23 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       return;
     }
     options.onCommitted();
+  }
+
+  /** The style run of `unit` under a click: the painter's target. */
+  function spanUnder(unit: TextUnit, event: MouseEvent): number {
+    const viewport = currentViewport;
+    if (viewport && unit.span_indices.length > 1) {
+      const layerRect = layer.getBoundingClientRect();
+      const [x, y] = viewportToMupdfPoint(viewport, event.clientX - layerRect.left, event.clientY - layerRect.top);
+      const hit = unit.span_indices.find((i) => {
+        const bbox = pageSpans[i]?.style.bbox;
+        return bbox !== undefined && x >= bbox[0] && x <= bbox[2] && y >= bbox[1] && y <= bbox[3];
+      });
+      if (hit !== undefined) {
+        return hit;
+      }
+    }
+    return unit.span_indices[0];
   }
 
   window.addEventListener("keydown", (event) => {
@@ -338,11 +436,11 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }, PREVIEW_DEBOUNCE_MS);
   }
 
-  /** The Match row for a draft: the engine's own preview while the original font is
-   * kept; a font the user chose is exactly that font, by definition. */
+  /** The Match row for a draft: the engine's own preview (in the unit's first font) while
+   * the original font is kept; a font the user chose is exactly that font, by definition. */
   function previewDraft(draft: TextDraft): void {
-    const span = selected;
-    if (!span) {
+    const unit = selected;
+    if (!unit) {
       return;
     }
     if (draft.font) {
@@ -355,36 +453,45 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       });
       return;
     }
-    queuePreview(span.pageIndex, span.spanIndex, draft.text);
+    queuePreview(unit.pageIndex, unit.firstSpan, draft.text);
   }
 
-  /** The edit_span Op for a draft: only what actually changed is sent. */
-  function editOpFor(span: SpanRef, draft: TextDraft): HistoryOp {
-    const op: HistoryOp = { op: "edit_span", page_index: span.pageIndex, span_index: span.spanIndex };
-    if (draft.text !== span.text) op.new_text = draft.text;
+  /** The edit_text_unit Op for a draft: only what actually changed is sent. A field
+   * that is mixed across the unit is sent only once the user has touched it. */
+  function editOpFor(unit: UnitRef, draft: TextDraft): HistoryOp {
+    const op: HistoryOp = {
+      op: "edit_text_unit",
+      page_index: unit.pageIndex,
+      unit: unit.unit,
+      index: unit.index,
+      expect_text: unit.text,
+    };
+    const changed = (field: StyleField, differs: boolean): boolean =>
+      !draft.mixed.includes(field) && (differs || unit.mixed.includes(field));
+    if (draft.text !== unit.text) op.new_text = draft.text;
     if (draft.font) op.font = draft.font;
-    if (Math.abs(draft.size - span.style.size) > 0.05) op.size = draft.size;
-    if (toHexColor(draft.color) !== toHexColor(span.style.color)) op.color = draft.color;
-    const current = styleFromFontName(span.style.font);
-    if (draft.bold !== current.bold) op.bold = draft.bold;
-    if (draft.italic !== current.italic) op.italic = draft.italic;
+    if (changed("size", Math.abs(draft.size - unit.style.size) > 0.05)) op.size = draft.size;
+    if (changed("color", toHexColor(draft.color) !== toHexColor(unit.style.color))) op.color = draft.color;
+    const current = styleFromFontName(unit.style.font);
+    if (changed("bold", draft.bold !== current.bold)) op.bold = draft.bold;
+    if (changed("italic", draft.italic !== current.italic)) op.italic = draft.italic;
     return op;
   }
 
   async function commit(draft: TextDraft): Promise<void> {
-    const span = selected;
-    if (!span || committing) {
+    const unit = selected;
+    if (!unit || committing) {
       return;
     }
     if (!draft.text.trim()) {
-      options.inspector.setStatus("The text can't be empty. To remove it, use: delete \"…\" in the command bar.");
+      options.inspector.setStatus("The text can't be empty. To remove it, press Esc, then Delete.");
       return;
     }
     committing = true;
     options.inspector.setStatus("Applying…", true);
     let applied: { result: unknown } | null = null;
     try {
-      applied = await applyWithApproval(options.api, options.documentId, editOpFor(span, draft));
+      applied = await applyWithApproval(options.api, options.documentId, editOpFor(unit, draft));
       if (applied) {
         await confirmVerified(options.api, options.documentId, applied.result);
       }
@@ -400,33 +507,53 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       options.inspector.focusEditor();
       return;
     }
-    reselectAfterCommit = { pageIndex: span.pageIndex, spanIndex: span.spanIndex, text: draft.text };
+    reselectAfterCommit = { ...unit, text: draft.text };
     options.onCommitted();
   }
 
-  function select(box: HTMLElement, pageIndex: number, spanIndex: number, span: SpanTrace, keepDraft: boolean): void {
+  function select(position: number, keepDraft: boolean): void {
+    const unit = pageUnits[position];
+    const box = boxes[position];
+    const spans = spansOf(unit);
+    if (!box || spans.length === 0) {
+      return;
+    }
     selectedBox?.classList.remove("pw-span-selected");
     selectedBox = box;
     box.classList.add("pw-span-selected");
-    selected = { pageIndex, spanIndex, text: span.style.text, bbox: span.style.bbox, style: span.style };
+    selected = {
+      pageIndex: currentPageIndex,
+      unit: unit.granularity,
+      index: unit.index,
+      text: unit.text,
+      origin: unit.origin,
+      bbox: unit.bbox,
+      firstSpan: unit.span_indices[0],
+      style: spans[0].style,
+      mixed: mixedStyleFields(spans),
+    };
     attachHandlesFor(box, selected);
-    options.inspector.showSpan(
-      span,
-      pageLinks.filter((link) => overlaps(link.rect, span.style.bbox)),
+    options.inspector.showUnit(
+      unit,
+      spans,
+      pageLinks.filter((link) => overlaps(link.rect, unit.bbox)),
       keepDraft,
     );
     previewDraft(options.inspector.draft());
   }
 
-  function onSpanClick(box: HTMLElement, pageIndex: number, spanIndex: number, span: SpanTrace): void {
+  function onUnitClick(position: number, event: MouseEvent): void {
+    const unit = pageUnits[position];
     if (painterSource) {
-      void applyPainter({ pageIndex, spanIndex, text: span.style.text, bbox: span.style.bbox, style: span.style });
+      const spanIndex = spanUnder(unit, event);
+      void applyPainter({ pageIndex: currentPageIndex, spanIndex, text: pageSpans[spanIndex]?.style.text ?? unit.text });
       return;
     }
     if (committing) {
       return;
     }
-    const same = selected?.pageIndex === pageIndex && selected.spanIndex === spanIndex;
+    const same =
+      selected?.pageIndex === currentPageIndex && selected.unit === unit.granularity && selected.index === unit.index;
     if (!same && options.inspector.isDirty() && selected) {
       if (!window.confirm(`Discard your unapplied change to “${selected.text}”?`)) {
         options.inspector.focusEditor();
@@ -434,19 +561,20 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       }
     }
     if (!same) {
-      select(box, pageIndex, spanIndex, span, false);
+      select(position, false);
     }
     options.inspector.focusEditor();
   }
 
   function update(
     pageIndex: number,
+    units: TextUnit[],
     spans: SpanTrace[],
     viewport: pdfjsLib.PageViewport,
     links: LinkInfo[] = [],
   ): void {
     // A zoom or re-render of the same page keeps the selection and its draft when the
-    // span is still there, unchanged; after a commit the edited span is found by its
+    // unit is still there, unchanged; after a commit the edited unit is found by its
     // new text. Anything else (another page, the text changed underneath) clears it.
     const previous = selected;
     const reselect = reselectAfterCommit;
@@ -458,9 +586,11 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     currentPageIndex = pageIndex;
     currentViewport = viewport;
     pageLinks = links;
+    pageUnits = units;
+    pageSpans = spans;
 
-    // EDT-10: link areas, drawn under the span boxes and never clickable
-    // themselves -- editing a link goes through the span it covers.
+    // EDT-10: link areas, drawn under the text boxes and never clickable
+    // themselves -- editing a link goes through the text it covers.
     for (const link of links) {
       const rect = bboxToRect(viewport, link.rect);
       const outline = document.createElement("div");
@@ -473,34 +603,42 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       layer.appendChild(outline);
     }
 
-    const boxes: HTMLElement[] = [];
-    for (const [spanIndex, span] of spans.entries()) {
-      const rect = bboxToRect(viewport, span.style.bbox);
+    boxes = [];
+    for (const [position, unit] of units.entries()) {
+      const rect = bboxToRect(viewport, unit.bbox);
+      const style = spans[unit.span_indices[0]]?.style;
       const box = document.createElement("div");
-      box.className = "pw-span-box";
+      // .pw-span-box on every box, whatever the unit: the one class for "text hit target".
+      box.className = `pw-span-box pw-unit-${unit.granularity}`;
       box.style.left = `${rect.left}px`;
       box.style.top = `${rect.top}px`;
       box.style.width = `${rect.width}px`;
       box.style.height = `${rect.height}px`;
-      box.style.fontSize = `${span.style.size * viewport.scale}px`;
-      // Invisible (style.css), but sized and weighted like the real text, so the
-      // box's own text matches what it covers (and tools can read its style).
-      box.style.fontFamily = approximateFontFamily(span.style.font);
-      box.style.fontWeight = approximateFontWeight(span.style.font);
-      box.style.fontStyle = approximateFontStyle(span.style.font);
-      box.textContent = span.style.text;
-      box.title = "Click to edit this text in the inspector";
-      box.dataset.spanIndex = String(spanIndex);
+      if (style) {
+        box.style.fontSize = `${style.size * viewport.scale}px`;
+        // Invisible (style.css), but sized and weighted like the real text, so the
+        // box's own text matches what it covers (and tools can read its style).
+        box.style.fontFamily = approximateFontFamily(style.font);
+        box.style.fontWeight = approximateFontWeight(style.font);
+        box.style.fontStyle = approximateFontStyle(style.font);
+      }
+      box.textContent = unit.text;
+      box.title = `Click to edit this ${UNIT_NOUNS[unit.granularity]} in the inspector`;
+      box.dataset.unitIndex = String(unit.index);
+      box.dataset.spanIndex = String(unit.span_indices[0]);
       // Shift+click, or dragging one object of a multi-object selection, belongs to
       // the shared selection (arrange.ts); the click that follows is then ignored.
       let consumed = false;
       box.addEventListener("mousedown", (event) => {
-        consumed = !painterSource && Boolean(options.arrange?.pointerDown("text", spanIndex, event));
+        consumed = !painterSource && Boolean(options.arrange?.pointerDown("text", unit.index, event));
       });
-      box.addEventListener("click", () => {
+      box.addEventListener("click", (event) => {
         if (!consumed) {
-          onSpanClick(box, pageIndex, spanIndex, span);
-          options.arrange?.selectOnly("text", spanIndex);
+          const painting = painterSource !== null;
+          onUnitClick(position, event);
+          if (!painting) {
+            options.arrange?.selectOnly("text", unit.index);
+          }
         }
         consumed = false;
       });
@@ -508,32 +646,65 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       boxes.push(box);
     }
 
-    const keep =
-      previous &&
-      previous.pageIndex === pageIndex &&
-      spans[previous.spanIndex]?.style.text === previous.text &&
-      !reselect;
-    if (keep) {
-      select(boxes[previous.spanIndex], pageIndex, previous.spanIndex, spans[previous.spanIndex], true);
-    } else if (reselect && reselect.pageIndex === pageIndex) {
-      // The edited span usually keeps its index; if the redraw moved it, find it by text.
-      const found =
-        spans[reselect.spanIndex]?.style.text === reselect.text
-          ? reselect.spanIndex
-          : spans.findIndex((span) => span.style.text === reselect.text);
+    const near = (a: readonly number[], b: readonly number[]): boolean =>
+      Math.abs(a[0] - b[0]) <= RESELECT_ORIGIN_PT && Math.abs(a[1] - b[1]) <= RESELECT_ORIGIN_PT;
+    if (reselect && reselect.pageIndex === pageIndex && units[0]?.granularity === reselect.unit) {
+      // The edited unit: its new text at the same origin. A word edited into several
+      // words is now several units: the first of them, at the edit's origin. If the
+      // redraw moved the first glyph (a centered line, a leading space), the unit that
+      // overlaps where it was and starts nearest to its old origin.
+      const wanted = reselect.unit === "word" ? (reselect.text.trim().split(/\s+/)[0] ?? "") : reselect.text;
+      let found = units.findIndex((u) => u.text === wanted && near(u.origin, reselect.origin));
+      if (found < 0) {
+        let best = Infinity;
+        for (const [position, unit] of units.entries()) {
+          const distance = Math.hypot(unit.origin[0] - reselect.origin[0], unit.origin[1] - reselect.origin[1]);
+          if (overlapArea(unit.bbox, reselect.bbox) > 0 && distance < best) {
+            best = distance;
+            found = position;
+          }
+        }
+      }
       if (found >= 0) {
-        select(boxes[found], pageIndex, found, spans[found], false);
+        select(found, false);
         options.inspector.setStatus("Applied. Undo with Ctrl+Z.");
       } else {
         options.inspector.showEmpty();
       }
+      return;
+    }
+    const kept =
+      previous && previous.pageIndex === pageIndex && !reselect
+        ? units.findIndex((u) => u.granularity === previous.unit && u.index === previous.index && u.text === previous.text)
+        : -1;
+    if (kept >= 0) {
+      select(kept, true);
     } else {
       options.inspector.showEmpty();
     }
   }
 
+  function setMode(next: SelectMode): void {
+    mode = next;
+    clearSelection();
+    options.inspector.setPainterEnabled(next !== "word");
+    if (next === "word" && painterSource) {
+      disarmPainter();
+    }
+  }
+
+  function selectIndex(index: number): void {
+    const position = pageUnits.findIndex((u) => u.index === index);
+    if (position >= 0 && !committing) {
+      select(position, false);
+    }
+  }
+
   return {
     update,
+    setMode,
+    selectedIndex: () => selected?.index ?? null,
+    selectIndex,
     armPainter,
     cancelPainter: disarmPainter,
     addLink,

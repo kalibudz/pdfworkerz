@@ -13,11 +13,45 @@ images (EDT-08, `images.ts`), vector shapes (EDT-09, `shapes.ts`, sharing
 nothing in `server/` knows this directory exists.
 
 The edit layer stacks, bottom to top: shape boxes, image boxes, text
-(span) boxes, spelling marks, then handles and menus -- so text over an
+boxes (one per block, line or word -- see "Selection modes" below),
+spelling marks, then handles and menus -- so text over an
 image or shape is always clickable for editing. Every box is placed with
 `overlay.ts`'s `bboxToRect`, which converts MuPDF's y-down, crop-box-relative
 coordinates through pdf.js's viewport (see its comment for the bug this
 once had).
+
+## Selection modes: Block, Line, Word (EDT-16..18)
+
+The toolbar's **Block | Line | Word** control (keys `B`, `L`, `W`; a radio
+group, so the arrow keys move within it) decides what one click on text
+selects. The default is Line; the choice is kept in `localStorage` under
+`pdfworkerz.selectMode`. Changing mode clears the selection and redraws the
+page's text boxes.
+
+- The server groups the text: `viewer.ts` fetches
+  `GET .../pages/{p}/text_units?granularity=<mode>` on every render and hands
+  the units to `overlay.ts` and `arrange.ts`. Nothing in this directory
+  decides what a line or a word is. The spans are still fetched too, because
+  they carry the styles the inspector shows.
+- `overlay.ts` draws one box per unit. Every box keeps the class
+  `.pw-span-box` (the one selector for "a text hit target") plus
+  `pw-unit-block`, `pw-unit-line` or `pw-unit-word`, with `data-unit-index`
+  (the unit's index) and `data-span-index` (its first span).
+- The inspector (`showUnit`) shows which kind of unit is selected, its text,
+  and the first span's style. A style field that differs across the unit's
+  spans shows "(mixed)" and is only sent once the user changes it.
+- Apply (or Enter) sends one `edit_text_unit` Op with `expect_text` and only
+  the fields that changed. Afterwards the edited unit is found again by its
+  unit kind, its origin (within 0.5pt) and its new text; failing that, by
+  whichever unit overlaps its old box most.
+- Every mode can drag, nudge, align, copy, paste, duplicate and delete. Text
+  refs in `move_objects`, `duplicate_objects` and `delete_objects` carry
+  `unit` and `expect_text`. A block keeps its move and resize handles
+  (`move_text_block`); a line or word has a move handle only, which sends a
+  single-item `move_objects`.
+- The format painter copies one style run (a span), so it is off in Word
+  mode. In Line and Block modes it copies from the selected unit's first
+  span onto the run under the next click.
 
 ## Running it
 
@@ -50,27 +84,23 @@ executable path is resolved the way it is.
 
 ## UI-02's font approximation is deliberate, not exact
 
-The click-to-edit overlay (`src/overlay.ts`) styles each editable box with
-the span's *exact* size and color, but only an *approximated*
+The click-to-edit overlay (`src/overlay.ts`) gives each text box the
+first span's *exact* size, but only an *approximated*
 font-family/weight/style guessed from the font's name (serif/sans/mono,
 bold, italic). It does not load the document's actual embedded font as a
-web font in the browser -- SPEC.md's "drawn in the detected font" is an
-ideal this gets close to, not a claim that the glyphs on screen while
-editing are pixel-identical to the PDF's own typeface. The size, color,
-and (once committed) the actual drawn result all go through the same
-font-resolution pipeline the CLI and server already use (`engine.edit`),
-which *is* exact -- only the live, in-browser preview while typing is an
-approximation.
+web font in the browser. That no longer shows: a box is only a hit target,
+and its text is transparent (`style.css`), because the canvas underneath
+already shows the real glyphs. The committed result goes through the same
+font-resolution pipeline the CLI and server use (`engine.edit`), which
+*is* exact.
 
-`overlay.ts` also has a documented, confirmed-the-hard-way reentrancy
-fix worth reading before touching its cancel/commit logic: setting
-`contentEditable = false` on a focused element can itself fire a
-synchronous `blur`, which re-enters the cancel handler through
-`box.onblur` *before* the outer call has finished. `cancelEdit()` takes a
-local copy of the shared "currently editing" reference and clears the
-shared one immediately, before touching the box at all, specifically so
-that reentrant call becomes a harmless no-op instead of operating on a
-box the outer call has already moved past.
+Text is never edited on the page. Clicking a box selects it and puts the
+cursor in the inspector's **Edit text** textarea (`inspector.ts`); Enter or
+Apply commits, Esc or Revert restores the draft, and Esc in an unchanged
+textarea hands the keyboard back to the page. The boxes are not
+`contenteditable`, so there is no blur/cancel handling in `overlay.ts` to
+be careful with: clicking elsewhere keeps the draft, and choosing other
+text with an unapplied draft asks first.
 
 ## UI-04's history panel shows what was asked for, not how well it went
 
@@ -148,18 +178,18 @@ methods -- `triggerUndo`/`triggerRedo` -- that are exactly
 view). Every toolbar/history button also gained a `title` naming its
 shortcut, plus `aria-label` on the two symbol-only zoom buttons.
 
-Scoping this surfaced a real, pre-existing bug, not a new one: `isTypingTarget`
-(the guard that keeps these shortcuts from firing while someone is
-typing) checked only `INPUT`/`TEXTAREA` tag names, missing that UI-02's
-click-to-edit boxes (`overlay.ts`) are `contenteditable` `<div>`s. That
-gap meant pressing ArrowLeft/ArrowRight to move the caret while actively
-editing a span's text *also* navigated pages, and silently broke caret
-movement entirely via the handler's own `preventDefault()`. Adding more
-global shortcuts next to the existing arrow keys would only have made
-this worse, so it had to be fixed first: `isTypingTarget` now also checks
-`target.isContentEditable`, true for a contenteditable element and any of
-its descendants (unlike a tag-name check). A regression test locks this
-in.
+`isTypingTarget` is the guard that keeps these shortcuts from firing while
+someone is typing. Text is typed in the inspector's textarea, which its
+`INPUT`/`TEXTAREA` tag check covers. It also checks
+`target.isContentEditable`: the text boxes used to be `contenteditable`
+`<div>`s, and without that check the arrow keys turned pages while moving
+the caret. No box is contenteditable today; the check stays for any
+editable element added later, and a regression test locks the behaviour in.
+
+The single-letter shortcuts are `C` (compare) and `B` / `L` / `W`
+(selection mode, EDT-16). They only fire with no modifier held and outside
+a typing target, so typing those letters in the inspector or the command
+bar is unaffected.
 
 ## UI-09's theme toggle, and a fixed-position layout bug it exposed
 

@@ -74,6 +74,7 @@ from engine.ops.objects import PageBlocksOp
 from engine.ops.shapes import PageShapesOp
 from engine.ops.spellcheck import SpellCheckOp
 from engine.ops.text import PreviewTextOp, _font_index
+from engine.ops.units import PageTextUnitsOp
 from engine.preview import preview_ops, preview_steps
 from engine.recipes import RecipeError, as_single_op, dump_recipe, load_recipe
 
@@ -287,6 +288,16 @@ def page_shapes(document_id: str, page_index: int, journal: JournalDep) -> Any:
 def page_blocks(page_index: int, journal: JournalDep) -> Any:
     """EDT-13: the page's text blocks, as span indices plus the box around them."""
     return _jsonable(_read(PageBlocksOp(page_index=page_index), journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/text_units")
+def page_text_units(
+    page_index: int, journal: JournalDep, granularity: Literal["block", "line", "word"] = "line"
+) -> Any:
+    """EDT-16: the page's blocks, lines or words (SPEC.md 8.2 item 6's TextUnit[]),
+    what one click selects in Block / Line / Word mode. Read-only (PageTextUnitsOp),
+    applied directly like page_blocks; an unknown granularity is FastAPI's 422."""
+    return _jsonable(_read(PageTextUnitsOp(page_index=page_index, granularity=granularity), journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/spelling")

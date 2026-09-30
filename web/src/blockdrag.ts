@@ -1,10 +1,10 @@
 /**
- * EDT-05: drag handles for moving and resizing the text block around the
- * span being edited. Pure pointer mechanics in the edit layer's own pixel
- * space: the caller (overlay.ts) converts the result to page coordinates
- * and sends the Op. The handles are siblings of the span box, never
- * children -- the box is contenteditable, and anything inside it would
- * become part of the text being edited.
+ * EDT-05: drag handles for moving and resizing the selected text: a block
+ * (move and resize), or a line or word (move only, EDT-18). Pure pointer
+ * mechanics in the edit layer's own pixel space: the caller (overlay.ts)
+ * converts the result to page coordinates and sends the Op. The handles are
+ * siblings of the text's box, never children, so the box's own text (what
+ * tests and tools read) stays exactly the unit's text.
  */
 
 import type { DragSnapper } from "./arrange";
@@ -15,7 +15,11 @@ export interface BlockHandleCallbacks {
   /** The move handle was dragged by (`dx`, `dy`) layer pixels. */
   onMove(dx: number, dy: number): void;
   /** The resize handle was dragged: the box's new right edge, in layer pixels. */
-  onResize(rightEdge: number): void;
+  onResize?(rightEdge: number): void;
+  /** False: no resize handle (lines and words only move). Defaults to true. */
+  resizable?: boolean;
+  /** What is being moved, for the handles' labels ("paragraph", "line", "word"). */
+  noun?: string;
 }
 
 /** Below this many pixels a press is a click, not a drag, and does nothing. */
@@ -37,12 +41,14 @@ export function attachBlockHandles(layer: HTMLElement, box: HTMLElement, callbac
   const width = parseFloat(box.style.width);
   const height = parseFloat(box.style.height);
 
-  const move = makeHandle("pw-move-handle", "Drag to move this paragraph");
+  const noun = callbacks.noun ?? "paragraph";
+  const resizable = callbacks.resizable ?? true;
+  const move = makeHandle("pw-move-handle", `Drag to move this ${noun}`);
   move.style.left = `${left - 16}px`;
   move.style.top = `${top}px`;
   move.style.height = `${height}px`;
 
-  const resize = makeHandle("pw-resize-handle", "Drag to change this paragraph's width");
+  const resize = makeHandle("pw-resize-handle", `Drag to change this ${noun}'s width`);
   resize.style.left = `${left + width}px`;
   resize.style.top = `${top}px`;
   resize.style.height = `${height}px`;
@@ -90,16 +96,19 @@ export function attachBlockHandles(layer: HTMLElement, box: HTMLElement, callbac
     (dx, dy) => callbacks.onMove(dx, dy),
     callbacks.snapper,
   );
-  track(
-    resize,
-    (dx) => {
-      box.style.width = `${Math.max(width + dx, 8)}px`;
-      resize.style.transform = dx ? `translateX(${dx}px)` : "";
-    },
-    (dx) => callbacks.onResize(left + Math.max(width + dx, 8)),
-  );
-
-  layer.append(move, resize);
+  if (resizable) {
+    track(
+      resize,
+      (dx) => {
+        box.style.width = `${Math.max(width + dx, 8)}px`;
+        resize.style.transform = dx ? `translateX(${dx}px)` : "";
+      },
+      (dx) => callbacks.onResize?.(left + Math.max(width + dx, 8)),
+    );
+    layer.append(move, resize);
+  } else {
+    layer.append(move);
+  }
   return () => {
     move.remove();
     resize.remove();

@@ -2991,6 +2991,173 @@
       "type": "object"
     },
     {
+      "additionalProperties": false,
+      "description": "EDT-17: new wording and/or a new style for one text unit -- the block, line or word\nthe user selected (SPEC.md 8.2 item 6) -- as one Op, so one history entry and one undo.\n\n`index` is a span index for a block and the unit's index among the page's lines or\nwords otherwise (GET .../text_units). `expect_text` is the unit's text as the UI last\nsaw it: if the unit at `index` no longer has that text, the Op is refused rather than\nediting whatever is there now. Any field left unset keeps the unit's current value.\n\nA **word** or **line** is edited in place: each separate change is redrawn in the\nstyle of its own run (an insertion in the style of the character it follows), and\neverything else keeps its glyphs and styles (_unit_hunks). The rest of that line shifts\nonly when a width changed, following the line's alignment; no other line is touched. A\ncolor-only restyle redraws each glyph where it is. A font, weight, slant or size change\nrestyles every run from its own style: `size` is the size the unit's largest run takes,\nand every other run (a superscript, say) scales in proportion; a weight or slant change\nis made within each run's own family. `expect_text` is required for a word or line.\nEmptying a word or line is refused: delete it (delete_objects).\n\nA **block** is re-wrapped across its own lines (reflow_block), with `align`, `grow` and\n`allow_overflow` as in reflow_text; these three are for blocks only.",
+      "properties": {
+        "size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "font": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font"
+        },
+        "bold": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bold"
+        },
+        "italic": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Italic"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        },
+        "op": {
+          "const": "edit_text_unit",
+          "default": "edit_text_unit",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "unit": {
+          "enum": [
+            "block",
+            "line",
+            "word"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "expect_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expect Text"
+        },
+        "new_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "New Text"
+        },
+        "align": {
+          "default": "left",
+          "enum": [
+            "left",
+            "justify"
+          ],
+          "title": "Align",
+          "type": "string"
+        },
+        "grow": {
+          "default": false,
+          "title": "Grow",
+          "type": "boolean"
+        },
+        "allow_overflow": {
+          "default": false,
+          "title": "Allow Overflow",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_index",
+        "unit",
+        "index"
+      ],
+      "title": "EditTextUnitOp",
+      "type": "object"
+    },
+    {
       "$defs": {
         "ObjectRef": {
           "additionalProperties": false,
@@ -3022,6 +3189,28 @@
               "default": 0.0,
               "title": "Dy",
               "type": "number"
+            },
+            "unit": {
+              "default": "block",
+              "enum": [
+                "block",
+                "line",
+                "word"
+              ],
+              "title": "Unit",
+              "type": "string"
+            },
+            "expect_text": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Expect Text"
             }
           },
           "required": [
@@ -3034,7 +3223,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "EDT-13/EDT-14: move every item by the shared (`dx`, `dy`) plus its own offset --\nwhat align, distribute, nudging and dragging several objects all send.",
+      "description": "EDT-13/EDT-14/EDT-18: move every item by the shared (`dx`, `dy`) plus its own offset --\nwhat align, distribute, nudging and dragging several objects all send.",
       "properties": {
         "items": {
           "items": {
@@ -3113,6 +3302,28 @@
               "default": 0.0,
               "title": "Dy",
               "type": "number"
+            },
+            "unit": {
+              "default": "block",
+              "enum": [
+                "block",
+                "line",
+                "word"
+              ],
+              "title": "Unit",
+              "type": "string"
+            },
+            "expect_text": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Expect Text"
             }
           },
           "required": [
@@ -3125,7 +3336,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "EDT-15: copy every item, offset by (`dx`, `dy`), onto `target_page_index` (default:\neach item's own page) -- paste and duplicate. The originals are untouched.",
+      "description": "EDT-15/EDT-18: copy every item, offset by (`dx`, `dy`), onto `target_page_index`\n(default: each item's own page) -- paste and duplicate. The originals are untouched.",
       "properties": {
         "items": {
           "items": {
@@ -3216,6 +3427,28 @@
               "default": 0.0,
               "title": "Dy",
               "type": "number"
+            },
+            "unit": {
+              "default": "block",
+              "enum": [
+                "block",
+                "line",
+                "word"
+              ],
+              "title": "Unit",
+              "type": "string"
+            },
+            "expect_text": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Expect Text"
             }
           },
           "required": [
@@ -3228,7 +3461,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "EDT-15: remove every item -- the Delete key on a selection.",
+      "description": "EDT-15/EDT-18: remove every item -- the Delete key on a selection.",
       "properties": {
         "items": {
           "items": {
@@ -3257,6 +3490,11 @@
           "default": "delete_objects",
           "title": "Op",
           "type": "string"
+        },
+        "close_gap": {
+          "default": true,
+          "title": "Close Gap",
+          "type": "boolean"
         }
       },
       "required": [
@@ -4557,6 +4795,35 @@
         "visibility"
       ],
       "title": "SetLayerVisibilityOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Every block, line or word on one page (engine.fonts.units), in that\ngranularity's order -- what one click selects in the matching selection mode.",
+      "properties": {
+        "op": {
+          "const": "page_text_units",
+          "default": "page_text_units",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "granularity": {
+          "default": "line",
+          "enum": [
+            "block",
+            "line",
+            "word"
+          ],
+          "title": "Granularity",
+          "type": "string"
+        }
+      },
+      "title": "PageTextUnitsOp",
       "type": "object"
     }
   ]
