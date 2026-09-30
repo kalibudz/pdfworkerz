@@ -10,6 +10,7 @@
 import type * as pdfjsLib from "pdfjs-dist";
 
 import type { Api, HistoryOp, ShapeInfo } from "./api";
+import type { ArrangeHandle } from "./arrange";
 import { cornerHandle, drag, layerToPageRect } from "./drag";
 import type { InspectorHandle, ShapeStyle } from "./inspector";
 import { bboxToRect, viewportToMupdfPoint } from "./overlay";
@@ -17,6 +18,8 @@ import { bboxToRect, viewportToMupdfPoint } from "./overlay";
 export type DrawKind = "line" | "rect" | "ellipse";
 
 export interface ShapeToolOptions {
+  /** EDT-13..15: the shared selection (Shift+click, group drag, snapping, Delete). */
+  arrange?: ArrangeHandle;
   api: Api;
   documentId: string;
   inspector: InspectorHandle;
@@ -146,8 +149,12 @@ export function createShapeTool(layer: HTMLElement, options: ShapeToolOptions): 
       box.style.width = `${width}px`;
       box.style.height = `${height}px`;
       box.addEventListener("mousedown", (event) => {
+        if (options.arrange?.pointerDown("shape", shape.index, event)) {
+          return;
+        }
         if (selected?.box !== box) {
           select(shape, box);
+          options.arrange?.selectOnly("shape", shape.index);
         }
         drag(
           event,
@@ -164,6 +171,7 @@ export function createShapeTool(layer: HTMLElement, options: ShapeToolOptions): 
             );
             void send({ op: "edit_shape", page_index: pageIndex, index: shape.index, rect: moved });
           },
+          options.arrange?.snapper("shape", shape.index),
         );
       });
       layer.appendChild(box);
@@ -195,14 +203,5 @@ export function createShapeTool(layer: HTMLElement, options: ShapeToolOptions): 
       deselect();
     }
   });
-  window.addEventListener("keydown", (event) => {
-    const target = event.target as HTMLElement | null;
-    const typing = target && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA");
-    if (selected && !typing && (event.key === "Delete" || event.key === "Backspace")) {
-      event.preventDefault();
-      deleteSelected();
-    }
-  });
-
   return { update, setDrawMode, restyle, deleteSelected };
 }

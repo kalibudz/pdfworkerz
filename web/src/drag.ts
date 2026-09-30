@@ -7,6 +7,7 @@
 
 import type * as pdfjsLib from "pdfjs-dist";
 
+import type { DragSnapper } from "./arrange";
 import { viewportToMupdfPoint } from "./overlay";
 
 const DRAG_THRESHOLD_PX = 3;
@@ -15,17 +16,25 @@ export function drag(
   start: MouseEvent,
   preview: (dx: number, dy: number) => void,
   done: (dx: number, dy: number) => void,
+  snapper?: DragSnapper,
 ): void {
   start.preventDefault();
   start.stopPropagation();
-  const onMove = (event: MouseEvent): void => preview(event.clientX - start.clientX, event.clientY - start.clientY);
+  // EDT-14: with a snapper, the delta snaps to other objects and the page (smart guides).
+  const delta = (event: MouseEvent): [number, number] => {
+    const dx = event.clientX - start.clientX;
+    const dy = event.clientY - start.clientY;
+    return snapper ? snapper.adjust(dx, dy, event) : [dx, dy];
+  };
+  const onMove = (event: MouseEvent): void => preview(...delta(event));
   const onUp = (event: MouseEvent): void => {
     window.removeEventListener("mousemove", onMove);
     window.removeEventListener("mouseup", onUp);
-    const dx = event.clientX - start.clientX;
-    const dy = event.clientY - start.clientY;
+    const raw = Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY);
+    const [dx, dy] = delta(event);
+    snapper?.end();
     preview(0, 0);
-    if (Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX) {
+    if (raw >= DRAG_THRESHOLD_PX) {
       done(dx, dy);
     }
   };

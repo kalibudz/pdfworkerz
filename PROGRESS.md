@@ -26,6 +26,42 @@ A phase is complete when all of its features are **done** through the evidence g
 
 ## Session log
 
+### 2026-09-30 (later) — Edit-then-move fonts; Nitro-style arranging (EDT-13..15)
+
+- **Edited text lost its font identity (owner's report: a move after an edit asked to
+  accept a look-alike).** Reproduced on synthetic PDFs, in three forms:
+  - An edit registered its font under PyMuPDF's full name ("Arial Regular") while
+    texttrace reported the PostScript name ("ArialMT"). The next move could not find it.
+  - A nameless embedded program came back as "(null)".
+  - With several "(null)" subsets on a page, the lookup took the first one.
+
+  Fixes:
+  - Registered fonts carry one PostScript name everywhere: in /BaseFont, and in the
+    program's name table when it had none.
+  - The lookup also compares loosely (Regular/Book and MT/PSMT ignored) and prefers the
+    same-named font whose glyphs cover the text.
+  - Same-named fonts no longer pool their characters.
+- **Subsets with no cmap (FNT-06):** the ToUnicode map, read backwards, rebuilds a cmap
+  for Identity-encoded Type0 subsets. Characters the document already shows in them are
+  now drawn exactly from its own glyphs. Characters it never held are still refused
+  rather than faked.
+- **Arranging, as in Nitro (owner's request).**
+  - *Selection:* text blocks, images and shapes share one selection (Shift+click, or a
+    marquee on empty page).
+  - *Tools:* smart guides snap to objects and the page (Alt turns this off); an Align
+    menu (six alignments, two distributions, a single object aligns to the page);
+    arrow-key nudging, with quick presses sent as one move; Ctrl+C/V/D and Delete.
+  - *Engine:* the new Ops `move_objects`, `duplicate_objects` and `delete_objects`
+    resolve every target to an identity that survives renumbering, so each action is
+    one undo. Copies can go to another page.
+  - *Server:* a new `/pages/{n}/blocks` route.
+- **Live review:** `tools/make_samples.py` writes invented documents to
+  `C:\pdfworkerz-docs\samples`, and the README has a "How to report a bug" section
+  (Export recipe, then `pdfworkerz run`).
+- **Also:**
+  - pdf.js is split into its own chunk; the app's own code is 78 kB.
+  - EDT-12 was already taken by OCR editing, so the new features are EDT-13..15.
+
 ### 2026-09-30 — Live use on a real bank statement: editing and font fixes
 
 Found by the owner editing a real statement in the web UI, and fixed:

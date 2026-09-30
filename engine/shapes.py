@@ -276,6 +276,25 @@ def draw_shape(
     return list_shapes(document, page_index)[-1]
 
 
+def duplicate_shape(
+    document: Document, page_index: int, index: int, dx: float, dy: float, *, target_page_index: int | None = None
+) -> ShapeInfo:
+    """EDT-15: draw the same path again, offset by (`dx`, `dy`), on `target_page_index`
+    if given, with its colors, width and dashes."""
+    source_page, drawings = _drawing_at(document, page_index, index)
+    del source_page  # a second live reference to the page would make _reload fail when copying onto it
+    path = drawings[index]
+    target_index = page_index if target_page_index is None else target_page_index
+    target = _page(document, target_index)
+    old = pymupdf.Rect(path["rect"])
+    moved = pymupdf.Rect(old.x0 + dx, old.y0 + dy, old.x1 + dx, old.y1 + dy)
+    if not moved.intersects(page_bounds(target)):
+        raise OpValidationError("the copy would lie entirely outside the page")
+    _draw_path(target, path, transform=lambda p: pymupdf.Point(p.x + dx, p.y + dy))
+    _reload(document, target)
+    return list_shapes(document, target_index)[-1]
+
+
 def delete_shape(document: Document, page_index: int, index: int) -> ShapeInfo:
     page, drawings = _drawing_at(document, page_index, index)
     removed = _info(index, drawings[index])

@@ -18,7 +18,9 @@ import { createCommandBar } from "./commandbar";
 import { createComparePanel } from "./compare";
 import { createHistoryPanel } from "./history";
 import { createImageTool } from "./images";
+import { createArrange } from "./arrange";
 import { createInspector } from "./inspector";
+import type { AlignAction } from "./snap";
 import { createOverlay, viewportToMupdfPoint } from "./overlay";
 import { applyWithApproval, confirmVerified } from "./approval";
 import { openStyleDialog } from "./styledialog";
@@ -136,6 +138,27 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
   shortcutsButton.title = "Keyboard shortcuts (?)";
   shortcutsButton.setAttribute("aria-label", "Keyboard shortcuts");
   const shortcutsDialog = createShortcutsDialog();
+  const alignSelect = document.createElement("select");
+  alignSelect.className = "pw-align-select";
+  alignSelect.title = "Align or distribute the selected objects (Shift+click or drag a box to select several)";
+  alignSelect.setAttribute("aria-label", "Align objects");
+  for (const [value, label] of [
+    ["", "Align…"],
+    ["left", "Align left"],
+    ["center", "Align center"],
+    ["right", "Align right"],
+    ["top", "Align top"],
+    ["middle", "Align middle"],
+    ["bottom", "Align bottom"],
+    ["distribute-h", "Distribute horizontally"],
+    ["distribute-v", "Distribute vertically"],
+  ]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    alignSelect.appendChild(option);
+  }
+  alignSelect.disabled = true;
   drawSelect.className = "pw-draw-select";
   drawSelect.title = "Draw a shape: pick one, then drag on the page";
   drawSelect.setAttribute("aria-label", "Draw a shape");
@@ -161,6 +184,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     addTextButton,
     insertImageButton,
     drawSelect,
+    alignSelect,
     spellButton,
     fontsButton,
     compareButton,
@@ -236,7 +260,27 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     onShapeStyle: (style) => shapeTool.restyle(style),
     onShapeDelete: () => shapeTool.deleteSelected(),
   });
+  const arrange = createArrange({
+    api: options.api,
+    documentId: options.documentId,
+    layer: editLayer,
+    currentPage: () => currentPage - 1,
+    onCommitted: () => void reloadDocument(),
+    onSelectionChange: (count) => {
+      alignSelect.disabled = count === 0;
+      alignSelect.title =
+        count === 0
+          ? "Align or distribute the selected objects (Shift+click or drag a box to select several)"
+          : count === 1
+            ? "Align the selected object to the page"
+            : `Align or distribute the ${count} selected objects`;
+      for (const option of alignSelect.options) {
+        option.disabled = option.value.startsWith("distribute") && count < 3;
+      }
+    },
+  });
   const overlay = createOverlay(editLayer, {
+    arrange,
     api: options.api,
     documentId: options.documentId,
     inspector,
@@ -251,12 +295,14 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     },
   });
   const shapeTool = createShapeTool(editLayer, {
+    arrange,
     api: options.api,
     documentId: options.documentId,
     inspector,
     onCommitted: () => void reloadDocument(),
   });
   const imageTool = createImageTool(editLayer, {
+    arrange,
     api: options.api,
     documentId: options.documentId,
     inspector,
@@ -306,11 +352,12 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     updateActiveThumbnail();
     if (viewport) {
       const pageIndex = currentPage - 1; // pdf.js pages are 1-based; the API's page_index is 0-based
-      const [spans, links, images, shapes] = await Promise.all([
+      const [spans, links, images, shapes, blocks] = await Promise.all([
         options.api.pageSpans(options.documentId, pageIndex),
         options.api.pageLinks(options.documentId, pageIndex),
         options.api.pageImages(options.documentId, pageIndex),
         options.api.pageShapes(options.documentId, pageIndex),
+        options.api.pageBlocks(options.documentId, pageIndex),
       ]);
       editLayer.style.width = `${mainCanvas.width}px`;
       editLayer.style.height = `${mainCanvas.height}px`;
@@ -319,6 +366,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
       // images stack above shapes, and both stay under the text (style.css).
       shapeTool.update(pageIndex, shapes, viewport);
       imageTool.update(pageIndex, images, viewport);
+      arrange.update(pageIndex, viewport, blocks, images, shapes);
       await spellTool.update(pageIndex, viewport);
     }
   }
@@ -418,6 +466,12 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     void spellTool.setEnabled(next);
   });
   drawSelect.addEventListener("change", () => shapeTool.setDrawMode((drawSelect.value || null) as DrawKind | null));
+  alignSelect.addEventListener("change", () => {
+    if (alignSelect.value) {
+      arrange.align(alignSelect.value as AlignAction);
+    }
+    alignSelect.value = "";
+  });
   shortcutsButton.addEventListener("click", () => shortcutsDialog.showModal());
   // Loaded on first use: it's rarely opened, and keeps the main bundle small.
   fontsButton.addEventListener("click", () => {
@@ -560,6 +614,10 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
       shapeTool.setDrawMode(null);
       return;
     }
+    if (arrange.handleKey(event)) {
+      event.preventDefault();
+      return;
+    }
     const modifier = event.ctrlKey || event.metaKey;
     if (modifier && event.key.toLowerCase() === "s") {
       event.preventDefault(); // not the browser's "save page as"
@@ -627,7 +685,12 @@ const SHORTCUTS: readonly [string, string][] = [
   ["Ctrl+Shift+Z / Ctrl+Y", "Redo"],
   ["C", "Before/after compare view"],
   ["Enter", "Commit the text being edited"],
-  ["Esc", "Discard an edit, cancel a tool, close a menu"],
+  ["Esc", "Discard an edit, cancel a tool, close a menu; in an unchanged text box, return the keyboard to the page"],
+  ["Shift+click / drag on empty page", "Select several objects"],
+  ["Arrows / Shift+Arrows", "Nudge the selection 1pt / 10pt (page navigation when nothing is selected)"],
+  ["Ctrl+C / Ctrl+V / Ctrl+D", "Copy / paste onto this page / duplicate the selection"],
+  ["Delete", "Delete the selection"],
+  ["Alt while dragging", "Move without snapping to guides"],
   ["/", "Type a command (Enter previews, Enter again applies)"],
   ["?", "Show this list"],
 ];

@@ -123,6 +123,10 @@ class FontResolution:
     font_bytes: bytes | None
     requires_approval: bool
     note: str
+    postscript_name: str | None = None
+    """The name to register `font_bytes` under on the page (its /BaseFont), so text drawn
+    with it can be found by that name later -- by a move, restyle or format paint. None
+    for a built-in standard font (`fontname`)."""
 
 
 FSTYPE_RESTRICTED = 0x0002
@@ -163,6 +167,14 @@ def embedded_program_covers(font_bytes: bytes, characters: str) -> bool:
     return True
 
 
+def usable_font_name(name: str | None) -> str | None:
+    """`name` if it can identify a font, else None. PyMuPDF writes the literal "(null)"
+    as the BaseFont of a font program that has no name table."""
+    if not name or name.strip() in ("(null)", "null"):
+        return None
+    return name
+
+
 def _standard_fallback_name(bold: bool, italic: bool, family_class: str) -> str:
     table = {"serif": _SERIF_FALLBACK, "monospace": _MONO_FALLBACK}.get(family_class, _SANS_FALLBACK)
     return table[(bold, italic)]
@@ -201,6 +213,7 @@ def _resolve_non_embedded(
             font_bytes=build_merged_subset(installed.path, characters),
             requires_approval=False,
             note=f"font not embedded in the PDF; the same font was found at {installed.path} and embedded",
+            postscript_name=installed.postscript_name or base,
         )
 
     if key in _METRIC_COMPATIBLE:
@@ -270,6 +283,8 @@ def resolve_font(
             font_bytes=build_merged_subset(original_font_bytes, characters),
             requires_approval=False,
             note="the document's own embedded font, re-subset to cover the edit",
+            # The PDF's own name for it: the program itself may carry no name at all.
+            postscript_name=usable_font_name(split_subset_tag(classification.base_font)[1]),
         )
 
     exact_match = find_by_name(font_index, classification.base_font)
@@ -283,6 +298,7 @@ def resolve_font(
             font_bytes=merged,
             requires_approval=False,
             note=f"same font found at {exact_match.path} and re-subset to cover the edit",
+            postscript_name=exact_match.postscript_name or None,
         )
 
     fingerprint = fingerprint_style(classification)
@@ -313,6 +329,9 @@ def resolve_font(
             requires_approval=True,
             note=f"closest metric match: {best.candidate.path.name}"
             + ("" if same_family(classification.base_font, best.candidate) else " (a different font family)"),
+            # Its own name, never the original's: a look-alike must not be found later
+            # as if it were the original font.
+            postscript_name=best.candidate.postscript_name or None,
         )
 
     name = _standard_fallback_name(fingerprint.bold, fingerprint.italic, fingerprint.family_class)

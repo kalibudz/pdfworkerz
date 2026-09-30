@@ -25,11 +25,14 @@ import type * as pdfjsLib from "pdfjs-dist";
 import type { Api, HistoryOp, LinkInfo, SpanTrace } from "./api";
 import { applyWithApproval, confirmVerified } from "./approval";
 import { attachBlockHandles } from "./blockdrag";
+import type { ArrangeHandle } from "./arrange";
 import type { InspectorHandle, TextDraft } from "./inspector";
 import { toHexColor } from "./inspector";
 import { styleFromFontName } from "./styledialog";
 
 export interface OverlayOptions {
+  /** EDT-13..15: the shared selection (Shift+click, group drag, snapping). */
+  arrange?: ArrangeHandle;
   api: Api;
   documentId: string;
   inspector: InspectorHandle;
@@ -194,6 +197,7 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
   function attachHandlesFor(box: HTMLElement, span: SpanRef): void {
     removeHandles();
     detachHandles = attachBlockHandles(layer, box, {
+      snapper: options.arrange?.snapper("text", span.spanIndex),
       onMove: (dxPx, dyPx) => {
         const viewport = currentViewport;
         if (!viewport) {
@@ -486,7 +490,20 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       box.style.fontStyle = approximateFontStyle(span.style.font);
       box.textContent = span.style.text;
       box.title = "Click to edit this text in the inspector";
-      box.addEventListener("click", () => onSpanClick(box, pageIndex, spanIndex, span));
+      box.dataset.spanIndex = String(spanIndex);
+      // Shift+click, or dragging one object of a multi-object selection, belongs to
+      // the shared selection (arrange.ts); the click that follows is then ignored.
+      let consumed = false;
+      box.addEventListener("mousedown", (event) => {
+        consumed = !painterSource && Boolean(options.arrange?.pointerDown("text", spanIndex, event));
+      });
+      box.addEventListener("click", () => {
+        if (!consumed) {
+          onSpanClick(box, pageIndex, spanIndex, span);
+          options.arrange?.selectOnly("text", spanIndex);
+        }
+        consumed = false;
+      });
       layer.appendChild(box);
       boxes.push(box);
     }

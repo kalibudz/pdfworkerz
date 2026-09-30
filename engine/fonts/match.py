@@ -166,6 +166,18 @@ def _without_vendor_suffix(key: str) -> str:
     return key
 
 
+_STYLE_WORD = re.compile(r"(regular|normal|book|roman|plain)$")
+
+
+def loose_font_key(name: str) -> str:
+    """A font name with case, punctuation, a trailing regular-like style word and
+    Monotype's MT/PSMT suffix removed: "ArialMT", "Arial Regular" and "Arial" all give
+    "arial". Used to connect the two names one font goes by inside a PDF."""
+    key = _without_vendor_suffix(normalize_font_name(name))
+    stripped = _STYLE_WORD.sub("", key)
+    return stripped if len(stripped) >= 3 else key
+
+
 def _name_keys(candidate: FontCandidate) -> list[str]:
     """Every normalized name `candidate` answers to, most specific first."""
     keys = [normalize_font_name(candidate.postscript_name)]

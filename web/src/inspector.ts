@@ -222,7 +222,8 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   editStatus.hidden = true;
   const editHint = document.createElement("p");
   editHint.className = "pw-hint";
-  editHint.textContent = "Enter applies, Esc reverts. Each piece of text is one line.";
+  editHint.textContent =
+    "Enter applies, Esc reverts. Each piece of text is one line. Esc again returns the keyboard to the page: arrows nudge, Delete removes.";
   editor.append(
     editHeading,
     editField("Text", editText, "pw-edit-field pw-edit-text-field"),
@@ -309,7 +310,13 @@ export function createInspector(container: HTMLElement, options: InspectorOption
       apply();
     } else if (event.key === "Escape") {
       event.preventDefault();
-      revert();
+      if (isDirty()) {
+        revert();
+      } else {
+        // Nothing to revert: hand the keyboard back to the page, where the arrow keys
+        // nudge the selected text and Delete removes it (arrange.ts).
+        (event.target as HTMLElement).blur();
+      }
     }
   });
 

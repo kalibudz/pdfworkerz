@@ -1088,3 +1088,36 @@ button {
   text-align: right;
   margin-top: 12px;
 }
+
+/* EDT-12..14: the shared selection, smart guides and the selection rectangle. */
+.pw-arrange-outline {
+  position: absolute;
+  pointer-events: none;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+  z-index: 4;
+}
+.pw-guide {
+  position: absolute;
+  pointer-events: none;
+  background: #e0359a;
+  z-index: 5;
+}
+.pw-guide-v {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.pw-guide-h {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.pw-marquee {
+  position: absolute;
+  pointer-events: none;
+  border: 1px dashed var(--accent);
+  background: rgba(47, 111, 235, 0.08);
+  z-index: 5;
+}

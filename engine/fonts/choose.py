@@ -86,4 +86,5 @@ def resolve_chosen_font(
         font_bytes=build_merged_subset(chosen.path, text),
         requires_approval=False,
         note=f"{chosen.family_name} {chosen.subfamily_name} chosen by the user ({chosen.path.name})",
+        postscript_name=chosen.postscript_name or None,
     )

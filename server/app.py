@@ -70,6 +70,7 @@ from engine.ops.base import MAX_RENDER_DPI, MIN_RENDER_DPI, Op, PageSpansOp, Ren
 from engine.ops.images import PageImagesOp
 from engine.ops.journal import UndoRedoJournal
 from engine.ops.links import PageLinksOp
+from engine.ops.objects import PageBlocksOp
 from engine.ops.shapes import PageShapesOp
 from engine.ops.spellcheck import SpellCheckOp
 from engine.ops.text import PreviewTextOp, _font_index
@@ -280,6 +281,12 @@ def page_shapes(document_id: str, page_index: int, journal: JournalDep) -> Any:
     """EDT-09: every vector path on one page. Read-only (PageShapesOp), applied
     directly like page_images; drawing and editing go through the ops endpoint."""
     return _jsonable(_read(PageShapesOp(page_index=page_index), journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/blocks")
+def page_blocks(page_index: int, journal: JournalDep) -> Any:
+    """EDT-13: the page's text blocks, as span indices plus the box around them."""
+    return _jsonable(_read(PageBlocksOp(page_index=page_index), journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/spelling")

@@ -1,9 +1,9 @@
 {
   "phase": "P5",
   "taskId": "P5 in progress: slice 1 (page organization, ORG-01..08, ORG-13) done. 74/163 features done",
-  "step": "Live use of the web UI on a real bank statement: inspector text editor (edit_span), document's own complete font reused (Tier 0), Arial/MT name matching, one span per line, accurate fonts-to-research list, user font library (Delta-Book harvested into the owner's library, not the repo).",
+  "step": "Owner-driven live-use fixes: edited text keeps its font identity (edit then move/restyle stays exact), cmap rebuilt from ToUnicode for cmap-less Type0 subsets, and Nitro-style arranging (EDT-13 select/align/distribute, EDT-14 guides/nudge, EDT-15 copy/paste/duplicate/delete).",
   "branch": "main",
-  "lastGreenCommit": "(this commit) local gate, Windows 11, Python 3.14.3, 14/14 steps, 864 tests",
+  "lastGreenCommit": "(this commit) local gate, Windows 11, Python 3.14.3, 14/14 steps",
   "nextAction": "P5 signed off 2026-09-29. Next: P6 (forms, signatures, security, redaction). Gate before every commit; push only with approval.",
   "openQuestions": [
     {

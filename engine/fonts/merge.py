@@ -44,6 +44,34 @@ def build_merged_subset(full_font: Path | bytes, characters: str) -> bytes:
     return buffer.getvalue()
 
 
+def program_postscript_name(program: bytes) -> str | None:
+    """The PostScript name (name ID 6) a font program carries, if any."""
+    try:
+        tt = TTFont(io.BytesIO(program), lazy=True, fontNumber=0)
+        return (tt["name"].getDebugName(6) or None) if "name" in tt else None
+    except Exception:
+        return None
+
+
+def with_postscript_name(program: bytes, postscript_name: str) -> bytes:
+    """`program` with a name table naming it `postscript_name` (IDs 1, 2, 4, 6), for a
+    program that has none -- as some PDF generators embed them. Text drawn with a
+    nameless program is reported as "(null)", which nothing can look up afterwards."""
+    tt = TTFont(io.BytesIO(program))
+    if "name" not in tt:
+        from fontTools.ttLib import newTable
+
+        tt["name"] = newTable("name")
+        tt["name"].names = []
+    family = postscript_name.split("-")[0]
+    for name_id, value in ((1, family), (2, "Regular"), (4, postscript_name), (6, postscript_name)):
+        tt["name"].setName(value, name_id, 3, 1, 0x409)
+        tt["name"].setName(value, name_id, 1, 0, 0)
+    buffer = io.BytesIO()
+    tt.save(buffer)
+    return buffer.getvalue()
+
+
 def borrow_glyphs_for(
     base_font: str, already_rendered_text: str, needed_text: str, index: list[FontCandidate]
 ) -> bytes | None:

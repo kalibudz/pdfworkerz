@@ -694,6 +694,24 @@ def test_edit_span_over_the_api_is_one_history_entry(client: TestClient, simple_
     assert [op["op"] for op in history["ops"]] == ["edit_span"]
 
 
+@pytest.mark.feature("EDT-13")
+def test_page_blocks_route_and_object_ops(client: TestClient, simple_path: Path) -> None:
+    document_id = _open(client, simple_path)
+    blocks = client.get(f"/documents/{document_id}/pages/0/blocks", headers=AUTH).json()
+    assert blocks and blocks[0]["span_indices"] == [0] and len(blocks[0]["bbox"]) == 4
+    item = {"kind": "text", "page_index": 0, "index": 0}
+    for body in (
+        {"op": "move_objects", "items": [item], "dx": 10},
+        {"op": "duplicate_objects", "items": [item]},
+        {"op": "delete_objects", "items": [item]},
+    ):
+        response = client.post(f"/documents/{document_id}/ops", json=body, headers=AUTH)
+        assert response.status_code == 200, response.text
+    history = client.get(f"/documents/{document_id}/history", headers=AUTH).json()
+    assert [op["op"] for op in history["ops"]] == ["move_objects", "duplicate_objects", "delete_objects"]
+    assert client.get(f"/documents/{document_id}/pages/9/blocks", headers=AUTH).status_code == 400
+
+
 # -- P4: commands and recipes over the API --
 
 

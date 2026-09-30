@@ -34,6 +34,7 @@ from engine.ops.images import (
 )
 from engine.ops.layout import BookletOp, CropPagesOp, NUpOp, ResizePagesOp, UncropPagesOp
 from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp, UpdateLinkOp
+from engine.ops.objects import DeleteObjectsOp, DuplicateObjectsOp, MoveObjectsOp, PageBlocksOp
 from engine.ops.pages import (
     DeletePagesOp,
     DuplicatePagesOp,
@@ -98,10 +99,12 @@ __all__ = [
     "DeleteAnnotationOp",
     "DeleteBookmarkOp",
     "DeleteImageOp",
+    "DeleteObjectsOp",
     "DeletePagesOp",
     "DeleteShapeOp",
     "DeleteTextOp",
     "DrawShapeOp",
+    "DuplicateObjectsOp",
     "DuplicatePagesOp",
     "EditShapeOp",
     "EditSpanOp",
@@ -122,10 +125,12 @@ __all__ = [
     "MergeOp",
     "MoveBookmarkOp",
     "MoveImageOp",
+    "MoveObjectsOp",
     "MovePagesOp",
     "NUpOp",
     "Op",
     "PageAnnotationsOp",
+    "PageBlocksOp",
     "PageImagesOp",
     "PageLinksOp",
     "PageNumbersOp",

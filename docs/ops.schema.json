@@ -2026,690 +2026,6 @@
     },
     {
       "additionalProperties": false,
-      "description": "ORG-01: add every page of another PDF, at the end or before page index `at`.",
-      "properties": {
-        "op": {
-          "const": "merge",
-          "default": "merge",
-          "title": "Op",
-          "type": "string"
-        },
-        "path": {
-          "title": "Path",
-          "type": "string"
-        },
-        "password": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Password"
-        },
-        "at": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "At"
-        }
-      },
-      "required": [
-        "path"
-      ],
-      "title": "MergeOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "ORG-07: insert blank pages, or pages from another PDF, before page index `at`.",
-      "properties": {
-        "op": {
-          "const": "insert_pages",
-          "default": "insert_pages",
-          "title": "Op",
-          "type": "string"
-        },
-        "at": {
-          "title": "At",
-          "type": "integer"
-        },
-        "count": {
-          "default": 1,
-          "title": "Count",
-          "type": "integer"
-        },
-        "size": {
-          "default": "same",
-          "enum": [
-            "a4",
-            "letter",
-            "legal",
-            "a3",
-            "a5",
-            "same"
-          ],
-          "title": "Size",
-          "type": "string"
-        },
-        "from_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "From Path"
-        },
-        "from_pages": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "integer"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "From Pages"
-        },
-        "password": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Password"
-        }
-      },
-      "required": [
-        "at"
-      ],
-      "title": "InsertPagesOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "ORG-03: move pages so they start at position `to` among the other pages.",
-      "properties": {
-        "op": {
-          "const": "move_pages",
-          "default": "move_pages",
-          "title": "Op",
-          "type": "string"
-        },
-        "page_indices": {
-          "items": {
-            "type": "integer"
-          },
-          "title": "Page Indices",
-          "type": "array"
-        },
-        "to": {
-          "title": "To",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "page_indices",
-        "to"
-      ],
-      "title": "MovePagesOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "ORG-03 / UI-07: put every page in a new order (the organizer's drag-and-drop result).",
-      "properties": {
-        "op": {
-          "const": "reorder_pages",
-          "default": "reorder_pages",
-          "title": "Op",
-          "type": "string"
-        },
-        "order": {
-          "items": {
-            "type": "integer"
-          },
-          "title": "Order",
-          "type": "array"
-        }
-      },
-      "required": [
-        "order"
-      ],
-      "title": "ReorderPagesOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "ORG-04: turn pages clockwise by a multiple of 90 degrees.",
-      "properties": {
-        "op": {
-          "const": "rotate_pages",
-          "default": "rotate_pages",
-          "title": "Op",
-          "type": "string"
-        },
-        "page_indices": {
-          "items": {
-            "type": "integer"
-          },
-          "title": "Page Indices",
-          "type": "array"
-        },
-        "degrees": {
-          "default": 90,
-          "title": "Degrees",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "page_indices"
-      ],
-      "title": "RotatePagesOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "ORG-05: remove pages (at least one must remain).",
-      "properties": {
-        "op": {
-          "const": "delete_pages",
-          "default": "delete_pages",
-          "title": "Op",
-          "type": "string"
-        },
-        "page_indices": {
-          "items": {
-            "type": "integer"
-          },
-          "title": "Page Indices",
-          "type": "array"
-        }
-      },
-      "required": [
-        "page_indices"
-      ],
-      "title": "DeletePagesOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "ORG-08: insert copies of pages right after each one.",
-      "properties": {
-        "op": {
-          "const": "duplicate_pages",
-          "default": "duplicate_pages",
-          "title": "Op",
-          "type": "string"
-        },
-        "page_indices": {
-          "items": {
-            "type": "integer"
-          },
-          "title": "Page Indices",
-          "type": "array"
-        },
-        "copies": {
-          "default": 1,
-          "title": "Copies",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "page_indices"
-      ],
-      "title": "DuplicatePagesOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "ORG-06: write pages to a new PDF; the document itself is unchanged.",
-      "properties": {
-        "op": {
-          "const": "extract_pages",
-          "default": "extract_pages",
-          "title": "Op",
-          "type": "string"
-        },
-        "page_indices": {
-          "items": {
-            "type": "integer"
-          },
-          "title": "Page Indices",
-          "type": "array"
-        },
-        "out": {
-          "title": "Out",
-          "type": "string"
-        },
-        "overwrite": {
-          "default": false,
-          "title": "Overwrite",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "page_indices",
-        "out"
-      ],
-      "title": "ExtractPagesOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "ORG-02: write the document out as several PDFs -- every N pages, by page ranges, by a\nmaximum file size, or at each top-level bookmark. The document itself is unchanged.",
-      "properties": {
-        "op": {
-          "const": "split",
-          "default": "split",
-          "title": "Op",
-          "type": "string"
-        },
-        "out_dir": {
-          "title": "Out Dir",
-          "type": "string"
-        },
-        "every": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Every"
-        },
-        "ranges": {
-          "anyOf": [
-            {
-              "items": {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ranges"
-        },
-        "max_bytes": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Max Bytes"
-        },
-        "by_bookmarks": {
-          "default": false,
-          "title": "By Bookmarks",
-          "type": "boolean"
-        },
-        "overwrite": {
-          "default": false,
-          "title": "Overwrite",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "out_dir"
-      ],
-      "title": "SplitOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "ORG-13: list pages that are blank (no text, nearly all white). Changes nothing.",
-      "properties": {
-        "op": {
-          "const": "find_blank_pages",
-          "default": "find_blank_pages",
-          "title": "Op",
-          "type": "string"
-        },
-        "threshold": {
-          "default": 0.999,
-          "title": "Threshold",
-          "type": "number"
-        }
-      },
-      "title": "FindBlankPagesOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "ORG-13: delete every blank page (never the last remaining page). Returns those removed.",
-      "properties": {
-        "op": {
-          "const": "remove_blank_pages",
-          "default": "remove_blank_pages",
-          "title": "Op",
-          "type": "string"
-        },
-        "threshold": {
-          "default": 0.999,
-          "title": "Threshold",
-          "type": "number"
-        }
-      },
-      "title": "RemoveBlankPagesOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Every vector path on one page. Read-only, so -- like PageSpansOp --\nnever journaled; server/app.py serves it from a GET route.",
-      "properties": {
-        "op": {
-          "const": "page_shapes",
-          "default": "page_shapes",
-          "title": "Op",
-          "type": "string"
-        },
-        "page_index": {
-          "default": 0,
-          "title": "Page Index",
-          "type": "integer"
-        }
-      },
-      "title": "PageShapesOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Draw a new line, rectangle, ellipse, polyline or polygon (see engine.shapes.draw_shape).",
-      "properties": {
-        "op": {
-          "const": "draw_shape",
-          "default": "draw_shape",
-          "title": "Op",
-          "type": "string"
-        },
-        "page_index": {
-          "title": "Page Index",
-          "type": "integer"
-        },
-        "kind": {
-          "enum": [
-            "line",
-            "rect",
-            "ellipse",
-            "polyline",
-            "polygon"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "points": {
-          "items": {
-            "maxItems": 2,
-            "minItems": 2,
-            "prefixItems": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "type": "array"
-          },
-          "title": "Points",
-          "type": "array"
-        },
-        "stroke_color": {
-          "anyOf": [
-            {
-              "maxItems": 3,
-              "minItems": 3,
-              "prefixItems": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                }
-              ],
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": [
-            0.0,
-            0.0,
-            0.0
-          ],
-          "title": "Stroke Color"
-        },
-        "fill_color": {
-          "anyOf": [
-            {
-              "maxItems": 3,
-              "minItems": 3,
-              "prefixItems": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                }
-              ],
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Fill Color"
-        },
-        "line_width": {
-          "default": 1.0,
-          "title": "Line Width",
-          "type": "number"
-        },
-        "dashed": {
-          "default": false,
-          "title": "Dashed",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "page_index",
-        "kind",
-        "points"
-      ],
-      "title": "DrawShapeOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Move/resize (`rect`: the shape's new bounding box) and/or restyle one\nexisting shape. `no_fill` removes its fill.",
-      "properties": {
-        "op": {
-          "const": "edit_shape",
-          "default": "edit_shape",
-          "title": "Op",
-          "type": "string"
-        },
-        "page_index": {
-          "title": "Page Index",
-          "type": "integer"
-        },
-        "index": {
-          "title": "Index",
-          "type": "integer"
-        },
-        "rect": {
-          "anyOf": [
-            {
-              "maxItems": 4,
-              "minItems": 4,
-              "prefixItems": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                }
-              ],
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Rect"
-        },
-        "stroke_color": {
-          "anyOf": [
-            {
-              "maxItems": 3,
-              "minItems": 3,
-              "prefixItems": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                }
-              ],
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Stroke Color"
-        },
-        "fill_color": {
-          "anyOf": [
-            {
-              "maxItems": 3,
-              "minItems": 3,
-              "prefixItems": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                }
-              ],
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Fill Color"
-        },
-        "no_fill": {
-          "default": false,
-          "title": "No Fill",
-          "type": "boolean"
-        },
-        "line_width": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Line Width"
-        }
-      },
-      "required": [
-        "page_index",
-        "index"
-      ],
-      "title": "EditShapeOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Remove one vector path; text, images and other paths stay.",
-      "properties": {
-        "op": {
-          "const": "delete_shape",
-          "default": "delete_shape",
-          "title": "Op",
-          "type": "string"
-        },
-        "page_index": {
-          "title": "Page Index",
-          "type": "integer"
-        },
-        "index": {
-          "title": "Index",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "page_index",
-        "index"
-      ],
-      "title": "DeleteShapeOp",
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
       "description": "A read-only preview of the font resolution a replacement would use --\nnever draws, redacts or verifies anything, so (like PageSpansOp) it's\nnever journaled; server/app.py calls it directly. `span_index` is\npositional in a fresh `extract_page_spans` call on `page_index`, not a\ntext search (see _span_at).",
       "properties": {
         "op": {
@@ -3672,6 +2988,984 @@
         "page_index"
       ],
       "title": "ReflowTextOp",
+      "type": "object"
+    },
+    {
+      "$defs": {
+        "ObjectRef": {
+          "additionalProperties": false,
+          "description": "One object on a page, as the UI selected it.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "text",
+                "image",
+                "shape"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "page_index": {
+              "title": "Page Index",
+              "type": "integer"
+            },
+            "index": {
+              "title": "Index",
+              "type": "integer"
+            },
+            "dx": {
+              "default": 0.0,
+              "title": "Dx",
+              "type": "number"
+            },
+            "dy": {
+              "default": 0.0,
+              "title": "Dy",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "page_index",
+            "index"
+          ],
+          "title": "ObjectRef",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "EDT-13/EDT-14: move every item by the shared (`dx`, `dy`) plus its own offset --\nwhat align, distribute, nudging and dragging several objects all send.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        },
+        "op": {
+          "const": "move_objects",
+          "default": "move_objects",
+          "title": "Op",
+          "type": "string"
+        },
+        "dx": {
+          "default": 0.0,
+          "title": "Dx",
+          "type": "number"
+        },
+        "dy": {
+          "default": 0.0,
+          "title": "Dy",
+          "type": "number"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "MoveObjectsOp",
+      "type": "object"
+    },
+    {
+      "$defs": {
+        "ObjectRef": {
+          "additionalProperties": false,
+          "description": "One object on a page, as the UI selected it.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "text",
+                "image",
+                "shape"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "page_index": {
+              "title": "Page Index",
+              "type": "integer"
+            },
+            "index": {
+              "title": "Index",
+              "type": "integer"
+            },
+            "dx": {
+              "default": 0.0,
+              "title": "Dx",
+              "type": "number"
+            },
+            "dy": {
+              "default": 0.0,
+              "title": "Dy",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "page_index",
+            "index"
+          ],
+          "title": "ObjectRef",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "EDT-15: copy every item, offset by (`dx`, `dy`), onto `target_page_index` (default:\neach item's own page) -- paste and duplicate. The originals are untouched.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        },
+        "op": {
+          "const": "duplicate_objects",
+          "default": "duplicate_objects",
+          "title": "Op",
+          "type": "string"
+        },
+        "dx": {
+          "default": 10.0,
+          "title": "Dx",
+          "type": "number"
+        },
+        "dy": {
+          "default": 10.0,
+          "title": "Dy",
+          "type": "number"
+        },
+        "target_page_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Page Index"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "DuplicateObjectsOp",
+      "type": "object"
+    },
+    {
+      "$defs": {
+        "ObjectRef": {
+          "additionalProperties": false,
+          "description": "One object on a page, as the UI selected it.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "text",
+                "image",
+                "shape"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "page_index": {
+              "title": "Page Index",
+              "type": "integer"
+            },
+            "index": {
+              "title": "Index",
+              "type": "integer"
+            },
+            "dx": {
+              "default": 0.0,
+              "title": "Dx",
+              "type": "number"
+            },
+            "dy": {
+              "default": 0.0,
+              "title": "Dy",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "page_index",
+            "index"
+          ],
+          "title": "ObjectRef",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "EDT-15: remove every item -- the Delete key on a selection.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "require_tier": {
+          "default": "approximate",
+          "enum": [
+            "exact",
+            "approximate",
+            "fallback"
+          ],
+          "title": "Require Tier",
+          "type": "string"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        },
+        "op": {
+          "const": "delete_objects",
+          "default": "delete_objects",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "DeleteObjectsOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The page's text blocks (engine.fonts.blocks), each as its span indices and the\nbox around them -- what the UI selects, snaps and aligns as one text object.\nRead-only, never journaled; served from a GET route.",
+      "properties": {
+        "op": {
+          "const": "page_blocks",
+          "default": "page_blocks",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        }
+      },
+      "title": "PageBlocksOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-01: add every page of another PDF, at the end or before page index `at`.",
+      "properties": {
+        "op": {
+          "const": "merge",
+          "default": "merge",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Password"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "MergeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-07: insert blank pages, or pages from another PDF, before page index `at`.",
+      "properties": {
+        "op": {
+          "const": "insert_pages",
+          "default": "insert_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "at": {
+          "title": "At",
+          "type": "integer"
+        },
+        "count": {
+          "default": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "size": {
+          "default": "same",
+          "enum": [
+            "a4",
+            "letter",
+            "legal",
+            "a3",
+            "a5",
+            "same"
+          ],
+          "title": "Size",
+          "type": "string"
+        },
+        "from_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Path"
+        },
+        "from_pages": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Pages"
+        },
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Password"
+        }
+      },
+      "required": [
+        "at"
+      ],
+      "title": "InsertPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-03: move pages so they start at position `to` among the other pages.",
+      "properties": {
+        "op": {
+          "const": "move_pages",
+          "default": "move_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        },
+        "to": {
+          "title": "To",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_indices",
+        "to"
+      ],
+      "title": "MovePagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-03 / UI-07: put every page in a new order (the organizer's drag-and-drop result).",
+      "properties": {
+        "op": {
+          "const": "reorder_pages",
+          "default": "reorder_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "order": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Order",
+          "type": "array"
+        }
+      },
+      "required": [
+        "order"
+      ],
+      "title": "ReorderPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-04: turn pages clockwise by a multiple of 90 degrees.",
+      "properties": {
+        "op": {
+          "const": "rotate_pages",
+          "default": "rotate_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        },
+        "degrees": {
+          "default": 90,
+          "title": "Degrees",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_indices"
+      ],
+      "title": "RotatePagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-05: remove pages (at least one must remain).",
+      "properties": {
+        "op": {
+          "const": "delete_pages",
+          "default": "delete_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_indices"
+      ],
+      "title": "DeletePagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-08: insert copies of pages right after each one.",
+      "properties": {
+        "op": {
+          "const": "duplicate_pages",
+          "default": "duplicate_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        },
+        "copies": {
+          "default": 1,
+          "title": "Copies",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_indices"
+      ],
+      "title": "DuplicatePagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-06: write pages to a new PDF; the document itself is unchanged.",
+      "properties": {
+        "op": {
+          "const": "extract_pages",
+          "default": "extract_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Indices",
+          "type": "array"
+        },
+        "out": {
+          "title": "Out",
+          "type": "string"
+        },
+        "overwrite": {
+          "default": false,
+          "title": "Overwrite",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_indices",
+        "out"
+      ],
+      "title": "ExtractPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-02: write the document out as several PDFs -- every N pages, by page ranges, by a\nmaximum file size, or at each top-level bookmark. The document itself is unchanged.",
+      "properties": {
+        "op": {
+          "const": "split",
+          "default": "split",
+          "title": "Op",
+          "type": "string"
+        },
+        "out_dir": {
+          "title": "Out Dir",
+          "type": "string"
+        },
+        "every": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Every"
+        },
+        "ranges": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ranges"
+        },
+        "max_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Bytes"
+        },
+        "by_bookmarks": {
+          "default": false,
+          "title": "By Bookmarks",
+          "type": "boolean"
+        },
+        "overwrite": {
+          "default": false,
+          "title": "Overwrite",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "out_dir"
+      ],
+      "title": "SplitOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-13: list pages that are blank (no text, nearly all white). Changes nothing.",
+      "properties": {
+        "op": {
+          "const": "find_blank_pages",
+          "default": "find_blank_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "threshold": {
+          "default": 0.999,
+          "title": "Threshold",
+          "type": "number"
+        }
+      },
+      "title": "FindBlankPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "ORG-13: delete every blank page (never the last remaining page). Returns those removed.",
+      "properties": {
+        "op": {
+          "const": "remove_blank_pages",
+          "default": "remove_blank_pages",
+          "title": "Op",
+          "type": "string"
+        },
+        "threshold": {
+          "default": 0.999,
+          "title": "Threshold",
+          "type": "number"
+        }
+      },
+      "title": "RemoveBlankPagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Every vector path on one page. Read-only, so -- like PageSpansOp --\nnever journaled; server/app.py serves it from a GET route.",
+      "properties": {
+        "op": {
+          "const": "page_shapes",
+          "default": "page_shapes",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        }
+      },
+      "title": "PageShapesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Draw a new line, rectangle, ellipse, polyline or polygon (see engine.shapes.draw_shape).",
+      "properties": {
+        "op": {
+          "const": "draw_shape",
+          "default": "draw_shape",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "line",
+            "rect",
+            "ellipse",
+            "polyline",
+            "polygon"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "points": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Points",
+          "type": "array"
+        },
+        "stroke_color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "title": "Stroke Color"
+        },
+        "fill_color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fill Color"
+        },
+        "line_width": {
+          "default": 1.0,
+          "title": "Line Width",
+          "type": "number"
+        },
+        "dashed": {
+          "default": false,
+          "title": "Dashed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_index",
+        "kind",
+        "points"
+      ],
+      "title": "DrawShapeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Move/resize (`rect`: the shape's new bounding box) and/or restyle one\nexisting shape. `no_fill` removes its fill.",
+      "properties": {
+        "op": {
+          "const": "edit_shape",
+          "default": "edit_shape",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "rect": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rect"
+        },
+        "stroke_color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stroke Color"
+        },
+        "fill_color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fill Color"
+        },
+        "no_fill": {
+          "default": false,
+          "title": "No Fill",
+          "type": "boolean"
+        },
+        "line_width": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Width"
+        }
+      },
+      "required": [
+        "page_index",
+        "index"
+      ],
+      "title": "EditShapeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Remove one vector path; text, images and other paths stay.",
+      "properties": {
+        "op": {
+          "const": "delete_shape",
+          "default": "delete_shape",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_index",
+        "index"
+      ],
+      "title": "DeleteShapeOp",
       "type": "object"
     },
     {

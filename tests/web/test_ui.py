@@ -1087,7 +1087,8 @@ def test_draw_mode_draws_a_rectangle_by_dragging(page: Page, app_url: str, corpu
     _wait_overlay_ready(page)
     page.select_option(".pw-draw-select", "rect")
     canvas = _box(page, ".pw-canvas-wrap canvas")
-    x, y = canvas["x"] + canvas["width"] * 0.3, canvas["y"] + canvas["height"] * 0.4
+    area = _box(page, ".pw-page-area")  # the visible part of the page: the canvas runs on below it
+    x, y = canvas["x"] + canvas["width"] * 0.3, max(canvas["y"], area["y"]) + 150
     page.mouse.move(x, y)
     page.mouse.down()
     page.mouse.move(x + 60, y + 40)
@@ -1631,3 +1632,177 @@ def test_fonts_dialog_adds_a_font_from_the_open_document(page: Page, app_url: st
     # The editor's font list now offers it.
     page.click(".pw-span-box")
     page.wait_for_selector("#pw-edit-font option[value='PWTestSans']", state="attached", timeout=5000)
+
+
+# -- EDT-13..15: selection, align, guides, nudge, copy/paste, delete --
+
+
+@pytest.fixture
+def arrange_pdf(tmp_path: Path) -> Path:
+    """Two text blocks at different left edges, an image and three shapes."""
+    import io
+
+    import pymupdf
+    from PIL import Image
+
+    png = io.BytesIO()
+    Image.new("RGB", (30, 20), (40, 160, 90)).save(png, format="PNG")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 120), "Alpha heading", fontname="helv", fontsize=14)
+    page.insert_text((230, 200), "Beta note", fontname="helv", fontsize=14)
+    page.insert_image(pymupdf.Rect(330, 90, 390, 130), stream=png.getvalue())
+    for x in (80, 150, 300):
+        shape = page.new_shape()
+        shape.draw_rect(pymupdf.Rect(x, 300, x + 40, 340))
+        shape.finish(color=(0, 0, 1), width=2)
+        shape.commit()
+    path = tmp_path / "arrange.pdf"
+    doc.save(path)
+    return path
+
+
+def _open_arrange(page: Page, app_url: str, path: Path) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(path))
+    _wait_overlay_ready(page)
+    page.wait_for_selector(".pw-shape-box", timeout=5000)
+
+
+def _shape_lefts(page: Page) -> list[float]:
+    return sorted(page.eval_on_selector_all(".pw-shape-box", "els => els.map(e => e.getBoundingClientRect().left)"))
+
+
+_BETA_LEFT = (
+    "() => [...document.querySelectorAll('.pw-span-box')]"
+    ".find(b => b.textContent === 'Beta note')?.getBoundingClientRect().left"
+)
+
+
+@pytest.mark.feature("EDT-05")
+def test_edited_text_can_be_moved_without_an_approval_prompt(page: Page, app_url: str, arrange_pdf: Path) -> None:
+    """The reported bug: after editing text, moving it asked to accept a look-alike font."""
+    dialogs: list[str] = []
+    page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
+    _open_arrange(page, app_url, arrange_pdf)
+    page.click(".pw-span-box:has-text('Alpha heading')")
+    page.fill(_EDITOR, "Alpha title")
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".pw-history-entry", timeout=10000)
+    page.wait_for_selector(".pw-move-handle", timeout=5000)
+    _drag(page, ".pw-move-handle", 0, 60)
+    page.wait_for_selector(".pw-history-entry:has-text('Move paragraph')", timeout=10000)
+    assert dialogs == []
+
+
+@pytest.mark.feature("EDT-13")
+def test_shift_click_selects_several_and_align_left_lines_them_up(page: Page, app_url: str, arrange_pdf: Path) -> None:
+    _open_arrange(page, app_url, arrange_pdf)
+    page.click(".pw-span-box:has-text('Alpha heading')")
+    page.click(".pw-span-box:has-text('Beta note')", modifiers=["Shift"])
+    page.click(".pw-image-box", modifiers=["Shift"])
+    assert page.locator(".pw-arrange-outline").count() == 3
+    assert page.is_enabled(".pw-align-select")
+    alpha_left = page.locator(".pw-span-box:has-text('Alpha heading')").bounding_box()["x"]
+    page.select_option(".pw-align-select", "left")
+    page.wait_for_selector(".pw-history-entry:has-text('Move 2 objects')", timeout=10000)  # Alpha is leftmost
+    page.wait_for_function(f"() => Math.abs(({_BETA_LEFT})() - {alpha_left}) < 2", timeout=5000)
+    page.wait_for_function(
+        f"() => Math.abs(document.querySelector('.pw-image-box').getBoundingClientRect().left - {alpha_left}) < 2",
+        timeout=5000,
+    )
+    assert page.locator(".pw-arrange-outline").count() == 3  # still selected after the change
+
+
+@pytest.mark.feature("EDT-13")
+def test_marquee_selects_and_distribute_evens_the_gaps(page: Page, app_url: str, arrange_pdf: Path) -> None:
+    _open_arrange(page, app_url, arrange_pdf)
+    boxes = [page.locator(".pw-shape-box").nth(i).bounding_box() for i in range(3)]
+    left = min(b["x"] for b in boxes) - 10
+    top = min(b["y"] for b in boxes) - 10
+    right = max(b["x"] + b["width"] for b in boxes) + 10
+    bottom = max(b["y"] + b["height"] for b in boxes) + 10
+    page.mouse.move(left, top)
+    page.mouse.down()
+    page.mouse.move((left + right) / 2, (top + bottom) / 2)
+    page.mouse.move(right, bottom)
+    page.mouse.up()
+    assert page.locator(".pw-arrange-outline").count() == 3
+    page.select_option(".pw-align-select", "distribute-h")
+    page.wait_for_selector(".pw-history-entry:has-text('Move')", timeout=10000)
+    page.wait_for_function(
+        "() => { const r = [...document.querySelectorAll('.pw-shape-box')].map(e => e.getBoundingClientRect())"
+        ".sort((a, b) => a.left - b.left);"
+        " return r.length === 3 && Math.abs((r[1].left - r[0].right) - (r[2].left - r[1].right)) < 2; }",
+        timeout=5000,
+    )
+
+
+@pytest.mark.feature("EDT-14")
+def test_dragging_near_another_edge_snaps_and_shows_a_guide(page: Page, app_url: str, arrange_pdf: Path) -> None:
+    _open_arrange(page, app_url, arrange_pdf)
+    image = page.locator(".pw-image-box").bounding_box()
+    target_left = page.evaluate(_BETA_LEFT)
+    x, y = image["x"] + image["width"] / 2, image["y"] + image["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x - 20, y + 5)
+    # 3px short of Beta's left edge: close enough to snap onto it.
+    page.mouse.move(x + (target_left - image["x"]) + 3, y + 10)
+    assert page.locator(".pw-guide-v").count() >= 1
+    page.mouse.up()
+    page.wait_for_selector(".pw-history-entry:has-text('Move/resize image')", timeout=10000)
+    page.wait_for_function(
+        f"() => Math.abs(document.querySelector('.pw-image-box').getBoundingClientRect().left - {target_left}) < 1.5",
+        timeout=5000,
+    )
+    assert page.locator(".pw-guide").count() == 0
+
+
+@pytest.mark.feature("EDT-14")
+def test_arrow_keys_nudge_the_selection_as_one_move(page: Page, app_url: str, arrange_pdf: Path) -> None:
+    _open_arrange(page, app_url, arrange_pdf)
+    before = _shape_lefts(page)
+    page.locator(".pw-shape-box").first.click()
+    page.keyboard.press("ArrowRight")
+    page.keyboard.press("ArrowRight")
+    page.keyboard.press("Shift+ArrowRight")
+    page.wait_for_selector(".pw-history-entry:has-text('Move 1 object')", timeout=10000)
+    assert page.locator(".pw-history-entry").count() == 1
+    assert (page.text_content(".pw-page-indicator") or "").startswith("1 /")  # arrows nudged, not paged
+    scale = page.evaluate("() => document.querySelector('.pw-canvas-wrap canvas').getBoundingClientRect().width / 595")
+    expected = before[0] + 12 * scale
+    page.wait_for_function(
+        "e => [...document.querySelectorAll('.pw-shape-box')]"
+        ".some(b => Math.abs(b.getBoundingClientRect().left - e) < 2.5)",
+        arg=expected,
+        timeout=5000,
+    )
+
+
+@pytest.mark.feature("EDT-15")
+def test_copy_paste_then_delete(page: Page, app_url: str, arrange_pdf: Path) -> None:
+    _open_arrange(page, app_url, arrange_pdf)
+    page.locator(".pw-shape-box").first.click()
+    page.keyboard.press("Control+c")
+    page.keyboard.press("Control+v")
+    page.wait_for_selector(".pw-history-entry:has-text('Copy 1 object')", timeout=10000)
+    page.wait_for_function("() => document.querySelectorAll('.pw-shape-box').length === 4", timeout=5000)
+    page.keyboard.press("Delete")  # the pasted copy is the selection now
+    page.wait_for_selector(".pw-history-entry:has-text('Delete 1 object')", timeout=10000)
+    page.wait_for_function("() => document.querySelectorAll('.pw-shape-box').length === 3", timeout=5000)
+
+
+@pytest.mark.feature("EDT-15")
+def test_text_can_be_duplicated_and_deleted_from_the_keyboard(page: Page, app_url: str, arrange_pdf: Path) -> None:
+    _open_arrange(page, app_url, arrange_pdf)
+    count = "() => [...document.querySelectorAll('.pw-span-box')].filter(b => b.textContent === 'Beta note').length"
+    page.click(".pw-span-box:has-text('Beta note')")
+    page.keyboard.press("Escape")  # unchanged: hands the keyboard back to the page
+    page.keyboard.press("Control+d")
+    page.wait_for_selector(".pw-history-entry:has-text('Copy 1 object')", timeout=10000)
+    page.wait_for_function(f"() => ({count})() === 2", timeout=5000)
+    page.keyboard.press("Delete")
+    page.wait_for_selector(".pw-history-entry:has-text('Delete 1 object')", timeout=10000)
+    page.wait_for_function(f"() => ({count})() === 1", timeout=5000)

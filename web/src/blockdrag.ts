@@ -7,7 +7,11 @@
  * become part of the text being edited.
  */
 
+import type { DragSnapper } from "./arrange";
+
 export interface BlockHandleCallbacks {
+  /** EDT-14: snaps the move handle's delta to other objects (smart guides). */
+  snapper?: DragSnapper;
   /** The move handle was dragged by (`dx`, `dy`) layer pixels. */
   onMove(dx: number, dy: number): void;
   /** The resize handle was dragged: the box's new right edge, in layer pixels. */
@@ -47,19 +51,26 @@ export function attachBlockHandles(layer: HTMLElement, box: HTMLElement, callbac
     handle: HTMLElement,
     preview: (dx: number, dy: number) => void,
     done: (dx: number, dy: number) => void,
+    snapper?: DragSnapper,
   ): void {
     handle.addEventListener("mousedown", (down: MouseEvent) => {
-      // Keeps focus on the span box, so starting a drag doesn't blur (and
-      // so cancel) the edit this handle belongs to.
+      // Keeps the focus where it is (the inspector's text box), so starting a
+      // drag doesn't move the cursor out of an edit in progress.
       down.preventDefault();
-      const onMouseMove = (event: MouseEvent): void => preview(event.clientX - down.clientX, event.clientY - down.clientY);
+      const delta = (event: MouseEvent): [number, number] => {
+        const dx = event.clientX - down.clientX;
+        const dy = event.clientY - down.clientY;
+        return snapper ? snapper.adjust(dx, dy, event) : [dx, dy];
+      };
+      const onMouseMove = (event: MouseEvent): void => preview(...delta(event));
       const onMouseUp = (event: MouseEvent): void => {
         window.removeEventListener("mousemove", onMouseMove);
         window.removeEventListener("mouseup", onMouseUp);
-        const dx = event.clientX - down.clientX;
-        const dy = event.clientY - down.clientY;
+        const raw = Math.hypot(event.clientX - down.clientX, event.clientY - down.clientY);
+        const [dx, dy] = delta(event);
+        snapper?.end();
         preview(0, 0);
-        if (Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX) {
+        if (raw >= DRAG_THRESHOLD_PX) {
           done(dx, dy);
         }
       };
@@ -77,6 +88,7 @@ export function attachBlockHandles(layer: HTMLElement, box: HTMLElement, callbac
       resize.style.transform = shift;
     },
     (dx, dy) => callbacks.onMove(dx, dy),
+    callbacks.snapper,
   );
   track(
     resize,

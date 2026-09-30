@@ -65,9 +65,22 @@ cd web && npm ci && npm run build && npm run preview
 # open the printed URL with ?token=<token>&api=http://127.0.0.1:8000
 ```
 
-Type commands in the **command bar** under the toolbar (press `/`): suggestions show what can come next, Enter previews how many matches would change, and Enter again (or **Apply**) does it; the bar also exports the session as a recipe and runs a recipe after a dry run. Click any text to select it: the inspector's **Edit text** box takes the cursor, holding the text and its detected style (the original font, size, color, bold, italic). Change the words, the style or both, and press Enter (or **Apply**): it is one change, one undo, and the edited text stays selected for the next one. Esc (or **Revert**) goes back; clicking elsewhere never throws a draft away. The inspector also shows the detected font, size, color and live match confidence, and offers **Copy style** (format painter) and the text's **links**. The **Fonts** button lists the fonts edits could only approximate and your own font library; add a font from the open document (when the PDF embeds it completely) or from a font file. Drag the handles beside selected text to move or re-wrap its paragraph. Images and shapes can be selected, dragged, resized, restyled, cropped (images) and deleted. The toolbar adds text (**Text…**, then click where it goes), inserts images, draws lines/rectangles/ellipses, toggles **Spelling** (underlines, with suggestions), and opens a before/after **Compare** view. Every change is undoable from the history strip (Ctrl+Z / Ctrl+Shift+Z).
+Type commands in the **command bar** under the toolbar (press `/`): suggestions show what can come next, Enter previews how many matches would change, and Enter again (or **Apply**) does it; the bar also exports the session as a recipe and runs a recipe after a dry run. Click any text to select it: the inspector's **Edit text** box takes the cursor, holding the text and its detected style (the original font, size, color, bold, italic). Change the words, the style or both, and press Enter (or **Apply**): it is one change, one undo, and the edited text stays selected for the next one. Esc (or **Revert**) goes back; clicking elsewhere never throws a draft away. The inspector also shows the detected font, size, color and live match confidence, and offers **Copy style** (format painter) and the text's **links**. The **Fonts** button lists the fonts edits could only approximate and your own font library; add a font from the open document (when the PDF embeds it completely) or from a font file. Drag the handles beside selected text to move or re-wrap its paragraph. Text blocks, images and shapes can be arranged the way Nitro does it:
+- **Select:** Shift+click adds objects; dragging on empty page selects everything in a rectangle.
+- **Guides:** drags snap to other objects and to the page, with guide lines (hold Alt to turn this off).
+- **Align:** the **Align…** menu aligns or distributes the selection.
+- **Keys:** arrows nudge it, Ctrl+C / Ctrl+V / Ctrl+D copy, paste and duplicate, and Delete removes it.
+
+Each of these is one undo. Images and shapes can be selected, dragged, resized, restyled, cropped (images) and deleted. The toolbar adds text (**Text…**, then click where it goes), inserts images, draws lines/rectangles/ellipses, toggles **Spelling** (underlines, with suggestions), and opens a before/after **Compare** view. Every change is undoable from the history strip (Ctrl+Z / Ctrl+Shift+Z).
 
 The server binds to `127.0.0.1` only, and every request must carry the session token in an `X-Session-Token` header (`401` otherwise). The API is the same `Op` classes as the CLI, over JSON: `POST /documents` opens a file, `POST /documents/{id}/ops` applies any Op (journaled, undoable), and read-only `GET .../pages/{n}/spans|links|images|shapes|spelling|render` routes describe a page. `docs/ops.schema.json` lists every Op.
+
+## How to report a bug
+
+1. Make sample documents to try with `python tools/make_samples.py`. It writes invented PDFs to `C:\pdfworkerz-docs\samples`: a letter, a form, a flyer, and a page of mixed embedded fonts.
+2. When something goes wrong in the web UI, click **Export recipe**. It saves every edit of the session as YAML.
+3. Send the recipe, the document (or its path), and a screenshot or a line on what looked wrong.
+4. `pdfworkerz run` replays the recipe exactly, which reproduces the problem.
 
 ## Status
 

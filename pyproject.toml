@@ -87,6 +87,6 @@ ignore_missing_imports = true
 # these two strict sub-checks only for the modules that touch those libraries
 # directly is a deliberate, scoped trade-off, not a general weakening of strict mode.
 [[tool.mypy.overrides]]
-module = ["engine.*", "cli.*"]
+module = ["engine.*", "cli.*", "make_samples"]
 disallow_untyped_calls = false
 warn_return_any = false

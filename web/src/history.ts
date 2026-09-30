@@ -57,6 +57,12 @@ function pageLabel(op: HistoryOp): string {
  * Op's own discriminator field, matching engine/ops/text.py's registered
  * Op shapes field-for-field. Never guesses at an Op this doesn't
  * recognize; it falls back to the raw op name instead. */
+/** The page of an object Op's first item. */
+function firstPage(op: HistoryOp): unknown {
+  const first = Array.isArray(op.items) ? (op.items[0] as { page_index?: unknown } | undefined) : undefined;
+  return first?.page_index;
+}
+
 function describeOp(op: HistoryOp): string {
   switch (op.op) {
     case "replace_text":
@@ -120,6 +126,19 @@ function describeOp(op: HistoryOp): string {
       return typeof op.width === "number"
         ? `Resize paragraph to ${Math.round(op.width)}pt (${pageLabel(op)})`
         : `Move paragraph (${pageLabel(op)})`;
+    case "move_objects": {
+      const count = Array.isArray(op.items) ? op.items.length : 0;
+      return `Move ${count} object${count === 1 ? "" : "s"} (${pageLabel({ op: op.op, page_index: firstPage(op) })})`;
+    }
+    case "duplicate_objects": {
+      const count = Array.isArray(op.items) ? op.items.length : 0;
+      const page = typeof op.target_page_index === "number" ? op.target_page_index : firstPage(op);
+      return `Copy ${count} object${count === 1 ? "" : "s"} (${pageLabel({ op: op.op, page_index: page })})`;
+    }
+    case "delete_objects": {
+      const count = Array.isArray(op.items) ? op.items.length : 0;
+      return `Delete ${count} object${count === 1 ? "" : "s"} (${pageLabel({ op: op.op, page_index: firstPage(op) })})`;
+    }
     case "copy_style":
       return `Copy style onto text (${pageLabel({ op: op.op, page_index: op.target_page_index })})`;
     default:

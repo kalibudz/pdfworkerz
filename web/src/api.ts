@@ -154,6 +154,12 @@ export interface HistoryOp {
   [field: string]: unknown;
 }
 
+/** One text block (paragraph) on a page: PageBlocksOp (EDT-13). */
+export interface BlockInfo {
+  span_indices: number[];
+  bbox: [number, number, number, number];
+}
+
 /** Mirrors engine.fonts.research.FontToResearch, plus the per-document fields GET
  * /fonts/research adds when given a document. */
 export interface FontToResearch {
@@ -239,6 +245,12 @@ export class Api {
       .then((response) => response.json() as Promise<{ families: string[] }>)
       .then((body) => body.families);
     return await this.families;
+  }
+
+  /** EDT-13: the page's text blocks -- what the arrangement tools select as one text object. */
+  async pageBlocks(documentId: string, pageIndex: number): Promise<BlockInfo[]> {
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/blocks`);
+    return (await response.json()) as BlockInfo[];
   }
 
   /** Fonts that edits could only approximate (engine.fonts.research). With a

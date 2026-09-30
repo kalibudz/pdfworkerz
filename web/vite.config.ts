@@ -10,5 +10,14 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: true,
+    rolldownOptions: {
+      output: {
+        // pdf.js is most of the bundle and changes only on upgrade: its own chunk
+        // keeps the app's code small (and cacheable separately).
+        codeSplitting: {
+          groups: [{ name: "pdfjs", test: /node_modules[\\/]pdfjs-dist/ }],
+        },
+      },
+    },
   },
 });

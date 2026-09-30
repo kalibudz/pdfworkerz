@@ -240,6 +240,27 @@ def move_image(document: Document, page_index: int, index: int, rect: Rect) -> I
     return _new_index(document, page_index, before)
 
 
+def duplicate_image(
+    document: Document, page_index: int, index: int, dx: float, dy: float, *, target_page_index: int | None = None
+) -> ImageInfo:
+    """EDT-15: place the same image again, offset by (`dx`, `dy`), on `target_page_index`
+    if given. The copy reuses the image object (no second copy of its pixels)."""
+    source_page, raw = _placement_at(document, page_index, index)
+    del source_page  # a second live reference to the page would make _reload fail when copying onto it
+    target_index = page_index if target_page_index is None else target_page_index
+    target = _page(document, target_index)
+    x0, y0, x1, y1 = raw["bbox"]
+    area = _validate_rect(target, (x0 + dx, y0 + dy, x1 + dx, y1 + dy))
+    xref = raw.get("xref", 0)
+    before = list_images(document, target_index)
+    if xref:
+        target.insert_image(area, xref=xref, keep_proportion=False)
+    else:
+        target.insert_image(area, stream=_placement_bytes(document, raw), keep_proportion=False)
+    _reload(document, target)
+    return _new_index(document, target_index, before)
+
+
 def replace_image(document: Document, page_index: int, index: int, data_base64: str) -> ImageInfo:
     """Draw a new image in this placement's rectangle, fitted inside it with
     its own aspect ratio kept; other placements of the old image are untouched."""

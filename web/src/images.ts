@@ -10,11 +10,14 @@
 import type * as pdfjsLib from "pdfjs-dist";
 
 import type { Api, HistoryOp, ImageInfo } from "./api";
+import type { ArrangeHandle } from "./arrange";
 import type { ImageAction, InspectorHandle } from "./inspector";
 import { cornerHandle, drag, layerToPageRect } from "./drag";
 import { bboxToRect } from "./overlay";
 
 export interface ImageToolOptions {
+  /** EDT-13..15: the shared selection (Shift+click, group drag, snapping). */
+  arrange?: ArrangeHandle;
   api: Api;
   documentId: string;
   inspector: InspectorHandle;
@@ -140,8 +143,12 @@ export function createImageTool(layer: HTMLElement, options: ImageToolOptions): 
       box.style.height = `${rect.height}px`;
       box.dataset.index = String(image.index);
       box.addEventListener("mousedown", (event) => {
+        if (!cropping && options.arrange?.pointerDown("image", image.index, event)) {
+          return;
+        }
         if (selected?.box !== box) {
           select(image, box);
+          options.arrange?.selectOnly("image", image.index);
         }
         if (cropping) {
           startCropDrag(image, event);
@@ -158,6 +165,7 @@ export function createImageTool(layer: HTMLElement, options: ImageToolOptions): 
               void send({ op: "move_image", page_index: pageIndex, index: image.index, rect: moved });
             }
           },
+          options.arrange?.snapper("image", image.index),
         );
       });
       layer.appendChild(box);

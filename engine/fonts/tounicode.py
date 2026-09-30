@@ -17,6 +17,7 @@ stripped of its ToUnicode CMap, round-trips correctly through this path).
 from __future__ import annotations
 
 import io
+import re
 
 import pikepdf
 import pymupdf
@@ -118,3 +119,122 @@ def recover_broken_spans(doc: pymupdf.Document, page_index: int, spans: list[Spa
         recovered.append(trace)
         code_index += count
     return recovered
+
+
+# -- The other direction: a character map for a subset that has none --
+
+_HEX = re.compile(r"<([0-9A-Fa-f]+)>")
+
+
+def _utf16(hex_text: str) -> str | None:
+    try:
+        return bytes.fromhex(hex_text).decode("utf-16-be")
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
+def _parse_tounicode(data: str) -> dict[int, str]:
+    """A ToUnicode CMap's bfchar and bfrange entries as code -> text."""
+    mapping: dict[int, str] = {}
+    for block in re.findall(r"beginbfchar(.*?)endbfchar", data, re.S):
+        pairs = _HEX.findall(block)
+        for code, text in zip(pairs[0::2], pairs[1::2], strict=False):
+            value = _utf16(text)
+            if value:
+                mapping[int(code, 16)] = value
+    for block in re.findall(r"beginbfrange(.*?)endbfrange", data, re.S):
+        for line in block.strip().splitlines():
+            line = line.strip()
+            array = re.match(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*\[(.*)\]", line)
+            if array:
+                start, end = int(array.group(1), 16), int(array.group(2), 16)
+                for offset, text in enumerate(_HEX.findall(array.group(3))):
+                    value = _utf16(text)
+                    if value and start + offset <= end:
+                        mapping[start + offset] = value
+                continue
+            parts = _HEX.findall(line)
+            if len(parts) == 3:
+                start, end = int(parts[0], 16), int(parts[1], 16)
+                base = _utf16(parts[2])
+                if base and len(base) == 1 and end - start < 0x10000:
+                    for offset in range(end - start + 1):
+                        mapping[start + offset] = chr(ord(base) + offset)
+    return mapping
+
+
+def unicode_to_glyph_ids(doc: pymupdf.Document, font_xref: int) -> dict[int, int] | None:
+    """For a composite (Type0) font drawn with Identity-H/V: character -> glyph ID,
+    recovered from the font's ToUnicode CMap, or None when that can't be done.
+
+    Subsets embedded without a ``cmap`` table (PyMuPDF's own, and many generators')
+    can't draw new text: nothing says which glyph is which character. With Identity
+    encoding the content-stream code is the CID, and with an Identity (or absent)
+    CIDToGIDMap the CID is the glyph ID -- so ToUnicode, read backwards, is exactly
+    the missing map, for every character the document already shows in that font."""
+    if doc.xref_get_key(font_xref, "Subtype") != ("name", "/Type0"):
+        return None
+    if doc.xref_get_key(font_xref, "Encoding")[1] not in ("/Identity-H", "/Identity-V"):
+        return None
+    descendants = doc.xref_get_key(font_xref, "DescendantFonts")
+    found = re.search(r"(\d+) 0 R", descendants[1]) if descendants[0] == "array" else None
+    if not found:
+        return None
+    cid_to_gid = doc.xref_get_key(int(found.group(1)), "CIDToGIDMap")
+    if cid_to_gid[0] not in ("null", "name") or (cid_to_gid[0] == "name" and cid_to_gid[1] != "/Identity"):
+        return None  # an explicit CIDToGIDMap stream: not handled
+    tounicode = doc.xref_get_key(font_xref, "ToUnicode")
+    if tounicode[0] != "xref":
+        return None
+    data = doc.xref_stream(int(tounicode[1].split()[0]))
+    if not data:
+        return None
+    result: dict[int, int] = {}
+    for code, text in _parse_tounicode(data.decode("latin-1")).items():
+        if len(text) == 1:
+            result.setdefault(ord(text), code)
+    return result or None
+
+
+def with_cmap(program: bytes, char_to_glyph_id: dict[int, int]) -> bytes | None:
+    """`program` with a ``cmap`` table built from `char_to_glyph_id`, or None if
+    the program can't take one. Glyph IDs outside the font are left out."""
+    from fontTools.ttLib import newTable
+    from fontTools.ttLib.tables._c_m_a_p import cmap_format_4, cmap_format_12
+
+    try:
+        tt = TTFont(io.BytesIO(program))
+        order = tt.getGlyphOrder()
+    except Exception:
+        return None
+    mapping = {char: order[gid] for char, gid in char_to_glyph_id.items() if 0 <= gid < len(order)}
+    if not mapping:
+        return None
+    table = newTable("cmap")
+    table.tableVersion = 0
+    table.tables = []
+    bmp = cmap_format_4(4)
+    bmp.platformID, bmp.platEncID, bmp.language = 3, 1, 0
+    bmp.cmap = {char: name for char, name in mapping.items() if char <= 0xFFFF}
+    table.tables.append(bmp)
+    if any(char > 0xFFFF for char in mapping):
+        full = cmap_format_12(12)
+        full.platformID, full.platEncID, full.language = 3, 10, 0
+        full.format, full.reserved, full.length, full.nGroups = 12, 0, 0, 0
+        full.cmap = dict(mapping)
+        table.tables.append(full)
+    tt["cmap"] = table
+    buffer = io.BytesIO()
+    try:
+        tt.save(buffer)
+    except Exception:
+        return None
+    return buffer.getvalue()
+
+
+def has_cmap(program: bytes) -> bool:
+    try:
+        tt = TTFont(io.BytesIO(program), lazy=True, fontNumber=0)
+        return "cmap" in tt and bool(tt.getBestCmap())
+    except Exception:
+        return False

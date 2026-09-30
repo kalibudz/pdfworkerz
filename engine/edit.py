@@ -31,6 +31,7 @@ import dataclasses
 import hashlib
 import io
 import math
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -45,10 +46,12 @@ from engine.fonts.blocks import TextBlock, detect_alignment, detect_blocks
 from engine.fonts.classify import classify_font_xref, split_subset_tag
 from engine.fonts.fit import fit_to_width
 from engine.fonts.kerning import build_kern_pairs
-from engine.fonts.match import FontCandidate, normalize_font_name
+from engine.fonts.match import FontCandidate, loose_font_key, normalize_font_name
+from engine.fonts.merge import program_postscript_name, with_postscript_name
 from engine.fonts.reflow import wrap_text
-from engine.fonts.resolve import TIER_EXACT, FontResolution, resolve_font
+from engine.fonts.resolve import TIER_EXACT, FontResolution, embedded_program_covers, resolve_font
 from engine.fonts.style import SpanTrace, TextState, advance_for_char, dedupe_texttrace, extract_page_spans
+from engine.fonts.tounicode import has_cmap, unicode_to_glyph_ids, with_cmap
 from engine.geometry import page_bounds
 from engine.verify import DiffResult, changed_outside, pixel_diff, render_to_array
 
@@ -144,6 +147,8 @@ def _verify_edit(
     expected_text: str,
     removed: list[SpanTrace],
     drawn: list[_DrawnLine] | None = None,
+    *,
+    allow_overlap: bool = False,
 ) -> VerificationResult:
     """FNT-12: confirm `expected_text` is now really on the page, measure how much
     of the page changed, how much changed outside the edit itself (the `removed`
@@ -183,7 +188,7 @@ def _verify_edit(
         text_matches=text_matches,
         diff=diff,
         outside_changed_fraction=changed_outside(before.render, after, allowed),
-        overlaps_other_text=overlaps,
+        overlaps_other_text=overlaps and not allow_overlap,
         misplaced_text=misplaced,
     )
 
@@ -215,9 +220,48 @@ def _resolve_font_resource(page: pymupdf.Page, resolution: FontResolution) -> st
         return resolution.fontname
     if resolution.font_bytes is None:
         raise ValueError("FontResolution has neither fontname nor font_bytes set")
-    name = f"{_EDIT_FONT_RESOURCE}{hashlib.sha256(resolution.font_bytes).hexdigest()[:12]}"
-    page.insert_font(fontname=name, fontbuffer=resolution.font_bytes)
+    program, postscript = _named_program(resolution)
+    name = f"{_EDIT_FONT_RESOURCE}{hashlib.sha256(program).hexdigest()[:12]}"
+    xref = page.insert_font(fontname=name, fontbuffer=program)
+    _set_base_font(page.parent, xref, postscript)
     return name
+
+
+def _named_program(resolution: FontResolution) -> tuple[bytes, str]:
+    """The font program to register, and the one name it goes by everywhere.
+
+    Text drawn by an edit must be findable by name afterwards (a move, restyle or format
+    paint looks its font up by the name texttrace reports). texttrace reports the
+    program's own PostScript name, so that name wins when there is one; a nameless
+    program is given the resolution's name, or failing that a stable one of its own."""
+    if resolution.font_bytes is None:
+        raise ValueError("FontResolution has no font_bytes to register")
+    own = program_postscript_name(resolution.font_bytes)
+    if own:
+        return resolution.font_bytes, own
+    digest = hashlib.sha256(resolution.font_bytes).hexdigest()[:12]
+    name = re.sub(r"[^A-Za-z0-9+._-]", "", resolution.postscript_name or "") or f"PDFWorkerzFont-{digest}"
+    return with_postscript_name(resolution.font_bytes, name), name
+
+
+def _set_base_font(doc: pymupdf.Document, xref: int, postscript: str) -> None:
+    """Register the font under its PostScript name. PyMuPDF writes the program's *full*
+    name ("Arial Regular") as /BaseFont while texttrace reports the PostScript name
+    ("ArialMT"), and the two could not be matched: the next Op on that text failed."""
+    base = "/" + re.sub(r"[^A-Za-z0-9+._-]", "", postscript)
+    if base == "/":
+        return
+    doc.xref_set_key(xref, "BaseFont", base)
+    descendants = doc.xref_get_key(xref, "DescendantFonts")
+    found = re.search(r"(\d+) 0 R", descendants[1]) if descendants[0] == "array" else None
+    font_xrefs = [xref] + ([int(found.group(1))] if found else [])
+    for font_xref in font_xrefs[1:]:
+        doc.xref_set_key(font_xref, "BaseFont", base)
+    for font_xref in font_xrefs:
+        descriptor = doc.xref_get_key(font_xref, "FontDescriptor")
+        match = re.search(r"(\d+) 0 R", descriptor[1]) if descriptor[0] == "xref" else None
+        if match:
+            doc.xref_set_key(int(match.group(1)), "FontName", base)
 
 
 def _drawing_metrics(span: SpanTrace) -> tuple[float, TextState]:
@@ -394,7 +438,7 @@ def draw_styled_text(
     return (x, y)
 
 
-def _find_font_entry(page: pymupdf.Page, basefont: str) -> tuple[int, str] | None:
+def _find_font_entry(page: pymupdf.Page, basefont: str, chars: str = "") -> tuple[int, str] | None:
     """The (xref, Tf resource name) of the page's font whose BaseFont matches, if any.
 
     Matched with the subset tag stripped and both sides case/punctuation-
@@ -417,18 +461,32 @@ def _find_font_entry(page: pymupdf.Page, basefont: str) -> tuple[int, str] | Non
     and only if none matches at all does a second pass accept a
     containment match (one normalized name a prefix/suffix of the other,
     with a minimum length so short names can't false-match each other).
+
+    Several fonts can share one name -- a generator's subsets that each hold different
+    characters, or nameless programs all reported as "(null)". Among equal matches, the
+    one whose program can draw `chars` (the span's own text) is chosen: taking the first
+    drew a figure with a subset that held only letters, falling to a look-alike.
     """
     _, plain = split_subset_tag(basefont)
     target = normalize_font_name(plain)
     entries = list(page.get_fonts(full=True))
 
+    exact: list[tuple[int, str]] = []
     for entry in entries:
         xref, _ext, font_type, entry_basefont, resource_name, *_rest = entry
         _, entry_plain = split_subset_tag(entry_basefont)
-        if normalize_font_name(entry_plain) == target:
-            return xref, resource_name
-        if not entry_basefont and plain.startswith(f"{font_type} ("):
-            return xref, resource_name
+        if normalize_font_name(entry_plain) == target or (not entry_basefont and plain.startswith(f"{font_type} (")):
+            exact.append((xref, resource_name))
+    if exact:
+        return _best_covering(page.parent, exact, chars)
+
+    # "ArialMT" and "Arial Regular" name the same font: compare the way FNT-06's
+    # find_by_name does, with style words like Regular/Book and MT/PSMT ignored.
+    loose = loose_font_key(plain)
+    if loose:
+        similar = [(entry[0], entry[4]) for entry in entries if loose_font_key(split_subset_tag(entry[3])[1]) == loose]
+        if similar:
+            return _best_covering(page.parent, similar, chars)
 
     if len(target) >= _MIN_CONTAINMENT_MATCH_LENGTH:
         for entry in entries:
@@ -438,6 +496,35 @@ def _find_font_entry(page: pymupdf.Page, basefont: str) -> tuple[int, str] | Non
             if candidate and (candidate.startswith(target) or target.startswith(candidate)):
                 return xref, resource_name
     return None
+
+
+def _shared_name(page: pymupdf.Page, basefont: str) -> bool:
+    target = normalize_font_name(split_subset_tag(basefont)[1])
+    names = [normalize_font_name(split_subset_tag(entry[3])[1]) for entry in page.get_fonts(full=True)]
+    return names.count(target) > 1
+
+
+def _program_with_cmap(doc: pymupdf.Document, xref: int) -> bytes | None:
+    """The font program embedded at `xref`, given a cmap when it has none.
+
+    A subset without a cmap can't say which glyph is which character; its ToUnicode
+    map, read backwards, can (engine.fonts.tounicode) -- for every character the
+    document already shows in that font."""
+    program = doc.extract_font(xref)[3] or None
+    if program and not has_cmap(program):
+        recovered = unicode_to_glyph_ids(doc, xref)
+        program = (with_cmap(program, recovered) if recovered else None) or program
+    return program
+
+
+def _best_covering(doc: pymupdf.Document, candidates: list[tuple[int, str]], chars: str) -> tuple[int, str]:
+    if len(candidates) == 1 or not chars:
+        return candidates[0]
+    for xref, resource_name in candidates:
+        program = _program_with_cmap(doc, xref)
+        if program and embedded_program_covers(program, chars):
+            return xref, resource_name
+    return candidates[0]
 
 
 def resolve_font_for_span(
@@ -457,7 +544,7 @@ def resolve_font_for_span(
     page = document.raw[page_index]
     style = span.style
 
-    found = _find_font_entry(page, style.font)
+    found = _find_font_entry(page, style.font, style.text)
     if found is None:
         raise FontResourceNotFoundError(f"could not find the font resource for {style.font!r} on page {page_index}")
     xref, resource_name = found
@@ -467,8 +554,13 @@ def resolve_font_for_span(
     with pikepdf.open(io.BytesIO(document.to_bytes())) as pikepdf_doc:
         classification = classify_font_xref(pikepdf_doc, xref, resource_name)
 
-    original_bytes = document.raw.extract_font(xref)[3] or None
+    original_bytes = _program_with_cmap(document.raw, xref)
     already_used = _collect_font_usage(extract_page_spans(document.raw, page_index), style.font)
+    if _shared_name(page, style.font):
+        # Several fonts on this page go by this name (nameless "(null)" subsets, say):
+        # other spans with the same name may be drawn in a different program, so only
+        # this span's own text is known to be in this one.
+        already_used = style.text
 
     resolution = resolve_font(
         classification,
@@ -780,9 +872,15 @@ def move_resize_block(
     width: float | None = None,
     font_index: list[FontCandidate],
     verify: bool = True,
+    keep_original: bool = False,
+    target_page_index: int | None = None,
 ) -> list[EditResult]:
     """EDT-05: move a text block by (`dx`, `dy`) page points (y-down, like
     every MuPDF coordinate) and/or re-wrap it to a new `width`.
+
+    EDT-15: with `keep_original`, the block is copied instead -- drawn again at the
+    offset, on `target_page_index` if given, with the original left in place. A copy
+    is allowed to overlap other text (a paste lands just beside its source).
 
     Unlike reflow_block, which must fit new text into the block's existing
     lines, resizing may change the line count: a narrower block grows
@@ -793,7 +891,10 @@ def move_resize_block(
     """
     if not block.lines:
         return []
-    page = document.raw[page_index]
+    target_index = page_index if target_page_index is None else target_page_index
+    if target_index != page_index and not keep_original:
+        raise OpValidationError("a text block can only be copied to another page, not moved there")
+    page = document.raw[target_index]
     reference = block.lines[0]
     font_size, text_state = _drawing_metrics(reference)
     resolution = resolve_font_for_span(document, page_index, reference, block.text, font_index=font_index)
@@ -819,8 +920,9 @@ def move_resize_block(
         if not (page_rect.x0 <= x < page_rect.x1 and page_rect.y0 < y <= page_rect.y1):
             raise OpValidationError(f"the block would be moved off the page (a line would start at {x:.0f}, {y:.0f})")
 
-    before = _capture(document, page_index, verify)
-    _redact_spans(page, list(block.lines))
+    before = _capture(document, target_index, verify)
+    if not keep_original:
+        _redact_spans(page, list(block.lines))
 
     results: list[EditResult] = []
     for text, origin, line in placed:
@@ -847,9 +949,31 @@ def move_resize_block(
         drawn = [
             (origin, result.end_point, font_size) for (_t, origin, _l), result in zip(placed, results, strict=True)
         ]
-        verification = _verify_edit(document, page_index, before, placed[0][0], list(block.lines), drawn)
+        removed = [] if keep_original else list(block.lines)
+        verification = _verify_edit(
+            document, target_index, before, placed[0][0], removed, drawn, allow_overlap=keep_original
+        )
         results[-1] = dataclasses.replace(results[-1], verification=verification)
     return results
+
+
+def delete_block(document: Document, page_index: int, block: TextBlock, *, verify: bool = True) -> EditResult:
+    """EDT-15: remove every line of a text block, and nothing else."""
+    if not block.lines:
+        raise OpValidationError("the text block is empty")
+    before = _capture(document, page_index, verify)
+    _redact_spans(document.raw[page_index], list(block.lines))
+    first = block.lines[0].style
+    result = EditResult(
+        tier=TIER_EXACT,
+        confidence=1.0,
+        requires_approval=False,
+        note=f"deleted {len(block.lines)} line(s)",
+        end_point=first.chars[0].origin if first.chars else (first.bbox[0], first.bbox[3]),
+    )
+    if before is None:
+        return result
+    return dataclasses.replace(result, verification=_verify_edit(document, page_index, before, "", list(block.lines)))
 
 
 def reflow_block(
