@@ -219,6 +219,27 @@ def test_span_boxes_sit_over_their_text_not_mirrored(page: Page, app_url: str, c
 
 
 @pytest.mark.feature("UI-02")
+def test_idle_span_boxes_do_not_draw_a_second_copy_of_the_text(page: Page, app_url: str, corpus: Corpus) -> None:
+    """The canvas already shows the real glyphs. An idle box that painted
+    its text too, in an approximated web font a few pixels off, doubled
+    every word on a real bank statement. Idle text must be invisible; an
+    editing box shows its text over an opaque background instead."""
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(corpus.simple))
+    _wait_overlay_ready(page)
+    color = page.eval_on_selector(".pw-span-box", "el => getComputedStyle(el).color")
+    assert color == "rgba(0, 0, 0, 0)"
+    page.click(".pw-span-box")
+    page.wait_for_selector(".pw-span-box.pw-span-editing", timeout=3000)
+    editing = page.eval_on_selector(
+        ".pw-span-box.pw-span-editing",
+        "el => [getComputedStyle(el).color, getComputedStyle(el).backgroundColor]",
+    )
+    assert editing == ["rgb(0, 0, 0)", "rgb(255, 255, 255)"]
+
+
+@pytest.mark.feature("UI-02")
 def test_clicking_a_span_opens_an_editable_overlay(page: Page, app_url: str, corpus: Corpus) -> None:
     _open_and_click_first_span(page, app_url, str(corpus.simple))
     is_editable = page.eval_on_selector(".pw-span-box.pw-span-editing", "el => el.isContentEditable")

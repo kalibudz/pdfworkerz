@@ -321,6 +321,13 @@ button {
   border-radius: 2px;
 }
 
+/* At rest a box is only a hit target: the rendered page already shows the
+ * real glyphs, and drawing the text again in an approximated web font on
+ * top of them doubled every word. Its inline color applies once editing. */
+.pw-span-box:not(.pw-span-editing) {
+  color: transparent !important;
+}
+
 .pw-span-box:hover {
   outline-color: var(--accent);
   background: rgba(47, 111, 235, 0.08);
@@ -328,7 +335,9 @@ button {
 
 .pw-span-box.pw-span-editing {
   outline: 2px solid var(--accent);
-  background: var(--panel);
+  /* Opaque, and page-colored rather than theme-colored, so it hides the
+   * rendered glyphs underneath and dark text stays readable in dark mode. */
+  background: #fff;
   box-shadow: var(--shadow);
   cursor: text;
 }
