@@ -1492,6 +1492,512 @@
     },
     {
       "additionalProperties": false,
+      "description": "FRM-03: add a new field to one page; see engine.forms.create_field for what each\nof these means per `field_type` (a radio group's own `rect` is ignored -- give\n`options`+`rects` instead).",
+      "properties": {
+        "op": {
+          "const": "create_field",
+          "default": "create_field",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "field_type": {
+          "enum": [
+            "text",
+            "checkbox",
+            "radio",
+            "dropdown",
+            "listbox",
+            "signature"
+          ],
+          "title": "Field Type",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "rect": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rect"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Options"
+        },
+        "rects": {
+          "anyOf": [
+            {
+              "items": {
+                "maxItems": 4,
+                "minItems": 4,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rects"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "font": {
+          "default": "Helv",
+          "title": "Font",
+          "type": "string"
+        },
+        "size": {
+          "default": 0.0,
+          "title": "Size",
+          "type": "number"
+        },
+        "multiline": {
+          "default": false,
+          "title": "Multiline",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_index",
+        "field_type",
+        "name"
+      ],
+      "title": "CreateFieldOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FRM-03: change an existing field's type-specific properties; only the fields\nactually given are changed (see engine.forms.edit_field for which properties apply\nto which field type -- an inapplicable one is refused).",
+      "properties": {
+        "op": {
+          "const": "edit_field",
+          "default": "edit_field",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "font": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "multiline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Multiline"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Options"
+        },
+        "rect": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rect"
+        },
+        "rects": {
+          "anyOf": [
+            {
+              "items": {
+                "maxItems": 4,
+                "minItems": 4,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rects"
+        }
+      },
+      "required": [
+        "page_index",
+        "name"
+      ],
+      "title": "EditFieldOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FRM-03: remove a field from both the page's annotations and the AcroForm's field\ntree (a radio group's every button together).",
+      "properties": {
+        "op": {
+          "const": "delete_field",
+          "default": "delete_field",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page_index",
+        "name"
+      ],
+      "title": "DeleteFieldOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FRM-07: every field on one page as FDF/XFDF/JSON/CSV bytes. Read-only, like\nPageFieldsOp; server/app.py gives it its own GET route (like render_page's) since\nits result is raw bytes of a caller-chosen format, not journaled JSON.",
+      "properties": {
+        "op": {
+          "const": "export_form_data",
+          "default": "export_form_data",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "format": {
+          "enum": [
+            "fdf",
+            "xfdf",
+            "json",
+            "csv"
+          ],
+          "title": "Format",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page_index",
+        "format"
+      ],
+      "title": "ExportFormDataOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FRM-07: apply previously-exported (or hand-written) field data to one page, in one\nundo step. `data_base64` is the file's bytes, base64-encoded for the JSON Op body --\nthe same convention RenderPageOp's PNG result and SIG-01's image stamp input use.",
+      "properties": {
+        "op": {
+          "const": "import_form_data",
+          "default": "import_form_data",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "format": {
+          "enum": [
+            "fdf",
+            "xfdf",
+            "json",
+            "csv"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "data_base64": {
+          "title": "Data Base64",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page_index",
+        "format",
+        "data_base64"
+      ],
+      "title": "ImportFormDataOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FRM-04: propose likely field locations on a flat (non-interactive) page\nfrom visual cues alone (a line/underscore -> text field, a small box ->\ncheckbox). Read-only, like PageFieldsOp -- never journaled; server/app.py\nserves it from its own GET route. Nothing is created until the caller\nreviews the proposals and issues a separate CreateDetectedFieldsOp (or\nindividual CreateFieldOp calls).",
+      "properties": {
+        "op": {
+          "const": "detect_form_fields",
+          "default": "detect_form_fields",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "dpi": {
+          "default": 150,
+          "title": "Dpi",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_index"
+      ],
+      "title": "DetectFormFieldsOp",
+      "type": "object"
+    },
+    {
+      "$defs": {
+        "FieldProposal": {
+          "description": "FRM-04: one auto-detected candidate field, for review before anything is\ncreated. Nothing in this module ever turns a proposal into a real field on\nits own -- see :class:`~engine.ops.forms.CreateDetectedFieldsOp`.",
+          "properties": {
+            "field_type": {
+              "enum": [
+                "text",
+                "checkbox"
+              ],
+              "title": "Field Type",
+              "type": "string"
+            },
+            "rect": {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "title": "Rect",
+              "type": "array"
+            },
+            "confidence": {
+              "title": "Confidence",
+              "type": "number"
+            },
+            "suggested_name": {
+              "title": "Suggested Name",
+              "type": "string"
+            },
+            "label_text": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label Text"
+            }
+          },
+          "required": [
+            "field_type",
+            "rect",
+            "confidence",
+            "suggested_name",
+            "label_text"
+          ],
+          "title": "FieldProposal",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "FRM-04's accept step: turn a batch of (presumably reviewed/filtered)\nFieldProposals into real AcroForm fields via FRM-03's own create_field, in\none journal entry -- so accepting several proposals at once undoes as a\nsingle step, and a failure partway (e.g. a duplicate name) leaves nothing\nbehind (UndoRedoJournal.record rolls the whole Op back on any exception,\nsame as every other multi-step Op). `proposals` is normally exactly what\na prior DetectFormFieldsOp returned, possibly with some entries dropped by\nthe caller after review -- never applied automatically on its own.",
+      "properties": {
+        "op": {
+          "const": "create_detected_fields",
+          "default": "create_detected_fields",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "proposals": {
+          "items": {
+            "$ref": "#/$defs/FieldProposal"
+          },
+          "title": "Proposals",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_index",
+        "proposals"
+      ],
+      "title": "CreateDetectedFieldsOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FRM-08: whether this document's AcroForm carries an /XFA entry. Read-only and not\npage-scoped (it's a whole-document property); server/app.py gives it its own GET\nroute, like PageFieldsOp's.",
+      "properties": {
+        "op": {
+          "const": "detect_xfa",
+          "default": "detect_xfa",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "title": "DetectXFAOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "Every image placement on one page. Read-only, so -- like\nPageSpansOp -- never journaled; server/app.py serves it from a GET route.",
       "properties": {
         "op": {
@@ -4629,6 +5135,162 @@
         "index"
       ],
       "title": "DeleteShapeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Apply a real PAdES digital signature to the document (SIG-02), optionally\ntimestamped by an RFC 3161 TSA (SIG-04). See engine.pades.sign_document for\nthe exact contract -- in particular, this signs the document's current\non-disk bytes, not unsaved in-memory edits, and leaves `document` reloaded\nfrom the signed file afterward.",
+      "properties": {
+        "op": {
+          "const": "sign_document",
+          "default": "sign_document",
+          "title": "Op",
+          "type": "string"
+        },
+        "cert_pem": {
+          "title": "Cert Pem",
+          "type": "string"
+        },
+        "key_pem": {
+          "title": "Key Pem",
+          "type": "string"
+        },
+        "key_passphrase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Key Passphrase"
+        },
+        "field_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field Name"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        },
+        "tsa_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tsa Url"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        }
+      },
+      "required": [
+        "cert_pem",
+        "key_pem"
+      ],
+      "title": "SignDocumentOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "SIG-03: a validation report for every signature embedded in the document.\nRead-only (like InspectOp/RenderPageOp): never journaled, applied directly.",
+      "properties": {
+        "op": {
+          "const": "validate_signatures",
+          "default": "validate_signatures",
+          "title": "Op",
+          "type": "string"
+        },
+        "trust_anchors": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trust Anchors"
+        },
+        "ts_trust_anchors": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ts Trust Anchors"
+        }
+      },
+      "title": "ValidateSignaturesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "SIG-05: whether the document is signed and whether that signature is\nstill current -- what the web UI checks before warning the user that\nediting further will invalidate it. Read-only, applied directly.",
+      "properties": {
+        "op": {
+          "const": "document_signature_status",
+          "default": "document_signature_status",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "title": "DocumentSignatureStatusOp",
       "type": "object"
     },
     {

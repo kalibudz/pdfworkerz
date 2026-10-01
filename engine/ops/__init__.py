@@ -25,7 +25,18 @@ from engine.ops.base import InspectOp, Op, RenderPageOp, op_registry, parse_op
 from engine.ops.batch import BatchOp
 from engine.ops.certs import GenerateCertificateOp
 from engine.ops.design import BackgroundOp, BatesOp, HeaderFooterOp, PageNumbersOp, StampOp, WatermarkOp
-from engine.ops.forms import FillFieldsOp, FlattenFormOp, PageFieldsOp, SetTabOrderOp
+from engine.ops.forms import (
+    CreateFieldOp,
+    DeleteFieldOp,
+    DetectXFAOp,
+    EditFieldOp,
+    ExportFormDataOp,
+    FillFieldsOp,
+    FlattenFormOp,
+    ImportFormDataOp,
+    PageFieldsOp,
+    SetTabOrderOp,
+)
 from engine.ops.images import (
     CropImageOp,
     DeleteImageOp,
@@ -53,6 +64,7 @@ from engine.ops.pages import (
 from engine.ops.protect import RemovePasswordOp, SetPasswordOp, SetPermissionsOp
 from engine.ops.redact import FindRedactionCandidatesOp, RedactAreasOp, SanitizeOp
 from engine.ops.shapes import DeleteShapeOp, DrawShapeOp, EditShapeOp, PageShapesOp
+from engine.ops.sign import DocumentSignatureStatusOp, SignDocumentOp, ValidateSignaturesOp
 from engine.ops.signatures import PlaceSignatureOp
 from engine.ops.spellcheck import CorrectWordOp, SpellCheckOp
 from engine.ops.structure import (
@@ -100,20 +112,26 @@ __all__ = [
     "BookletOp",
     "ContentsPageOp",
     "CorrectWordOp",
+    "CreateFieldOp",
     "CropImageOp",
     "CropPagesOp",
     "DeleteAnnotationOp",
     "DeleteBookmarkOp",
+    "DeleteFieldOp",
     "DeleteImageOp",
     "DeleteObjectsOp",
     "DeletePagesOp",
     "DeleteShapeOp",
     "DeleteTextOp",
+    "DetectXFAOp",
+    "DocumentSignatureStatusOp",
     "DrawShapeOp",
     "DuplicateObjectsOp",
     "DuplicatePagesOp",
+    "EditFieldOp",
     "EditShapeOp",
     "EditSpanOp",
+    "ExportFormDataOp",
     "ExtractAttachmentOp",
     "ExtractPagesOp",
     "FillFieldsOp",
@@ -124,6 +142,7 @@ __all__ = [
     "GenerateCertificateOp",
     "GetMetadataOp",
     "HeaderFooterOp",
+    "ImportFormDataOp",
     "InsertImageOp",
     "InsertPagesOp",
     "InsertTextOp",
@@ -170,6 +189,7 @@ __all__ = [
     "SetPasswordOp",
     "SetPermissionsOp",
     "SetTabOrderOp",
+    "SignDocumentOp",
     "SpellCheckOp",
     "SplitOp",
     "StampOp",
@@ -177,6 +197,7 @@ __all__ = [
     "UpdateAnnotationOp",
     "UpdateBookmarkOp",
     "UpdateLinkOp",
+    "ValidateSignaturesOp",
     "WatermarkOp",
     "op_registry",
     "parse_op",

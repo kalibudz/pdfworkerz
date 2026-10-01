@@ -66,14 +66,17 @@ installed version, not assumed from memory):
 
 from __future__ import annotations
 
+import io
 import re
 from typing import Literal
 
+import pikepdf
 import pymupdf
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from engine.document import Document
 from engine.errors import OpValidationError
+from engine.pdfbytes import plain_bytes
 
 Rect = tuple[float, float, float, float]
 
@@ -132,6 +135,24 @@ def _union_rect(rects: list[pymupdf.Rect | None]) -> Rect:
 def _as_rect(rect: pymupdf.Rect | None) -> Rect:
     box = pymupdf.Rect(rect)
     return (box.x0, box.y0, box.x1, box.y1)
+
+
+def _validate_rect(page: pymupdf.Page, rect: Rect, *, label: str = "field") -> pymupdf.Rect:
+    """A field's rect must have positive area, normalized corners (x0<x1, y0<y1), and lie
+    within the page -- otherwise `page.add_widget` raises a bare ``ValueError("bad rect")``
+    for a zero-area/inverted rect (which server/app.py's error map doesn't know how to turn
+    into a clean 400, since it isn't a PdfWorkerzError) and raises nothing at all for an
+    out-of-bounds one (silently creating an unreachable/invisible field). Both FRM-03's
+    simple-field path and its raw-xref radio-group path (`_build_radio_group`) call this
+    before writing anything, so every field creation/edit gets the same check."""
+    box = pymupdf.Rect(rect)
+    if box.is_empty or not box.is_valid:
+        raise OpValidationError(
+            f"{label} rect {tuple(rect)!r} is empty or inverted; need x0 < x1 and y0 < y1 with positive area"
+        )
+    if not page.rect.contains(box):
+        raise OpValidationError(f"{label} rect {tuple(rect)!r} is outside the page ({_as_rect(page.rect)!r})")
+    return box
 
 
 def _group_widgets(page: pymupdf.Page) -> dict[str, list[pymupdf.Widget]]:
@@ -199,12 +220,459 @@ def _widgets_by_field(page: pymupdf.Page) -> dict[str, list[pymupdf.Widget]]:
     return {name: widgets for name, widgets in _group_widgets(page).items() if name}
 
 
+# -- FRM-03: create, edit, delete fields --------------------------------------------------
+#
+# Simple (single-widget) field types -- text, checkbox, dropdown, listbox, signature -- are
+# created with page.add_widget(), confirmed (see this module's own docstring, and a REPL
+# check before writing this code) to build a correct, immediately-visible widget: the new
+# field shows up in page.widgets() right away, no save/reopen needed, so create_field can
+# hand back a FieldInfo straight away and a later list_fields()/fill_fields() call in the
+# same session sees it too.
+#
+# A radio *group* is the one shape page.add_widget() can't build (no real /Parent+/Kids --
+# see the module docstring). This module instead writes the raw PDF structure directly with
+# pymupdf's own low-level xref calls (get_new_xref/update_object/update_stream/xref_set_key
+# -- the same primitives set_tab_order already uses for /Annots, so no new library is
+# introduced for this). Confirmed by a REPL check: unlike add_widget, a freshly-built raw
+# structure is *not* picked up by an already-open Page's cached widget list on its own --
+# pymupdf.Document.reload_page(page) is required afterwards, and must be called with no
+# other live reference to that Page object around (reload_page's own internal refcount
+# assertion fails if the caller still holds one), so every helper below re-fetches the page
+# via `document.raw[page_index]` after a reload rather than keeping an old Page variable.
+
+_CREATABLE_TYPES: frozenset[str] = frozenset({"text", "checkbox", "radio", "dropdown", "listbox", "signature"})
+
+# Missing from pymupdf's stub (like PDF_ENCRYPT_KEEP in engine.pdfbytes), confirmed present
+# on the installed 1.28.2 at runtime.
+_FIELD_TYPE_CONST: dict[str, int] = {
+    "text": pymupdf.PDF_WIDGET_TYPE_TEXT,  # type: ignore[attr-defined]
+    "checkbox": pymupdf.PDF_WIDGET_TYPE_CHECKBOX,  # type: ignore[attr-defined]
+    "dropdown": pymupdf.PDF_WIDGET_TYPE_COMBOBOX,  # type: ignore[attr-defined]
+    "listbox": pymupdf.PDF_WIDGET_TYPE_LISTBOX,  # type: ignore[attr-defined]
+    "signature": pymupdf.PDF_WIDGET_TYPE_SIGNATURE,  # type: ignore[attr-defined]
+}
+_MULTILINE_FLAG: int = pymupdf.PDF_TX_FIELD_IS_MULTILINE  # type: ignore[attr-defined]
+
+# Type-specific properties FRM-03's edit_field accepts per field type, beyond the generic
+# "rect" (reposition/resize) every simple type also accepts. Radio groups are edited through
+# a separate path (_edit_radio_group) since "options" there means something structurally
+# different (new /Kids, not a /Opt array).
+_EDITABLE_PROPS: dict[FieldType, frozenset[str]] = {
+    "text": frozenset({"font", "size", "multiline", "rect"}),
+    "checkbox": frozenset({"rect"}),
+    "dropdown": frozenset({"options", "rect"}),
+    "listbox": frozenset({"options", "rect"}),
+    "signature": frozenset({"rect"}),
+}
+
+
+def _pdf_name_token(value: str) -> str:
+    """A PDF `/Name` token for `value`. Field option names in this engine are plain
+    identifiers (radio/dropdown/listbox options, as validated by fill_fields already);
+    the only characters routinely seen that aren't legal bare in a PDF name are escaped
+    as `#xx`, the PDF 1.2+ name-escaping convention, so an option like "50% Off" still
+    round-trips instead of corrupting the object syntax."""
+    escaped = "".join(f"#{ord(ch):02x}" if ch in " \t\r\n()<>[]{}/%#" or ord(ch) < 33 else ch for ch in value)
+    return f"/{escaped}"
+
+
+def _pdf_string_literal(value: str) -> str:
+    """A PDF `(...)` string literal for `value`, with the three characters that would
+    otherwise corrupt the literal (backslash and the two parens) backslash-escaped."""
+    escaped = value.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+    return f"({escaped})"
+
+
+def _require_known_field(groups: dict[str, list[pymupdf.Widget]], name: str, page_index: int) -> list[pymupdf.Widget]:
+    widgets = groups.get(name)
+    if widgets is None:
+        raise OpValidationError(f"unknown field name {name!r} on page {page_index}")
+    return widgets
+
+
+def _make_appearance_xobject(document: Document, size: tuple[float, float], content: str) -> int:
+    doc = document.raw
+    width, height = size
+    xref = doc.get_new_xref()
+    doc.update_object(
+        xref,
+        f"<< /Type /XObject /Subtype /Form /BBox [0 0 {width} {height}] "
+        f"/Matrix [1 0 0 1 0 0] /Resources << /ProcSet [/PDF] >> >>",
+    )
+    doc.update_stream(xref, content.encode("latin-1"))
+    return xref
+
+
+def _append_page_annots(document: Document, page: pymupdf.Page, xrefs: list[int]) -> None:
+    tokens = _page_annots_tokens(document, page.xref)
+    tokens += [f"{xref} 0 R".encode("ascii") for xref in xrefs]
+    document.raw.xref_set_key(page.xref, "Annots", (b"[" + b" ".join(tokens) + b"]").decode("ascii"))
+
+
+def _remove_page_annots(document: Document, page: pymupdf.Page, xrefs: set[int]) -> None:
+    tokens = _page_annots_tokens(document, page.xref)
+    kept = [token for token in tokens if int(token.split()[0]) not in xrefs]
+    document.raw.xref_set_key(page.xref, "Annots", (b"[" + b" ".join(kept) + b"]").decode("ascii"))
+
+
+_ACROFORM_FIELDS_RE = re.compile(r"/Fields\s*\[([^\]]*)\]")
+
+
+def _acroform_text(document: Document) -> tuple[str, int | None]:
+    """The AcroForm dict's own text, and -- if it's its own indirect object rather than
+    inline in the catalog -- the xref to write it back to. `document.raw.xref_get_key`
+    reports an inline dict's full text directly (e.g. after page.add_widget or this
+    module's own writes, both confirmed in a REPL check to leave it inline); some
+    externally-produced files instead point `/AcroForm` at a separate indirect object,
+    which is handled by resolving to that object's own text instead."""
+    doc = document.raw
+    catalog = doc.pdf_catalog()
+    kind, raw = doc.xref_get_key(catalog, "AcroForm")
+    if kind == "null":
+        return "<< /Fields [] >>", None
+    if kind == "xref":
+        target = int(raw.split()[0])
+        return doc.xref_object(target), target
+    if kind == "dict":
+        return raw, None
+    raise OpValidationError(f"unexpected /AcroForm value type {kind!r} on this document")
+
+
+def _write_acroform_text(document: Document, text: str, indirect_xref: int | None) -> None:
+    doc = document.raw
+    if indirect_xref is None:
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm", text)
+    else:
+        doc.update_object(indirect_xref, text)
+
+
+def _append_acroform_fields(document: Document, xrefs: list[int]) -> None:
+    text, indirect = _acroform_text(document)
+    additions = " ".join(f"{xref} 0 R" for xref in xrefs)
+    match = _ACROFORM_FIELDS_RE.search(text)
+    if match:
+        existing = match.group(1).strip()
+        merged = f"{existing} {additions}".strip() if existing else additions
+        new_text = text[: match.start()] + f"/Fields [{merged}]" + text[match.end() :]
+    else:
+        insert_at = text.index("<<") + 2
+        new_text = text[:insert_at] + f" /Fields [{additions}] " + text[insert_at:]
+    _write_acroform_text(document, new_text, indirect)
+
+
+def _remove_acroform_fields(document: Document, xrefs: set[int]) -> None:
+    text, indirect = _acroform_text(document)
+    match = _ACROFORM_FIELDS_RE.search(text)
+    if not match:
+        return
+    tokens = _ANNOT_REF_RE.findall(match.group(1).encode("latin-1"))
+    kept = [token for token in tokens if int(token.split()[0]) not in xrefs]
+    new_text = text[: match.start()] + f"/Fields [{b' '.join(kept).decode('ascii')}]" + text[match.end() :]
+    _write_acroform_text(document, new_text, indirect)
+
+
+def _radio_parent_xref(document: Document, widget: pymupdf.Widget) -> int:
+    kind, raw = document.raw.xref_get_key(widget.xref, "Parent")
+    if kind != "xref":
+        raise OpValidationError(f"field {widget.field_name!r} has no /Parent -- not a real radio group")
+    return int(raw.split()[0])
+
+
+def _build_radio_group(
+    document: Document,
+    page: pymupdf.Page,
+    name: str,
+    options: list[str],
+    rects: list[Rect],
+    selected: str | None,
+) -> int:
+    """Write a real /Parent+/Kids radio group directly (see this section's own docstring
+    for why) and wire it into the page's /Annots and the document's /AcroForm /Fields.
+    Returns the parent field's xref; the caller must reload the page afterwards."""
+    if len(options) < 2:
+        raise OpValidationError(f"a radio group needs at least two options, got {options!r}")
+    if len(options) != len(rects):
+        raise OpValidationError(f"radio 'options' and 'rects' must be the same length ({len(options)} vs {len(rects)})")
+    if len(set(options)) != len(options):
+        raise OpValidationError(f"duplicate radio option name(s): {options}")
+    if selected is not None and selected not in options:
+        raise OpValidationError(f"radio value {selected!r} is not one of {options}")
+    # Validate every option's rect before writing anything (same "nothing applied until
+    # everything validates" discipline fill_fields already uses): page.add_widget raises a
+    # bare ValueError for a zero-area/inverted rect in the simple-field path, and this raw
+    # xref path wouldn't raise anything at all for a bad one, so every rect is normalized
+    # here explicitly instead of trusting the PDF writer to reject it.
+    for rect in rects:
+        _validate_rect(page, rect, label="radio option")
+
+    doc = document.raw
+    parent_xref = doc.get_new_xref()
+    kid_xrefs: list[int] = []
+    for option, rect in zip(options, rects, strict=True):
+        box = pymupdf.Rect(rect)
+        width, height = box.width, box.height
+        on_xref = _make_appearance_xobject(document, (width, height), f"q 0 0 0 rg 0 0 {width} {height} re f Q")
+        off_xref = _make_appearance_xobject(document, (width, height), "")
+        as_state = _pdf_name_token(option) if option == selected else "/Off"
+        option_name = _pdf_name_token(option)
+        kid_xref = doc.get_new_xref()
+        doc.update_object(
+            kid_xref,
+            f"<< /Type /Annot /Subtype /Widget /Rect [{box.x0} {box.y0} {box.x1} {box.y1}] "
+            f"/Parent {parent_xref} 0 R /AS {as_state} /F 4 "
+            f"/AP << /N << {option_name} {on_xref} 0 R /Off {off_xref} 0 R >> >> >>",
+        )
+        kid_xrefs.append(kid_xref)
+
+    kids_text = " ".join(f"{xref} 0 R" for xref in kid_xrefs)
+    value_token = _pdf_name_token(selected) if selected is not None else "/Off"
+    doc.update_object(
+        parent_xref,
+        f"<< /FT /Btn /T {_pdf_string_literal(name)} /Ff 32768 /V {value_token} /Kids [{kids_text}] >>",
+    )
+    _append_page_annots(document, page, kid_xrefs)
+    _append_acroform_fields(document, [parent_xref])
+    return parent_xref
+
+
+def create_field(
+    document: Document,
+    page_index: int,
+    *,
+    field_type: str,
+    name: str,
+    rect: Rect | None = None,
+    options: list[str] | None = None,
+    rects: list[Rect] | None = None,
+    value: str | bool | None = None,
+    font: str = "Helv",
+    size: float = 0.0,
+    multiline: bool = False,
+) -> FieldInfo:
+    """FRM-03: add a new AcroForm field to `page_index` and return it as FRM-01 would
+    report it. `field_type` is one of "text", "checkbox", "radio", "dropdown", "listbox"
+    or "signature".
+
+    - text: `value` (str, default ""), `font` (one of Cour/TiRo/Helv/ZaDb -- see FRM-02's
+      own docstring for why those four), `size` (0 means "auto-size", pymupdf's own
+      default), `multiline`.
+    - checkbox: `value` (bool, default False).
+    - dropdown / listbox: `options` (required, at least one), `value` (one of `options`
+      or None for "nothing selected").
+    - radio: a GROUP, not a single widget -- give `options` (at least two, the export
+      value of each button) and `rects` (one rect per option, same length/order as
+      `options`); the top-level `rect` argument is ignored for this type. `value` is
+      one of `options` or None.
+    - signature: an interactive /Sig placeholder field (not SIG-01's drawn/typed/image
+      stamp, which is ordinary page content, not an AcroForm field) -- a later PAdES
+      signer (SIG-02) targets this field by name. Carries no `value` through this API.
+
+    Refuses a name already used by another field on this page (AcroForm field names
+    must be unique on a page for FRM-01/FRM-02 to address them unambiguously)."""
+    if field_type not in _CREATABLE_TYPES:
+        raise OpValidationError(f"unknown field_type {field_type!r}; choose one of {sorted(_CREATABLE_TYPES)}")
+    if not name:
+        raise OpValidationError("a field needs a non-empty name")
+    page = document.raw[page_index]
+    if name in _widgets_by_field(page):
+        raise OpValidationError(f"a field named {name!r} already exists on page {page_index}")
+
+    if field_type == "radio":
+        if options is None or rects is None:
+            raise OpValidationError("a radio field needs 'options' and 'rects' (one rect per option)")
+        if value is not None and not isinstance(value, str):
+            raise OpValidationError(f"a radio field's value must be a string or None, not {value!r}")
+        _build_radio_group(document, page, name, options, rects, value)
+        document.raw.reload_page(page)
+        page = document.raw[page_index]
+        return _field_info(name, _widgets_by_field(page)[name], page_index)
+
+    if rect is None:
+        raise OpValidationError(f"a {field_type} field needs a 'rect'")
+    box = _validate_rect(page, rect)
+
+    widget = pymupdf.Widget()
+    widget.field_name = name
+    widget.rect = box
+    widget.field_type = _FIELD_TYPE_CONST[field_type]
+
+    if field_type == "text":
+        if value is not None and not isinstance(value, str):
+            raise OpValidationError(f"a text field's value must be a string, not {value!r}")
+        widget.field_value = value or ""
+        widget.text_font = font
+        # pymupdf's stub narrows text_fontsize to int; it accepts (and this module needs) a float.
+        widget.text_fontsize = size  # type: ignore[assignment]
+        if multiline:
+            widget.field_flags = _MULTILINE_FLAG
+    elif field_type == "checkbox":
+        if value is not None and not isinstance(value, bool):
+            raise OpValidationError(f"a checkbox field's value must be a bool, not {value!r}")
+        widget.field_value = bool(value)
+    elif field_type in ("dropdown", "listbox"):
+        if not options:
+            raise OpValidationError(f"a {field_type} field needs at least one option")
+        if value is not None and value not in options:
+            raise OpValidationError(f"value {value!r} is not one of {options}")
+        widget.choice_values = list(options)
+        widget.field_value = value or ""
+    # signature: no further fields to set.
+
+    page.add_widget(widget)
+    return _field_info(name, _widgets_by_field(page)[name], page_index)
+
+
+def edit_field(document: Document, page_index: int, name: str, **changes: object) -> FieldInfo:
+    """FRM-03: change an existing field's type-specific properties (e.g. a dropdown's
+    `options`, a text field's `font`/`size`/`multiline`, or any simple field's `rect`)
+    after creation. Refuses a change not applicable to the field's own type (e.g. giving
+    `options` to a text field), and refuses unknown field/page the same way fill_fields
+    does. A radio group's `options` (with matching `rects`) rebuilds the whole group
+    (see `_edit_radio_group`); this never changes which radio button -- if any -- is
+    currently selected unless that option was itself removed, in which case the
+    selection is cleared rather than left pointing at a dropped option."""
+    page = document.raw[page_index]
+    groups = _widgets_by_field(page)
+    is_radio = len(_require_known_field(groups, name, page_index)) > 1
+    # Drop every live reference to `page` (including the ones `groups` holds, one per
+    # widget on it) before a possible radio rebuild: pymupdf.Document.reload_page refuses
+    # to run while any other Python reference to the same Page is still alive (confirmed
+    # in a REPL check; engine.images._remove_placement hits the identical constraint, see
+    # its own "del source_page" comment), and this function's own `page`/`groups` would
+    # otherwise still be alive in this frame while `_edit_radio_group` is running.
+    del page, groups
+    if is_radio:
+        return _edit_radio_group(document, page_index, name, changes)
+
+    page = document.raw[page_index]
+    widgets = _widgets_by_field(page)[name]
+    widget = widgets[0]
+    field_type = _field_type(widget)
+    allowed = _EDITABLE_PROPS.get(field_type, frozenset())
+    unknown = set(changes) - allowed
+    if unknown:
+        raise OpValidationError(
+            f"field {name!r} ({field_type}) doesn't support editing {sorted(unknown)}; editable: {sorted(allowed)}"
+        )
+    if not changes:
+        raise OpValidationError("no changes given")
+
+    if field_type == "text":
+        if "font" in changes:
+            widget.text_font = str(changes["font"])
+        if "size" in changes:
+            widget.text_fontsize = float(changes["size"])  # type: ignore[arg-type,assignment]
+        if "multiline" in changes:
+            flags = widget.field_flags or 0
+            flags = flags | _MULTILINE_FLAG if changes["multiline"] else flags & ~_MULTILINE_FLAG
+            widget.field_flags = flags
+    elif field_type in ("dropdown", "listbox"):
+        if "options" in changes:
+            new_options = list(changes["options"])  # type: ignore[call-overload]
+            if not new_options:
+                raise OpValidationError(f"field {name!r} needs at least one option")
+            widget.choice_values = new_options
+            clear_value = widget.field_value not in new_options
+            if clear_value:
+                widget.field_value = ""
+    if "rect" in changes:
+        widget.rect = _validate_rect(page, changes["rect"])  # type: ignore[arg-type]
+
+    widget.update()
+    if field_type in ("dropdown", "listbox") and "options" in changes and clear_value:
+        # widget.update() silently refuses to rewrite /V to empty for a choice widget
+        # (confirmed: xref_get_key(widget.xref, "V") still showed the OLD value, both
+        # right after update() and after a save/reopen, with no matching /Opt entry --
+        # a corrupted field, not merely a stale in-memory read) -- clear /V directly.
+        document.raw.xref_set_key(widget.xref, "V", "null")
+    return _field_info(name, [widget], page_index)
+
+
+def _edit_radio_group(document: Document, page_index: int, name: str, changes: dict[str, object]) -> FieldInfo:
+    """Rebuild radio group `name` to a new set of options/rects. Takes only `page_index`
+    and `name` -- never a Page/Widget object the caller already fetched -- precisely so
+    the caller holds no competing live reference by the time this reloads the page; see
+    edit_field's own comment for why that matters."""
+    allowed = frozenset({"options", "rects"})
+    unknown = set(changes) - allowed
+    if unknown:
+        raise OpValidationError(
+            f"radio field {name!r} doesn't support editing {sorted(unknown)}; editable: {sorted(allowed)}"
+        )
+    if not changes:
+        raise OpValidationError("no changes given")
+    if ("options" in changes) != ("rects" in changes):
+        raise OpValidationError("editing a radio group's options requires both 'options' and 'rects' together")
+
+    page = document.raw[page_index]
+    widgets = _widgets_by_field(page)[name]
+    current_options = [widget.on_state() or "" for widget in widgets]
+    selected = next(
+        (
+            state
+            for widget, state in zip(widgets, current_options, strict=True)
+            if widget.field_value not in (None, "Off")
+        ),
+        None,
+    )
+    new_options: list[str] = list(changes.get("options", current_options))  # type: ignore[call-overload]
+    new_rects: list[Rect] = list(
+        changes.get("rects", [_as_rect(widget.rect) for widget in widgets])  # type: ignore[call-overload]
+    )
+    if selected not in new_options:
+        selected = None
+    parent_xref = _radio_parent_xref(document, widgets[0])
+    kid_xrefs = {widget.xref for widget in widgets}
+    del widgets  # see this function's own note on live references, below
+
+    # The old kids are removed with a raw /Annots rewrite (_remove_page_annots), *not*
+    # page.delete_widget: confirmed in a REPL check that calling page.delete_widget and
+    # then pymupdf.Document.reload_page on the same Page object -- even with zero other
+    # live references to it by then -- hits the same internal assertion this whole
+    # function is already careful to avoid (reload_page gets back the same internal
+    # pointer it started with and refuses to proceed, as if nothing had reloaded).
+    # Going fully through this module's own raw-xref helpers for *both* the removal and
+    # the rebuild, with exactly one reload_page at the very end, sidesteps it.
+    _remove_page_annots(document, page, kid_xrefs)
+    _remove_acroform_fields(document, {parent_xref})
+    _build_radio_group(document, page, name, new_options, new_rects, selected)
+    document.raw.reload_page(page)
+    del page
+    page = document.raw[page_index]
+    return _field_info(name, _widgets_by_field(page)[name], page_index)
+
+
+def delete_field(document: Document, page_index: int, name: str) -> None:
+    """FRM-03: remove a field from both the page's annotations and the AcroForm's
+    field tree. A radio group's every button is removed together. Refuses an
+    unknown field/page name the same way fill_fields does. No page reload is needed
+    here (unlike field creation/editing): `page.delete_widget` -- pymupdf's own API,
+    unlike this module's raw-xref radio *construction* -- already live-updates the
+    page's widget list immediately, confirmed in a REPL check."""
+    page = document.raw[page_index]
+    groups = _widgets_by_field(page)
+    widgets = _require_known_field(groups, name, page_index)
+
+    if len(widgets) > 1:
+        parent_xref = _radio_parent_xref(document, widgets[0])
+        for widget in widgets:
+            page.delete_widget(widget)
+        _remove_acroform_fields(document, {parent_xref})
+    else:
+        page.delete_widget(widgets[0])
+
+
 class FillResult(BaseModel):
-    """FRM-02: what :func:`fill_fields` changed."""
+    """FRM-02: what :func:`fill_fields` changed. ``unknown`` is always empty when this
+    comes straight from :func:`fill_fields` itself (an unknown name there refuses the
+    whole call instead); FRM-07's :func:`engine.form_data.import_form_data` is the one
+    caller that fills it in, since an unrecognized field name on import is reported
+    rather than treated as fatal (see that module)."""
 
     model_config = ConfigDict(frozen=True)
 
     filled: list[str]
+    unknown: list[str] = Field(default_factory=list)
 
 
 _CHECKBOX_TRUE_SPELLINGS = ("true", "1")
@@ -408,3 +876,52 @@ def flatten_form(document: Document, page_index: int | None = None) -> FlattenRe
         _clear_acroform(document)
 
     return FlattenResult(fields_flattened=len(widgets), pages_affected=[page_index])
+
+
+# -- FRM-08: XFA detection ------------------------------------------------------------------
+
+
+class XFAReport(BaseModel):
+    """FRM-08: what :func:`detect_xfa` found."""
+
+    model_config = ConfigDict(frozen=True)
+
+    has_xfa: bool
+    has_static_fields: bool
+    """Whether this document also has ordinary (non-XFA) AcroForm fields on any page --
+    FRM-01/FRM-02 keep listing and filling those regardless of `has_xfa`."""
+    warning: str | None
+    """Set whenever `has_xfa` is true: only the static AcroForm fields are read/filled
+    here, never the XFA layer itself. ``None`` when this document has no XFA."""
+
+
+_XFA_WARNING = (
+    "this document uses XFA (XML Forms Architecture) form fields; only its conventional "
+    "AcroForm fields, if any, are listed or filled here -- the XFA layer itself is not "
+    "read, rendered or written"
+)
+
+
+def detect_xfa(document: Document) -> XFAReport:
+    """FRM-08: whether `document`'s AcroForm carries an ``/XFA`` entry (Adobe's dynamic/
+    static XML form layer, which this engine does not process), reported distinctly from
+    an ordinary AcroForm so a caller can warn before opening/filling such a document.
+    Checked with a read-only pikepdf parse of a plain (decrypted) copy of the document's
+    current bytes (the same technique engine.structure uses for metadata) rather than
+    engine.forms's own pymupdf-level xref helpers, since pikepdf's dict ``in`` operator
+    is a direct, unambiguous way to ask "does this dict have this key" -- confirmed
+    against the installed pikepdf 10.14.0 in a REPL check, including that a document
+    with no /AcroForm at all (so no possible /XFA) reports `has_xfa=False`, never raises.
+    A document with both XFA and ordinary fields still lists/fills the latter normally
+    (confirmed: list_fields reads straight from pymupdf's own widget list, which is
+    populated independently of /XFA)."""
+    with pikepdf.open(io.BytesIO(plain_bytes(document.raw))) as pdf:
+        acroform = pdf.Root.get("/AcroForm")
+        has_xfa = acroform is not None and "/XFA" in acroform
+
+    has_static_fields = any(list_fields(document, i) for i in range(document.page_count))
+    return XFAReport(
+        has_xfa=has_xfa,
+        has_static_fields=has_static_fields,
+        warning=_XFA_WARNING if has_xfa else None,
+    )

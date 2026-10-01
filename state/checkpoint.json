@@ -1,11 +1,26 @@
 {
   "phase": "P6",
-  "taskId": "P6 wave 1: 13/21 features done. 118/170 total",
-  "step": "Owner's request (2026-10-01): start P6 with heavy sub-agent parallelism, token-free gate as the final arbiter. Four builder agents in parallel, each owning its own new files (engine/protect.py SEC-04/05/06, engine/redact.py+sanitize.py SEC-08/09/10/11, engine/forms.py FRM-01/02/05/06, engine/signatures.py+certs.py SIG-01/06), built in worktree C:\\Users\\hi-ka\\PDFeditor-p6 on wip/P6. Two independent reviewers (one per security-weighted half) then found and fixed 3 real defects, one critical: SetPasswordOp accepted an explicit owner_password=\"\" alongside a real user password, silently granting full owner access with no password at all -- the exact 'empty owner password' hole a prior fix in the same module was supposed to have already closed, reopened from an angle that fix didn't cover. Also fixed: the SSN pattern only matched the dashed form; filling a form field with a character outside its font (an emoji) produced a silently invisible appearance (PyMuPDF's widget font is hard-locked to 4 base faces) -- now refused clearly instead. Also fixed one unrelated pre-existing bug: a stray `if __name__ == \"__main__\"` has sat mid-cli/main.py since P1, silently dropping every command defined after it from direct-script invocation (the installed console script was never affected). (Also absorbed FNT-20, committed to main just before this branch: icons/emoji are now their own text unit, protected from being redrawn away during an edit, restyle, move or re-wrap -- see its own openQuestions entries below.)",
-  "branch": "wip/P6",
-  "lastGreenCommit": "(this commit, worktree C:\\Users\\hi-ka\\PDFeditor-p6) local gate, Windows 11, Python 3.14.3, 14/14 steps",
-  "nextAction": "Wave 2: FRM-03 (create/edit fields), FRM-04 (OpenCV auto-detect on flat forms), FRM-07 (FDF/XFDF/JSON/CSV import-export), FRM-08 (XFA detection), SIG-02..05 (PAdES signing via pyHanko -- already installed and pinned -- validation, RFC 3161 timestamps, signed-document workflow), building on wave 1's FieldInfo/cert model. Then rebase wip/P6 onto main, full gate, merge, rebuild the C:\\Users\\hi-ka\\PDFeditor-work clone for live review. Gate before every commit; push only with the owner's approval.",
+  "taskId": "P6 complete: 21/21 features done. 127/175 total",
+  "step": "P6 finished in two waves the same day it started, four then three parallel builder agents, each owning its own new files, in worktree C:\\Users\\hi-ka\\PDFeditor-p6 on wip/P6. Wave 1: engine/protect.py (SEC-04/05/06), engine/redact.py+sanitize.py (SEC-08/09/10/11), engine/forms.py (FRM-01/02/05/06), engine/signatures.py+certs.py (SIG-01/06). Wave 2: engine/forms.py extended (FRM-03), engine/form_data.py (FRM-07/08), engine/pades.py (SIG-02..05, pyHanko), then engine/form_detect.py (FRM-04, OpenCV) built on FRM-03's field-creation Op. Two review rounds per wave (one per domain, run in parallel) found and fixed 9 real defects total across both waves, two critical: wave 1's SetPasswordOp accepted an explicit owner_password=\"\" alongside a real user password, silently granting full owner access with no password at all. Wave 2's sign_document claimed to refuse signing with unsaved pending edits but never actually enforced it -- it checked document.file_backed, which tracks provenance (ever reloaded from an undo/redo snapshot?) not staleness (does memory still match disk?) -- so an edit applied the normal way through the server's generic /ops endpoint sailed straight past the check, got signed over with the *stale* on-disk bytes, and was silently discarded with no warning. Fixed with real dirty-state tracking: Document now has a `dirty` flag the journal sets after every applied Op and `save()` clears; sign_document checks that instead of file_backed. (Also absorbed FNT-20, committed to main just before this branch started: icons/emoji are now their own text unit, protected from being redrawn away during an edit, restyle, move or re-wrap -- see its own openQuestions entries below.)",
+  "branch": "main",
+  "lastGreenCommit": "(this commit, after rebasing wip/P6 onto main and merging) local gate, Windows 11, Python 3.14.3, 14/14 steps",
+  "nextAction": "Rebuild the C:\\Users\\hi-ka\\PDFeditor-work clone and restart both servers for the owner's live review of forms/signing/redaction. Then P7 (OCR, scans, conversions). Gate before every commit; push only with the owner's approval.",
   "openQuestions": [
+    {
+      "phase": "P6",
+      "kind": "limitation",
+      "text": "SIG-02/03: only PAdES level B-B by default, B-T with an RFC 3161 timestamp -- not B-LT/LTA, which need embedded OCSP/CRL revocation info a locally generated self-signed certificate has no real source for. Deliberate scope limit, not an oversight."
+    },
+    {
+      "phase": "P6",
+      "kind": "limitation",
+      "text": "FRM-04: a text-field blank made of underscore *characters* (not a drawn line) is never detected -- the same text-overlap guard that suppresses false positives on ordinary paragraph text can't distinguish \"this text IS the field cue\" from \"this text is prose\". On a 180-degree-rotated page, the left/right/above label-search heuristics assume an unrotated layout, so a real field may be detected with no label attached (lower confidence, never the wrong label, never a phantom)."
+    },
+    {
+      "phase": "P6",
+      "kind": "limitation",
+      "text": "FRM-07: CSV export doesn't sanitize field *names* against spreadsheet formula injection (a field literally named \"=cmd|...\" exports with a leading-= cell) -- the usual defusing-prefix mitigation isn't reliably invertible without breaking FRM-07's own round-trip guarantee, so this is documented rather than fixed. XFDF loses a bare \\r from \\r\\n line endings in a multiline value on round-trip -- inherent XML line-ending normalization (every compliant parser does this), not a bug in this codebase."
+    },
     {
       "phase": "P6",
       "kind": "limitation",

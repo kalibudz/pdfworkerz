@@ -86,6 +86,7 @@ class UndoRedoJournal:
             self._reload(before)
             raise
         after = self._document.snapshot()
+        self._document.mark_dirty()
 
         self._undo_stack.append(JournalEntry(op=op, before=before, after=after))
         if len(self._undo_stack) > self._max_history:

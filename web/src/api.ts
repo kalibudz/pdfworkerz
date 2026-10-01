@@ -212,15 +212,58 @@ export interface FieldInfo {
   page_index: number;
 }
 
-/** Mirrors engine.forms.FillResult (FRM-02). */
+/** Mirrors engine.forms.FillResult (FRM-02). `unknown` is always `[]` from fillFields
+ * itself (an unknown name there refuses the whole call instead); importFormData (FRM-07)
+ * is the one caller that can return names in it. */
 export interface FillResult {
   filled: string[];
+  unknown: string[];
 }
 
 /** Mirrors engine.forms.FlattenResult (FRM-06). */
 export interface FlattenResult {
   fields_flattened: number;
   pages_affected: number[];
+}
+
+/** FRM-03's createField/editField params, per field_type:
+ * - text: `value` (string), `font` (one of Cour/TiRo/Helv/ZaDb), `size`, `multiline`.
+ * - checkbox: `value` (boolean).
+ * - dropdown / listbox: `options` (required), `value` (one of `options`).
+ * - radio: a GROUP -- `options` (>= 2) and `rects` (one per option, same order); the
+ *   top-level `rect` is ignored for this type.
+ * - signature: an interactive /Sig placeholder field (not SIG-01's drawn/typed/image
+ *   stamp); no `value`. */
+export interface FieldTypeProps {
+  rect?: [number, number, number, number];
+  options?: string[];
+  rects?: [number, number, number, number][];
+  value?: string | boolean | null;
+  font?: string;
+  size?: number;
+  multiline?: boolean;
+}
+
+/** Mirrors engine.forms.XFAReport (FRM-08). */
+export interface XFAReport {
+  has_xfa: boolean;
+  has_static_fields: boolean;
+  warning: string | null;
+}
+
+export type FormDataFormat = "fdf" | "xfdf" | "json" | "csv";
+
+/** Mirrors engine.form_detect.FieldProposal (FRM-04). One auto-detected
+ * candidate field, for review before anything is created -- nothing is
+ * created by detection alone. A review UI would list these with a checkbox
+ * per proposal (accept/reject), then call createDetectedFields once with
+ * only the accepted ones. */
+export interface FieldProposal {
+  field_type: "text" | "checkbox";
+  rect: [number, number, number, number];
+  confidence: number;
+  suggested_name: string;
+  label_text: string | null;
 }
 
 /** Mirrors engine.signatures.PlaceResult (SIG-01). */
@@ -253,6 +296,58 @@ export interface CertResult {
   key_pem: string;
   key_encrypted: boolean;
   pkcs12_base64: string;
+}
+
+/** SignDocumentOp's own params (engine.ops.sign), for SIG-02's real PAdES
+ * signature -- distinct from PlaceSignatureRequest above (SIG-01), which is
+ * only a picture on the page, never a cryptographic signature. `tsa_url`
+ * (SIG-04) embeds an RFC 3161 timestamp; omitted, the signature is PAdES
+ * B-B rather than B-T (see engine.pades module docstring). No UI panel
+ * sends this yet. */
+export interface SignDocumentRequest {
+  cert_pem: string;
+  key_pem: string;
+  key_passphrase?: string;
+  field_name?: string;
+  reason?: string;
+  location?: string;
+  tsa_url?: string;
+}
+
+/** Mirrors engine.pades.SignResult (SIG-02/SIG-04). */
+export interface SignResult {
+  field_name: string;
+  path: string;
+  pades_level: "B-B" | "B-T";
+  has_timestamp: boolean;
+  bytes_written: number;
+}
+
+/** Mirrors engine.pades.SignatureReport (SIG-03/SIG-04). */
+export interface SignatureReport {
+  field_name: string;
+  signed_revision: number;
+  coverage: "entire_file" | "entire_revision" | "contiguous_block_from_start" | "unclear";
+  intact: boolean;
+  signature_valid: boolean;
+  modified_after_signing: boolean;
+  /** The bottom line: `intact && signature_valid && !modified_after_signing`. */
+  valid: boolean;
+  cert_subject: string;
+  cert_valid_at_signing_time: boolean;
+  signer_reported_time: string | null;
+  has_trusted_timestamp: boolean;
+  /** The RFC 3161 timestamp's own trusted time, distinct from `signer_reported_time`. */
+  timestamp_time: string | null;
+  timestamp_trusted: boolean;
+}
+
+/** Mirrors engine.pades.SignedDocStatus (SIG-05): what the UI checks before
+ * warning that editing a signed document further will invalidate it. */
+export interface SignedDocStatus {
+  has_signature: boolean;
+  is_still_valid: boolean;
+  signature_count: number;
 }
 
 /** Mirrors engine.spellcheck.Misspelling (EDT-11). */
@@ -509,6 +604,98 @@ export class Api {
     return this.applyOp<null>(documentId, { op: "set_tab_order", page_index: pageIndex, field_names: fieldNames });
   }
 
+  /** FRM-03: add a new field to one page; see FieldTypeProps for which properties
+   * apply to which `fieldType`. */
+  async createField(
+    documentId: string,
+    pageIndex: number,
+    fieldType: FieldInfo["field_type"],
+    name: string,
+    props: FieldTypeProps = {},
+  ): Promise<FieldInfo> {
+    return this.applyOp<FieldInfo>(documentId, {
+      op: "create_field",
+      page_index: pageIndex,
+      field_type: fieldType,
+      name,
+      ...props,
+    });
+  }
+
+  /** FRM-03: change an existing field's type-specific properties; only the keys given
+   * in `changes` are touched (e.g. `{ options: [...] }` for a dropdown, `{ font, size,
+   * multiline }` for a text field, or `{ options, rects }` together to rebuild a radio
+   * group). */
+  async editField(
+    documentId: string,
+    pageIndex: number,
+    name: string,
+    changes: Omit<FieldTypeProps, "value">,
+  ): Promise<FieldInfo> {
+    return this.applyOp<FieldInfo>(documentId, { op: "edit_field", page_index: pageIndex, name, ...changes });
+  }
+
+  /** FRM-03: remove a field from both the page's annotations and the AcroForm's field
+   * tree (a radio group's every button together). */
+  async deleteField(documentId: string, pageIndex: number, name: string): Promise<null> {
+    return this.applyOp<null>(documentId, { op: "delete_field", page_index: pageIndex, name });
+  }
+
+  /** FRM-04: likely field locations detected from visual cues alone on a flat
+   * (non-interactive) page -- a line/underscore proposes a text field, a small
+   * box proposes a checkbox. Read-only; nothing is created until
+   * createDetectedFields (or individual createField calls) is sent. No UI
+   * panel calls this yet -- a review list with a checkbox per proposal
+   * (accept/reject), then one "create accepted" button, is still needed. */
+  async detectFormFields(documentId: string, pageIndex: number, dpi = 150): Promise<FieldProposal[]> {
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/field_proposals?dpi=${dpi}`);
+    return (await response.json()) as FieldProposal[];
+  }
+
+  /** FRM-04's accept step: turn a batch of (presumably reviewed/filtered)
+   * FieldProposals into real AcroForm fields in one undo step, through the
+   * generic, journaled ops endpoint (CreateDetectedFieldsOp). */
+  async createDetectedFields(documentId: string, pageIndex: number, proposals: FieldProposal[]): Promise<FieldInfo[]> {
+    return this.applyOp<FieldInfo[]>(documentId, {
+      op: "create_detected_fields",
+      page_index: pageIndex,
+      proposals,
+    });
+  }
+
+  /** FRM-07: every field on one page -- name and current value -- as FDF/XFDF/JSON/CSV bytes. */
+  async exportFormData(documentId: string, pageIndex: number, format: FormDataFormat): Promise<ArrayBuffer> {
+    const response = await this.request(
+      `/documents/${documentId}/pages/${pageIndex}/form_data?format=${format}`,
+    );
+    return await response.arrayBuffer();
+  }
+
+  /** FRM-07: apply previously-exported (or hand-written) field data to one page, in one
+   * undo step. An unknown field name comes back in the result's `unknown`, not as a
+   * thrown error for the whole import. */
+  async importFormData(
+    documentId: string,
+    pageIndex: number,
+    format: FormDataFormat,
+    data: ArrayBuffer,
+  ): Promise<FillResult> {
+    const dataBase64 = btoa(String.fromCharCode(...new Uint8Array(data)));
+    return this.applyOp<FillResult>(documentId, {
+      op: "import_form_data",
+      page_index: pageIndex,
+      format,
+      data_base64: dataBase64,
+    });
+  }
+
+  /** FRM-08: whether this document's AcroForm carries an /XFA entry; its layer isn't
+   * processed here -- only its ordinary static fields, if any, are read or filled. */
+  async detectXFA(documentId: string): Promise<XFAReport> {
+    const response = await this.request(`/documents/${documentId}/xfa`);
+    return (await response.json()) as XFAReport;
+  }
+
   /** FRM-06: draw every field's current appearance into static page content and drop
    * the interactive AcroForm. `pageIndex` of `null`/`undefined` flattens the whole
    * document; a document with no AcroForm is left unchanged. */
@@ -539,6 +726,31 @@ export class Api {
       body: JSON.stringify({ common_name: commonName, key_size: keySize, passphrase: passphrase ?? null }),
     });
     return (await response.json()) as CertResult;
+  }
+
+  /** SIG-02/SIG-04: apply a real PAdES digital signature (optionally RFC 3161
+   * timestamped) through the generic, journaled ops endpoint. No UI panel
+   * sends this yet -- see SIG-05's documentSignatureStatus for the warning
+   * check a future signing panel would show before calling this. */
+  async signDocument(documentId: string, request: SignDocumentRequest): Promise<SignResult> {
+    return this.applyOp<SignResult>(documentId, { op: "sign_document", ...request });
+  }
+
+  /** SIG-03/SIG-04: a validation report for every digital signature embedded
+   * in the document (modified-since-signing, certificate validity window,
+   * and a trusted RFC 3161 timestamp when one is present). Read-only, its
+   * own GET route like pageFields above. */
+  async validateSignatures(documentId: string): Promise<SignatureReport[]> {
+    const response = await this.request(`/documents/${documentId}/signatures`);
+    return (await response.json()) as SignatureReport[];
+  }
+
+  /** SIG-05: whether the open document is digitally signed and that
+   * signature is still current -- call before letting an edit proceed, to
+   * show the "this will invalidate the signature" warning. */
+  async documentSignatureStatus(documentId: string): Promise<SignedDocStatus> {
+    const response = await this.request(`/documents/${documentId}/signature-status`);
+    return (await response.json()) as SignedDocStatus;
   }
 
   /** EDT-11: misspelled words on one page, minus `ignore`d ones. */

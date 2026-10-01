@@ -137,6 +137,16 @@ class Document:
         self._file_backed = file_backed
         """Whether `_doc` was read from `source_path` itself (not from a memory snapshot):
         only then can an incremental save append to that file."""
+        self._dirty = False
+        """Whether `_doc` has changed in memory since it last matched what's on disk at
+        `source_path` -- distinct from `file_backed`, which is about *provenance*
+        (was this ever reloaded from a snapshot?), not *staleness* (does memory still
+        match disk right now?). A freshly opened or just-saved document is never dirty.
+        `mark_dirty()` is the one place anything outside this class sets it; `save()`
+        clears it after a successful save back to `source_path`. Checked by SIG-02's
+        `sign_document`, which signs the bytes on disk, not whatever is in memory --
+        found by independent review: `file_backed` alone let a save-less in-memory edit
+        slip silently past that check and get discarded."""
 
     # -- lifecycle -----------------------------------------------------
 
@@ -239,6 +249,26 @@ class Document:
     @property
     def password_used(self) -> str | None:
         return self._password_used
+
+    @property
+    def file_backed(self) -> bool:
+        """Whether this document's current state was read from `source_path` itself
+        (not a memory snapshot): the same precondition an incremental save -- or
+        SIG-02's PAdES signing, which needs the exact on-disk bytes to append to -- has."""
+        return self._file_backed
+
+    @property
+    def dirty(self) -> bool:
+        """Whether memory has diverged from `source_path` since the last save -- see
+        `mark_dirty`'s docstring. SIG-02's `sign_document` refuses to sign while this
+        is true, since it signs the bytes on disk, not these unsaved ones."""
+        return self._dirty
+
+    def mark_dirty(self) -> None:
+        """Record that `_doc` has been mutated and no longer matches `source_path` on disk.
+        The journal calls this after every successfully applied Op (COR-05); anything else
+        that mutates `raw` directly, outside an Op, should call it too."""
+        self._dirty = True
 
     def iter_pages(self) -> Iterator[pymupdf.Page]:
         """Yield pages one at a time (COR-09).
@@ -388,6 +418,14 @@ class Document:
                 self._file_backed = False
             raise SaveFailedError(f"could not write {target}: {exc}") from exc
 
+        if writes_original:
+            # Memory now matches source_path exactly, whichever of the three branches above
+            # ran: incremental kept using the same in-memory _doc to produce the appended
+            # bytes; the other two re-read target fresh via _reopen. A Save As (the `else`
+            # branch, not writes_original) leaves source_path's own bytes exactly as stale
+            # as they were -- the edits went to a different file, not back into this one.
+            self._dirty = False
+
         return SaveResult(path=target, mode=chosen_mode, bytes_written=target.stat().st_size, note=note)
 
     def _detached_copy(self, data: bytes) -> pymupdf.Document:
@@ -417,6 +455,25 @@ class Document:
         self._password_used = password if needs_pass else None
         remember_password(self._doc, self._password_used)
         self._file_backed = True
+
+    def reload(self) -> None:
+        """Re-read this document's own content from `source_path` on disk
+        (SIG-02): for a caller that wrote new bytes straight to that file
+        *outside* this class -- pyHanko's own incremental PAdES signing
+        (engine.pades.sign_document) does exactly that, appending a
+        cryptographic signature pyMuPDF itself never produces -- so this
+        Document's in-memory state catches up with what is now on disk,
+        the same way an ordinary :meth:`save` already does via `_reopen`
+        after replacing the file itself.
+
+        Requires a file-backed document with a `source_path` (the same
+        precondition an incremental :meth:`save` has); raises
+        :class:`OpValidationError` otherwise -- there would be nothing on
+        disk yet to read back.
+        """
+        if self.source_path is None or not self._file_backed:
+            raise OpValidationError("reload() needs a document opened from a file (source_path set, file-backed)")
+        self._reopen(self.source_path, self._password_used)
 
     def _is_original(self, target: Path) -> bool:
         return self.source_path is not None and target.resolve() == self.source_path.resolve()

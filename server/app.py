@@ -69,13 +69,14 @@ from engine.fonts.choose import available_families
 from engine.ops.annotations import PageAnnotationsOp
 from engine.ops.base import MAX_RENDER_DPI, MIN_RENDER_DPI, Op, PageSpansOp, RenderPageOp, parse_op
 from engine.ops.certs import GenerateCertificateOp
-from engine.ops.forms import PageFieldsOp
+from engine.ops.forms import DetectFormFieldsOp, DetectXFAOp, ExportFormDataOp, PageFieldsOp
 from engine.ops.images import PageImagesOp
 from engine.ops.journal import UndoRedoJournal
 from engine.ops.links import PageLinksOp
 from engine.ops.objects import PageBlocksOp
 from engine.ops.redact import FindRedactionCandidatesOp
 from engine.ops.shapes import PageShapesOp
+from engine.ops.sign import DocumentSignatureStatusOp, ValidateSignaturesOp
 from engine.ops.spellcheck import SpellCheckOp
 from engine.ops.text import PreviewTextOp, _font_index
 from engine.ops.units import PageTextUnitsOp
@@ -295,6 +296,61 @@ def page_fields(document_id: str, page_index: int, journal: JournalDep) -> Any:
     logical field). Read-only (PageFieldsOp), applied directly like
     page_annotations; filling, reordering and flattening go through the ops endpoint."""
     return _jsonable(_read(PageFieldsOp(page_index=page_index), journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/field_proposals")
+def page_field_proposals(document_id: str, page_index: int, journal: JournalDep, dpi: DpiQuery = 150) -> Any:
+    """FRM-04: likely field locations detected from visual cues alone on a flat
+    (non-interactive) page -- a line/underscore proposes a text field, a small
+    box proposes a checkbox. Read-only (DetectFormFieldsOp), applied directly
+    like page_fields; nothing is created here. Accepting proposals goes
+    through the generic, journaled .../ops endpoint (CreateDetectedFieldsOp,
+    or individual CreateFieldOp calls), same as every other mutation."""
+    return _jsonable(_read(DetectFormFieldsOp(page_index=page_index, dpi=dpi), journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/form_data")
+def export_form_data_route(
+    document_id: str, page_index: int, journal: JournalDep, format: Literal["fdf", "xfdf", "json", "csv"] = "json"
+) -> Response:
+    """FRM-07: every field on one page as FDF/XFDF/JSON/CSV bytes. Read-only
+    (ExportFormDataOp), applied directly like page_fields; its result is raw bytes of a
+    caller-chosen format (not JSON), so -- like render_page -- it gets its own route
+    rather than going through the generic /ops endpoint. Importing goes through /ops
+    (ImportFormDataOp) since it mutates the document and belongs in the undo history."""
+    data = _read(ExportFormDataOp(page_index=page_index, format=format), journal.document)
+    media_types = {
+        "fdf": "application/vnd.fdf",
+        "xfdf": "application/vnd.adobe.xfdf",
+        "json": "application/json",
+        "csv": "text/csv",
+    }
+    return Response(content=data, media_type=media_types[format])
+
+
+@router.get("/documents/{document_id}/xfa")
+def xfa_check(document_id: str, journal: JournalDep) -> Any:
+    """FRM-08: whether this document's AcroForm carries an /XFA entry. Read-only
+    (DetectXFAOp) and not page-scoped, applied directly like page_fields."""
+    return _jsonable(_read(DetectXFAOp(), journal.document))
+
+
+@router.get("/documents/{document_id}/signatures")
+def document_signatures(document_id: str, journal: JournalDep) -> Any:
+    """SIG-03: a validation report for every digital signature embedded in the
+    document. Read-only (ValidateSignaturesOp) and not page-scoped, applied
+    directly like xfa_check -- signing itself (SIG-02) goes through the
+    generic, journaled .../ops endpoint (SignDocumentOp)."""
+    return _jsonable(_read(ValidateSignaturesOp(), journal.document))
+
+
+@router.get("/documents/{document_id}/signature-status")
+def document_signature_status_route(document_id: str, journal: JournalDep) -> Any:
+    """SIG-05: whether the document is signed and that signature is still
+    current -- what the web UI checks before warning that further editing
+    will invalidate it. Read-only (DocumentSignatureStatusOp), applied
+    directly like document_signatures."""
+    return _jsonable(_read(DocumentSignatureStatusOp(), journal.document))
 
 
 @router.get("/documents/{document_id}/pages/{page_index}/blocks")

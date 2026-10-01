@@ -12,7 +12,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P3 | Web UI with click-to-edit | ✅ Done: 15/15 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes |
 | P4 | Command bar & recipes | ✅ Done: 8/8 features proven by tests | Independent reviewer: signed off 2026-09-29 after two rounds of fixes |
 | P5 | Organize, page design, annotate, document structure | ✅ Done: 40/40 features proven by tests | Independent reviewer: signed off 2026-09-29 (EDT-01..15) and 2026-09-30 after two rounds of fixes (EDT-16..19) |
-| P6 | Forms, signatures, security, redaction | 🟡 In progress: 13/21 features proven by tests | Independent reviewer: signed off wave 1 (SEC-04/05/06/08/09/10/11, FRM-01/02/05/06, SIG-01/06) 2026-10-01 after one round of fixes |
+| P6 | Forms, signatures, security, redaction | ✅ Done: 21/21 features proven by tests | Independent reviewer: signed off wave 1 (SEC-04/05/06/08/09/10/11, FRM-01/02/05/06, SIG-01/06) and wave 2 (FRM-03/04/07/08, SIG-02/03/04/05), both 2026-10-01 after fixes, one of them critical |
 | P7 | OCR, scans, conversions | Planned | |
 | P8 | Optimize, compare, accessibility, batch, extras | Planned | |
 | P9 | Packaging & documentation | Planned | |
@@ -25,6 +25,86 @@ A phase is complete when all of its features are **done** through the evidence g
 - [ ] Pin engine dependency versions in `pyproject.toml` when P1 starts, and add API-contract tests for every library call.
 
 ## Session log
+
+### 2026-10-01 (later) — P6 wave 2: field creation, OpenCV auto-detection, import/export, XFA detection, PAdES signing — P6 complete
+
+Finished P6 the same day it started: two more parallel builder agents, then
+a third agent (field auto-detection) once the first two landed, each again
+owning its own files.
+
+- **Forms-B (FRM-03/07/08):** `create_field`/`edit_field`/`delete_field`
+  extend wave 1's field model -- a radio group really has spec-correct
+  `/Parent`+`/Kids` structure, independently re-parsed and confirmed with a
+  fresh `pikepdf.open`, not just visually-separate same-named widgets.
+  `engine/form_data.py` exports and imports FDF, XFDF, JSON and CSV, each
+  round-tripping a checkbox/radio/dropdown's chosen *option*, not a raw
+  string. `detect_xfa` tells a real `/XFA` entry from a document that merely
+  contains the string "XFA" somewhere, confirmed by five adversarial cases.
+- **Signatures-B (SIG-02..05):** `engine/pades.py` signs with pyHanko,
+  producing a real PAdES signature (independently verified afterward with a
+  from-scratch CMS check, bypassing the engine's own validator entirely --
+  altering one signed byte correctly flips it invalid). PAdES level B-B by
+  default, B-T with an RFC 3161 timestamp from a user-configured TSA;
+  B-LT/LTA (needing embedded revocation data a self-signed cert has no real
+  source for) is a documented, deliberate scope limit, not an oversight.
+  Validation distinguishes a trusted third-party timestamp from the
+  signer's own claimed time, reports each signature's own covered revision,
+  and needs no network access when none is requested. Found its own gap
+  along the way: `pyhanko_certvalidator` doesn't check a self-signed trust
+  anchor's own expiry, so `sign_document` added that check itself rather
+  than trusting the library.
+- **Forms-C (FRM-04), after Forms-B landed:** `engine/form_detect.py` finds
+  likely text-field and checkbox cues in a flat form's rendered pixels
+  (Hough line detection, contour-based box detection), labels each from the
+  page's own already-extracted text, and suppresses false positives from
+  ordinary paragraph text and ruled tables. Nothing is created without an
+  explicit accept step, in one undo entry.
+- **Two independent-review rounds (one per domain, run in parallel) found
+  and fixed six real defects, one critical:**
+  - **Critical:** `sign_document`'s own claimed precondition ("no unsaved
+    pending edits") was never actually enforced. It checked
+    `document.file_backed`, which only tracks whether the document was ever
+    reloaded from an undo/redo snapshot -- not whether memory has since
+    diverged from disk. An edit applied through the ordinary journaled Op
+    path (exactly how the server's generic endpoint works) sailed straight
+    past it: `sign_document` signed the *stale* bytes already on disk,
+    reported success, and silently discarded the caller's pending edit with
+    no warning. Fixed with real dirty-state tracking: `Document` now has a
+    `dirty` flag the journal sets after every applied Op and `save()`
+    clears, and `sign_document` checks that instead.
+  - A dropdown/listbox's `edit_field` call claimed to clear a selection that
+    dropped out of the new options, but `pymupdf.Widget.update()` silently
+    refuses to rewrite `/V` to empty for a choice field -- the stale, now
+    invalid value survived into the saved PDF (and from there into export
+    and flatten). Now cleared with a direct xref write.
+  - A zero-area or inverted field rect raised a bare `ValueError`, reaching
+    the API as an uncaught 500 instead of a clean 400; an out-of-bounds rect
+    raised nothing at all and silently created an unreachable field. Both
+    now validated up front with a clear `OpValidationError`.
+  - A malformed or truncated FDF import silently "succeeded" with nothing
+    imported and no error, unlike XFDF/JSON/CSV, which already refused
+    garbage input cleanly. FDF now requires its own real structural markers
+    before importing anything.
+  - A rotated page produced phantom field proposals (and missed the real
+    one): the rendered pixmap honors the page's `/Rotate`, but the text
+    spans used to suppress false positives didn't, so the two were being
+    compared in different coordinate spaces. Both now go through the same
+    rotation matrix.
+  - Two lower-severity items were investigated and deliberately left as
+    documented limitations rather than "fixed": sanitizing CSV field
+    *names* against spreadsheet formula injection isn't reliably invertible
+    without breaking FRM-07's own round-trip guarantee; XFDF losing a `\r`
+    from `\r\n` in a multiline value is XML's own line-ending
+    normalization, not a bug in this codebase.
+- 93+ new tests across the four new engine modules; full local gate 14/14.
+  FRM-03/04/07/08 and SIG-02/03/04/05 moved to "done" by the evidence gate
+  -- **P6 complete, 21/21 features, 127/175 total.**
+- **Known limitations, documented rather than silently accepted:** general
+  polygon/curve redaction still removes in full rather than clipping (P6
+  wave 1); SIG-02/03 only reach PAdES B-B/B-T, not B-LT/LTA; FRM-04 can't
+  detect a text-field blank made of underscore *characters* (only a drawn
+  line), and on a 180°-rotated page may detect a real field without finding
+  its label (never attaches the wrong one, never invents a phantom).
 
 ### 2026-10-01 — FNT-20: icons and emoji are their own unit, never edited away
 

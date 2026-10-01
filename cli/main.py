@@ -28,12 +28,26 @@ from engine.fonts.choose import available_families
 from engine.fonts.style import extract_page_spans
 from engine.ops.base import InspectOp, Op, PageSpansOp, RenderPageOp, parse_op
 from engine.ops.certs import GenerateCertificateOp
-from engine.ops.forms import FillFieldsOp, FlattenFormOp, PageFieldsOp, SetTabOrderOp
+from engine.ops.forms import (
+    CreateDetectedFieldsOp,
+    CreateFieldOp,
+    DeleteFieldOp,
+    DetectFormFieldsOp,
+    DetectXFAOp,
+    EditFieldOp,
+    ExportFormDataOp,
+    FillFieldsOp,
+    FlattenFormOp,
+    ImportFormDataOp,
+    PageFieldsOp,
+    SetTabOrderOp,
+)
 from engine.ops.images import CropImageOp, DeleteImageOp, InsertImageOp, MoveImageOp, PageImagesOp, ReplaceImageOp
 from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp
 from engine.ops.protect import RemovePasswordOp, SetPasswordOp, SetPermissionsOp
 from engine.ops.redact import FindRedactionCandidatesOp, RedactAreasOp, SanitizeOp
 from engine.ops.shapes import DeleteShapeOp, DrawShapeOp, EditShapeOp, PageShapesOp
+from engine.ops.sign import SignDocumentOp, ValidateSignaturesOp
 from engine.ops.signatures import PlaceSignatureOp
 from engine.ops.spellcheck import SpellCheckOp
 from engine.ops.text import (
@@ -1123,6 +1137,63 @@ def cert_generate_command(
         )
 
 
+@app.command("sign-document")
+def sign_document_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to sign")],
+    cert: Annotated[Path, typer.Option(exists=True, dir_okay=False, help="Signer certificate, PEM")],
+    key: Annotated[Path, typer.Option(exists=True, dir_okay=False, help="Signer private key, PEM")],
+    key_passphrase: Annotated[str | None, typer.Option(help="Passphrase for --key, if it's encrypted")] = None,
+    field_name: Annotated[str | None, typer.Option("--field-name", help="Existing or new signature field name")] = None,
+    reason: Annotated[str | None, typer.Option(help="Reason for signing, embedded in the signature")] = None,
+    location: Annotated[str | None, typer.Option(help="Location, embedded in the signature")] = None,
+    tsa_url: Annotated[str | None, typer.Option("--tsa-url", help="RFC 3161 timestamp authority URL (SIG-04)")] = None,
+    out: Annotated[
+        Path | None, typer.Option(help="Write the signed file here instead of signing --path in place")
+    ] = None,
+    overwrite: Annotated[
+        bool, typer.Option(help="Sign the file in place (the default; rejected together with --out)")
+    ] = False,
+    password: PasswordOption = None,
+) -> None:
+    """Apply a real PAdES digital signature (SIG-02), optionally timestamped by
+    an RFC 3161 TSA (SIG-04). Unlike the other edit commands, this signs the
+    file *in place* by default (an incremental update naturally appends to
+    the same file); pass --out to write the signed result elsewhere instead,
+    leaving `path` untouched."""
+    if out is not None and overwrite:
+        raise typer.BadParameter("pass either --out or --overwrite, not both")
+    try:
+        with Document.open(path, password=password) as document:
+            op = SignDocumentOp(
+                cert_pem=cert.read_text(encoding="ascii"),
+                key_pem=key.read_text(encoding="ascii"),
+                key_passphrase=key_passphrase,
+                field_name=field_name,
+                reason=reason,
+                location=location,
+                tsa_url=tsa_url,
+                path=str(out) if out is not None else None,
+            )
+            result = _run(op, document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"signed -> {result.path} (field {result.field_name!r}, PAdES {result.pades_level})")
+
+
+@app.command("validate-signatures")
+def validate_signatures_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to check")],
+    password: PasswordOption = None,
+) -> None:
+    """Print SIG-03's validation report -- one entry per embedded signature -- as JSON."""
+    try:
+        with Document.open(path, password=password) as document:
+            reports = _run(ValidateSignaturesOp(), document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(json.dumps([report.model_dump(mode="json") for report in reports], indent=2))
+
+
 def _parse_field_value(raw: str) -> str | bool:
     if raw.lower() in ("true", "false"):
         return raw.lower() == "true"
@@ -1226,6 +1297,218 @@ def forms_flatten(
         raise _fail(exc) from exc
     typer.echo(f"flattened {result.fields_flattened} field(s)")
     typer.echo(f"saved -> {saved_to}")
+
+
+@forms_app.command("create")
+def forms_create(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to add a field to")],
+    field_type: Annotated[str, typer.Option(help="text|checkbox|radio|dropdown|listbox|signature")],
+    name: Annotated[str, typer.Option(help="The new field's name (must be unique on this page)")],
+    page: PageOption = 0,
+    rect: Annotated[
+        str | None, typer.Option(help='"x0,y0,x1,y1"; not used for radio (give --rect-for instead)')
+    ] = None,
+    option: Annotated[list[str], typer.Option("--option", help="A choice/radio option (repeatable, in order)")] = [],  # noqa: B006 -- typer reads this as the option's default, never mutated
+    rect_for: Annotated[
+        list[str],
+        typer.Option("--rect-for", help='A radio option\'s own "x0,y0,x1,y1" (repeatable, same order as --option)'),
+    ] = [],  # noqa: B006 -- typer reads this as the option's default, never mutated
+    value: Annotated[str | None, typer.Option(help='Initial value; "true"/"false" for a checkbox')] = None,
+    font: Annotated[str, typer.Option(help="Text field font: one of Cour/TiRo/Helv/ZaDb")] = "Helv",
+    size: Annotated[float, typer.Option(help="Text field font size; 0 lets the viewer auto-size it")] = 0.0,
+    multiline: Annotated[bool, typer.Option(help="Text field: allow multiple lines")] = False,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """FRM-03: add a new field to one page. A radio field is a GROUP: give --option and
+    --rect-for (one each per button, same order); every other type's own position is
+    --rect."""
+    parsed_value: str | bool | None = _parse_field_value(value) if value is not None else None
+    op = CreateFieldOp(
+        page_index=page,
+        field_type=field_type,  # type: ignore[arg-type]
+        name=name,
+        rect=_parse_rect(rect) if rect else None,
+        options=list(option) or None,
+        rects=[_parse_rect(r) for r in rect_for] or None,
+        value=parsed_value,
+        font=font,
+        size=size,
+        multiline=multiline,
+    )
+    try:
+        with Document.open(path, password=password) as document:
+            field = _run(op, document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"created {field.field_type} field {field.name!r} on page {page}")
+    typer.echo(f"saved -> {saved_to}")
+
+
+@forms_app.command("edit")
+def forms_edit(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit a field in")],
+    name: Annotated[str, typer.Option(help="The field to edit")],
+    page: PageOption = 0,
+    option: Annotated[
+        list[str], typer.Option("--option", help="New choice/radio options (repeatable, replaces the old ones)")
+    ] = [],  # noqa: B006 -- typer reads this as the option's default, never mutated
+    rect_for: Annotated[
+        list[str], typer.Option("--rect-for", help="New radio option rects (repeatable, with --option)")
+    ] = [],  # noqa: B006 -- typer reads this as the option's default, never mutated
+    rect: Annotated[str | None, typer.Option(help='New "x0,y0,x1,y1" for a non-radio field')] = None,
+    font: Annotated[str | None, typer.Option(help="New text field font")] = None,
+    size: Annotated[float | None, typer.Option(help="New text field font size")] = None,
+    multiline: Annotated[bool | None, typer.Option(help="New text field multiline flag")] = None,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """FRM-03: change an existing field's type-specific properties (e.g. a dropdown's
+    options, or a text field's font/size/multiline); only the options actually given
+    are changed."""
+    op = EditFieldOp(
+        page_index=page,
+        name=name,
+        font=font,
+        size=size,
+        multiline=multiline,
+        options=list(option) or None,
+        rect=_parse_rect(rect) if rect else None,
+        rects=[_parse_rect(r) for r in rect_for] or None,
+    )
+    try:
+        with Document.open(path, password=password) as document:
+            field = _run(op, document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"edited field {field.name!r} on page {page}")
+    typer.echo(f"saved -> {saved_to}")
+
+
+@forms_app.command("delete")
+def forms_delete(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to delete a field from")],
+    name: Annotated[str, typer.Option(help="The field to delete")],
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """FRM-03: remove a field from both the page's annotations and the AcroForm's
+    field tree (a radio group's every button together)."""
+    try:
+        with Document.open(path, password=password) as document:
+            _run(DeleteFieldOp(page_index=page, name=name), document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"deleted field {name!r} from page {page}")
+    typer.echo(f"saved -> {saved_to}")
+
+
+@forms_app.command("export")
+def forms_export(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to read field data from")],
+    out: Annotated[Path, typer.Option(help="File to write the exported field data to")],
+    format: Annotated[str, typer.Option(help="fdf|xfdf|json|csv")] = "json",
+    page: PageOption = 0,
+    password: PasswordOption = None,
+) -> None:
+    """FRM-07: every field on one page -- name and current value -- as FDF/XFDF/JSON/CSV."""
+    try:
+        with Document.open(path, password=password) as document:
+            data = _run(ExportFormDataOp(page_index=page, format=format), document)  # type: ignore[arg-type]
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    out.write_bytes(data)
+    typer.echo(f"exported -> {out}")
+
+
+@forms_app.command("import")
+def forms_import(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to fill from field data")],
+    in_: Annotated[Path, typer.Option("--in", exists=True, dir_okay=False, help="Field data file to read")],
+    format: Annotated[str, typer.Option(help="fdf|xfdf|json|csv")] = "json",
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """FRM-07: apply previously-exported (or hand-written) field data to one page, in
+    one undo step. An unknown field name is reported, not a fatal error for the whole
+    import."""
+    data_base64 = base64.b64encode(in_.read_bytes()).decode("ascii")
+    op = ImportFormDataOp(page_index=page, format=format, data_base64=data_base64)  # type: ignore[arg-type]
+    try:
+        with Document.open(path, password=password) as document:
+            result = _run(op, document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"filled {len(result.filled)} field(s) on page {page}")
+    if result.unknown:
+        typer.echo(f"unknown field name(s), not applied: {', '.join(result.unknown)}", err=True)
+    typer.echo(f"saved -> {saved_to}")
+
+
+@forms_app.command("xfa-check")
+def forms_xfa_check(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to check")],
+    password: PasswordOption = None,
+) -> None:
+    """FRM-08: whether this document's AcroForm carries an /XFA entry (its layer isn't
+    processed here -- only its ordinary static fields, if any, are read or filled)."""
+    try:
+        with Document.open(path, password=password) as document:
+            report = _run(DetectXFAOp(), document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"has_xfa={report.has_xfa} has_static_fields={report.has_static_fields}")
+    if report.warning:
+        typer.echo(report.warning, err=True)
+
+
+@forms_app.command("detect")
+def forms_detect(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to scan for flat-form cues")],
+    page: PageOption = 0,
+    dpi: Annotated[int, typer.Option(help="Render DPI used to detect visual cues")] = 150,
+    apply_: Annotated[
+        bool, typer.Option("--apply", help="Create a real field for every detected proposal, in one undo step")
+    ] = False,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """FRM-04: detect likely field locations on a flat (non-interactive) page
+    from visual cues alone (a line/underscore -> text field, a small box ->
+    checkbox). Dry run by default -- prints each proposal for review; nothing
+    is created unless --apply is given, which then creates every proposal as
+    a real field in one undo step (see engine.form_detect for this
+    heuristic's documented limitations)."""
+    try:
+        with Document.open(path, password=password) as document:
+            proposals = _run(DetectFormFieldsOp(page_index=page, dpi=dpi), document)
+            if not proposals:
+                typer.echo("no form field cues detected on this page")
+                return
+            for proposal in proposals:
+                label = f" label={proposal.label_text!r}" if proposal.label_text else ""
+                typer.echo(
+                    f"{proposal.suggested_name!r}: {proposal.field_type} rect={proposal.rect} "
+                    f"confidence={proposal.confidence:.2f}{label}"
+                )
+            if apply_:
+                _run(CreateDetectedFieldsOp(page_index=page, proposals=proposals), document)
+                saved_to = _save(document, path, out, overwrite)
+                typer.echo(f"created {len(proposals)} field(s) on page {page}")
+                typer.echo(f"saved -> {saved_to}")
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
 
 
 @app.command()
