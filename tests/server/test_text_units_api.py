@@ -23,6 +23,7 @@ UNIT_KEYS = {
     "span_indices",
     "segments",
     "line_index",
+    "icon",
 }
 
 
@@ -35,6 +36,16 @@ def client() -> TestClient:
 def document_id(client: TestClient, corpus: Corpus, work_dir: Path) -> str:
     dest = work_dir / "paragraph.pdf"
     shutil.copy(corpus.paragraph, dest)
+    response = client.post("/documents", json={"path": str(dest)}, headers=AUTH)
+    assert response.status_code == 200, response.text
+    value: str = response.json()["document_id"]
+    return value
+
+
+@pytest.fixture
+def icon_document_id(client: TestClient, corpus: Corpus, work_dir: Path) -> str:
+    dest = work_dir / "icon_labels.pdf"
+    shutil.copy(corpus.icon_labels, dest)
     response = client.post("/documents", json={"path": str(dest)}, headers=AUTH)
     assert response.status_code == 200, response.text
     value: str = response.json()["document_id"]
@@ -86,6 +97,17 @@ def test_block_granularity_equals_the_blocks_route(client: TestClient, document_
     assert units[0]["text"] == (
         "This is line one of a paragraph. This is line two continuing on. And this is line three, the last."
     )
+
+
+@pytest.mark.feature("FNT-20")
+def test_word_units_report_icon_true_for_an_icon_and_false_for_ordinary_words(
+    client: TestClient, icon_document_id: str
+) -> None:
+    words = _units(client, icon_document_id, granularity="word")
+    by_text = {w["text"]: w["icon"] for w in words}
+    assert by_text["✅"] is True
+    assert by_text["OBJECTIVES"] is False
+    assert by_text["©2026"] is False
 
 
 @pytest.mark.feature("EDT-16", criterion=3)

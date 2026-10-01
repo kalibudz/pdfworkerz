@@ -1,11 +1,21 @@
 {
   "phase": "P5",
-  "taskId": "P5 complete: 40/40 features done. 105/170 total",
-  "step": "Two real bugs from the owner's first live retest of EDT-16..19, both fixed: (1) a block restyle (text unchanged) could be falsely refused as an \"overflow\" -- reflow_block's re-wrap was used even when nothing needed to move to a new line, because a bolder/larger font is wider at the block's own width. New EditTextUnitOp._restyle_block restyles each line in place (EDT-17's own per-run mechanism) whenever the text itself doesn't change, never re-wraps. (2) A standard-14 fallback font (Type3 icon glyphs routing through FNT-15, or any other fallback path) could silently lose characters outside Latin-1 -- confirmed empirically that PyMuPDF draws a replacement-glyph mark, not a refusal, and the plain \"standard-14, not embedded\" case resolves at the exact tier (no approval at all). Six return sites in engine/fonts/resolve.py now check needed_text via the existing engine.fonts.coverage.check_coverage and name the uncoverable characters in the note, forcing approval. 14 new tests; full local gate 14/14, 1030 tests total.",
+  "taskId": "FNT-20 icon units: protect emoji/Type3 icons from being redrawn away",
+  "step": "FNT-20: icons and emoji are their own unit, never edited away. Root cause (from a read-only probe of the owner's real document): every heading/label opens with an icon in its own Type3 font, which split_words glued to the following word (\"\u2705OBJECTIVES\"); bolding, inserting next to it, moving it or re-wrapping its block all redrew the icon, and a Type3 glyph can't be redrawn outside its own document (FNT-15), so it silently fell back to a font with no such glyph. New engine/fonts/icons.py classifies emoji/PUA/Type3-U+FFFD/dingbat-font glyphs; engine/fonts/units.py splits them into their own TextWord/TextUnit (icon: bool, served over the wire); engine/edit.py + engine/ops/text.py make restyle/recolor skip them silently, fix _style_anchor so an insertion next to an icon takes the neighbour's style (the actual bug the owner hit), and refuse -- rather than silently lose -- any edit that would have to redraw one (text-touching hunk, a shift from a neighbour's width change, move/duplicate, block re-wrap, width-changing resize). web/src/inspector.ts shows an \"(icon)\" badge and makes its controls read-only. Owner chose \"protect now, move later\" when asked; FNT-21 (move/copy icons by reusing the document's own glyph drawing) added as planned, P6. 30 new engine tests, 1 new server test, 1 new Playwright test; full local gate 14/14, 1062 tests total.",
   "branch": "main",
-  "lastGreenCommit": "(this commit) local gate, Windows 11, Python 3.14.3, 14/14 steps, 1030 tests",
-  "nextAction": "Rebuild the C:\\Users\\hi-ka\\PDFeditor-work clone, restart both servers, and give the owner a fresh ?token= URL so they can retest Block restyling and the Type3/icon-font case directly. Then P6 (forms, signatures, security, redaction). Gate before every commit; push only with the owner's approval.",
+  "lastGreenCommit": "(this commit) local gate, Windows 11, Python 3.14.3, 14/14 steps, 1062 tests",
+  "nextAction": "Rebuild the C:\\Users\\hi-ka\\PDFeditor-work clone, restart both servers, and give the owner a fresh ?token= URL so they can retest the icon-protection behaviour directly on their proposal (the bold-then-insert sequence that lost the \u2705 before). Then P6 (forms, signatures, security, redaction), starting with FNT-21 if the owner wants icons movable sooner. Gate before every commit; push only with the owner's approval.",
   "openQuestions": [
+    {
+      "phase": "P6",
+      "kind": "todo",
+      "text": "FNT-20 protects icons/emoji from being redrawn away but does not make them movable: moving, duplicating, resizing-with-an-icon, or re-wrapping a block containing one is refused outright rather than attempted. FNT-21 (planned, P6) tracks doing this by reusing the document's own Type3 glyph procedure (or the emoji's own drawn glyph) instead of redrawing it through a fallback font."
+    },
+    {
+      "phase": "P6",
+      "kind": "limitation",
+      "text": "FNT-20's icon-cluster joiner handling (engine/fonts/icons.py) attaches ZWJ, variation selectors and the combining enclosing keycap (U+20E3) to a preceding icon, but not an ASCII digit before a keycap (e.g. the three codepoints of a keycap digit emoji like 1\\uFE0F\\u20E3) -- not seen in any real document reviewed, so left undocumented-but-untested rather than guessed at."
+    },
     {
       "phase": "P5",
       "kind": "todo",
@@ -77,7 +87,7 @@
       "text": "Moving or duplicating a line/word onto another line's baseline is flagged for approval, but if approved, later plain-text extraction can merge the two lines' glyphs into one garbled line -- pre-existing extraction behaviour, not specific to EDT-16..19."
     }
   ],
-  "updated": "2026-09-30",
+  "updated": "2026-10-01",
   "status": "clean",
   "startedAt": null
 }

@@ -53,9 +53,9 @@ The parity tags reflect features that iLovePDF and Nitro PDF Pro advertise publi
 |---|---|---|
 | iLovePDF | 48 | COR-01, COR-02, SEC-01, SEC-04, SEC-05, SEC-08, EDT-01, EDT-03, EDT-04, EDT-08, EDT-09, UI-01, UI-02, UI-06, UI-07, ORG-01, ORG-02, ORG-03, ORG-04, ORG-05, ORG-06, ORG-07, ORG-09, DES-01, DES-04, ANN-01, ANN-03, SIG-01, OCR-01, OCR-02, OCR-04, CVF-01, CVF-02, CVF-03, CVF-04, CVF-07, CVT-01, CVT-02, CVT-03, CVT-04, CVT-05, OPT-01, OPT-02, OPT-06, CMP-01, CMP-02, XTR-01, XTR-02 |
 | Nitro PDF Pro | 113 | COR-01, COR-02, COR-05, COR-06, COR-07, COR-09, COR-12, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-09, SEC-10, FNT-11, FNT-14, FNT-17, FNT-18, EDT-01, EDT-02, EDT-03, EDT-04, EDT-05, EDT-06, EDT-08, EDT-09, EDT-10, EDT-11, EDT-13, EDT-14, EDT-15, EDT-16, EDT-17, EDT-18, EDT-19, EDT-20, UI-01, UI-02, UI-04, UI-06, UI-07, UI-08, UI-09, UI-10, UI-11, CMD-07, ORG-01, ORG-02, ORG-03, ORG-04, ORG-05, ORG-06, ORG-07, ORG-08, ORG-09, ORG-10, DES-01, DES-02, DES-03, DES-04, DES-05, DES-06, ANN-01, ANN-02, ANN-03, ANN-04, ANN-05, ANN-06, DOC-01, DOC-02, DOC-04, DOC-05, FRM-01, FRM-02, FRM-03, FRM-04, FRM-05, FRM-06, FRM-07, SIG-01, SIG-02, SIG-03, SIG-04, OCR-01, OCR-02, OCR-03, CVF-01, CVF-02, CVF-03, CVF-04, CVF-05, CVF-07, CVF-08, CVT-01, CVT-02, CVT-03, CVT-04, CVT-05, OPT-01, OPT-02, OPT-03, OPT-04, OPT-05, CMP-01, CMP-02, CMP-03, ACC-01, ACC-02, BAT-01, XTR-03 |
-| Beyond both | 58 | INF-01, INF-02, INF-03, INF-04, INF-05, INF-06, INF-07, INF-08, INF-09, INF-10, COR-03, COR-04, COR-08, COR-10, COR-11, SEC-11, FNT-01, FNT-02, FNT-03, FNT-04, FNT-05, FNT-06, FNT-07, FNT-08, FNT-09, FNT-10, FNT-12, FNT-13, FNT-15, FNT-16, FNT-19, EDT-07, EDT-12, UI-03, UI-05, CMD-01, CMD-02, CMD-03, CMD-04, CMD-05, CMD-06, CMD-08, ORG-11, ORG-12, ORG-13, DOC-03, FRM-08, SIG-05, SIG-06, CVF-06, CVT-06, OPT-07, ACC-03, ACC-04, ACC-05, BAT-02, BAT-03, BAT-04 |
+| Beyond both | 60 | INF-01, INF-02, INF-03, INF-04, INF-05, INF-06, INF-07, INF-08, INF-09, INF-10, COR-03, COR-04, COR-08, COR-10, COR-11, SEC-11, FNT-01, FNT-02, FNT-03, FNT-04, FNT-05, FNT-06, FNT-07, FNT-08, FNT-09, FNT-10, FNT-12, FNT-13, FNT-15, FNT-16, FNT-19, FNT-20, FNT-21, EDT-07, EDT-12, UI-03, UI-05, CMD-01, CMD-02, CMD-03, CMD-04, CMD-05, CMD-06, CMD-08, ORG-11, ORG-12, ORG-13, DOC-03, FRM-08, SIG-05, SIG-06, CVF-06, CVT-06, OPT-07, ACC-03, ACC-04, ACC-05, BAT-02, BAT-03, BAT-04 |
 
-Total features: **175**.
+Total features: **177**.
 <!-- END GENERATED: parity -->
 
 **Why PDFWorkerz goes beyond both products:**
@@ -243,7 +243,7 @@ Every feature has a stable ID. The table below is **generated** from `tracker/fe
 | SEC-10 | Sanitize: remove metadata, XMP, JavaScript, embedded files, hidden text | Nitro | PyMuPDF, pikepdf | P6 | M |
 | SEC-11 | Redaction verification (re-extract after save proves removal) | Beyond | PyMuPDF | P6 | S |
 
-#### FNT — Font & text intelligence (19)
+#### FNT — Font & text intelligence (21)
 
 | ID | Feature | Parity | Libraries | Phase | Size |
 |---|---|---|---|---|---|
@@ -266,6 +266,8 @@ Every feature has a stable ID. The table below is **generated** from `tracker/fe
 | FNT-17 | Justified reflow, and moving later content when a paragraph grows | Nitro | PyMuPDF | P5 | L |
 | FNT-18 | Right-to-left and vertical text editing | Nitro | PyMuPDF, fontTools | P8 | L |
 | FNT-19 | Per-character spacing kept through a text-only edit (TJ kerning, spacing that changes mid-line) | Beyond | PyMuPDF, pikepdf | P8 | L |
+| FNT-20 | Icons and emoji recognised as their own units (Type3, PUA, emoji ranges), never edited away by a nearby restyle, insert, move or re-wrap | Beyond | PyMuPDF, pikepdf | P6 | M |
+| FNT-21 | Move, copy and shift icons and emoji by re-using the document's own glyph drawing (incl. Type3) | Beyond | PyMuPDF, pikepdf | P6 | L |
 
 #### EDT — Edit content (20)
 
@@ -700,7 +702,7 @@ Build sessions are finite. Usage limits, context size and session expiry can all
 | P3 | Web UI with click-to-edit | 15 | ~1,900k |
 | P4 | Command bar & recipes | 8 | ~900k |
 | P5 | Organize, page design, annotate, document structure | 40 | ~4,450k |
-| P6 | Forms, signatures, security, redaction | 21 | ~2,200k |
+| P6 | Forms, signatures, security, redaction | 23 | ~2,750k |
 | P7 | OCR, scans, conversions | 21 | ~2,800k |
 | P8 | Optimize, compare, accessibility, batch, extras | 25 | ~4,450k |
 | P9 | Packaging & documentation | 2 | ~550k |

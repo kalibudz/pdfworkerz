@@ -37,6 +37,7 @@ from engine.edit import (
 from engine.errors import OpValidationError
 from engine.fonts.blocks import TextBlock, detect_blocks, find_block_containing
 from engine.fonts.choose import family_is_inferred, family_of, is_bold_italic, resolve_chosen_font
+from engine.fonts.icons import is_icon_char
 from engine.fonts.match import FontCandidate, build_font_index, scan_font_directory, user_fonts_dir
 from engine.fonts.resolve import FontResolution
 from engine.fonts.style import SpanTrace, dedupe_texttrace, extract_page_spans
@@ -916,7 +917,13 @@ class EditTextUnitOp(_StyleChange):
             )
         else:
             glyphs = [None if entry is None else spans[entry[0]] for entry in line.glyph_map]
-            styles = [None if span is None else _style_of(span) for span in glyphs]
+            # FNT-20: an icon/emoji glyph (engine.fonts.icons) never gets a restyle run of
+            # its own -- the same "no style" treatment a synthetic space already gets, so
+            # restyling a line or word leaves its icon in its own font, silently.
+            styles = [
+                None if span is None or is_icon_char(line.text[offset], span.style.font) else _style_of(span)
+                for offset, span in enumerate(glyphs)
+            ]
             hunks = _unit_hunks(line, styles, start, end, new_text, restyle=restyles)
             scale = None
             if self.size is not None:
@@ -981,7 +988,12 @@ class EditTextUnitOp(_StyleChange):
             if line is None:
                 raise OpValidationError(f"edit_text_unit: the line {text!r} changed while the block was restyled")
             glyphs = [None if entry is None else spans[entry[0]] for entry in line.glyph_map]
-            styles = [None if span is None else _style_of(span) for span in glyphs]
+            # FNT-20: see the matching comment in apply() above -- an icon/emoji glyph
+            # never gets a restyle run, so it keeps its own font through a block restyle.
+            styles = [
+                None if span is None or is_icon_char(line.text[offset], span.style.font) else _style_of(span)
+                for offset, span in enumerate(glyphs)
+            ]
             hunks = _unit_hunks(line, styles, 0, len(line.text), line.text, restyle=True)
             scale = None
             if self.size is not None:

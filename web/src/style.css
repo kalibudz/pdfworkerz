@@ -1165,6 +1165,12 @@ button {
   font-style: italic;
 }
 
+/* FNT-20: the "(icon)" badge beside "Word" when the selected unit is an icon/emoji glyph. */
+.pw-icon-badge {
+  font-size: 0.85em;
+  font-style: italic;
+}
+
 /* A word's move handle sits beside it, over the end of the word before: it has to be
  * on top of the text boxes (z-index 1) and spelling marks (2) to be grabbed. */
 .pw-move-handle,

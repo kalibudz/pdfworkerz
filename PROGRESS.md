@@ -26,6 +26,54 @@ A phase is complete when all of its features are **done** through the evidence g
 
 ## Session log
 
+### 2026-10-01 — FNT-20: icons and emoji are their own unit, never edited away
+
+The same live retest that found the two EDT-16..19 bugs also bolded a
+heading and inserted text right after its emoji, and the emoji vanished.
+A read-only probe of the owner's real document confirmed the pattern: every
+heading and table label opens with an icon in its own Type3 font (how
+Chrome/Google Docs export emoji), and `split_words` glued it to the word
+after it (`✅OBJECTIVES`). Restyling, inserting next to it, moving it, or
+re-wrapping its block all redrew the icon -- and a Type3 glyph can't be
+redrawn outside its own document (FNT-15), so it silently fell back to a
+font with no such glyph and came out blank.
+
+Owner's decision, given a choice of scope: protect icons now, make them
+movable later (tracked as the new FNT-21).
+
+- `engine/fonts/icons.py` (new): `is_icon_char(char, font)` -- true for
+  emoji/pictograph Unicode ranges, private-use codepoints, `U+FFFD` in a
+  Type3 font (MuPDF's "no ToUnicode" case), or a dingbat/emoji font by name.
+  Explicitly not icons: `© ® ™ °`, bullets and arrows in a text font.
+  `icon_ranges`/`icon_members` group a line's icon glyphs into clusters,
+  with emoji joiners (ZWJ, variation selectors, keycap) attached to the
+  preceding icon.
+- `engine/fonts/units.py`: `TextLine.icon_ranges`, `split_words` breaks on
+  icon-cluster boundaries instead of only spaces, `TextWord.icon` and
+  `TextUnit.icon` (served over `GET .../text_units`, mirrored in
+  `web/src/api.ts`).
+- `engine/edit.py` / `engine/ops/text.py`: restyle and recolor skip icon
+  offsets silently (the same `style is None` mechanism synthetic spaces
+  already used); `_style_anchor` no longer anchors an insertion's style to
+  a neighbouring icon (the actual root cause of the "ALL " insert taking
+  the icon's own fallback font); any edit that would have to redraw an icon
+  -- a text-touching hunk, a shift from a neighbour's width change, a move
+  or duplicate, a block re-wrap or width-changing resize -- is refused with
+  a clear `OpValidationError` instead of silently losing it. Deliberately
+  deleting an icon (Word mode, Delete) still works.
+- `web/src/inspector.ts`: a selected icon word shows an "(icon)" badge next
+  to "Word" and its text/font/size/color/bold/italic controls go read-only,
+  with a hint that it can be deleted but not retyped, restyled or moved yet.
+- New corpus fixture `icon_labels` (two Type3 icons -- one with a ToUnicode
+  CMap to a real emoji codepoint, including one outside the BMP; one with
+  none, MuPDF's `U+FFFD` case -- plus a `©` and a `•` as negative tests).
+- 30 new engine tests (`tests/engine/test_icons.py`), 1 new server test
+  (`icon: true` over the wire) and 1 new Playwright test (clicking the icon
+  in Word mode selects only it; the inspector reflects the read-only
+  state). `python tools/gate.py`: 14/14. FNT-20 moved to "done"; FNT-21
+  (move/copy icons by reusing the document's own glyph drawing) added as
+  planned, P6.
+
 ### 2026-09-30 (later) — Two real bugs found in live use of EDT-16..19
 
 Owner retested a real document right after EDT-16..19 landed and found two

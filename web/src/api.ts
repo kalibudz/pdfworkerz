@@ -97,6 +97,9 @@ export interface TextUnit {
   segments: { span_index: number; start: number; end: number }[];
   /** Words only: the line the word is on. */
   line_index: number | null;
+  /** FNT-20: an emoji or icon glyph, its own unit so an edit never redraws it away.
+   * Read-only in the inspector: it can be deleted on its own but not retyped or moved. */
+  icon: boolean;
 }
 
 /** An ObjectRef inside move_objects / duplicate_objects / delete_objects items. */

@@ -9,10 +9,13 @@ one Op and one undo.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page
+
+from tests.corpus.build_corpus import Corpus
 
 _EDITOR = "#pw-edit-text"
 _SELECTED = ".pw-span-box.pw-span-selected"
@@ -583,3 +586,33 @@ def test_deleting_a_line_is_one_undo(page: Page, app_url: str, units_pdf: Path) 
     assert _texts(page) == [LINE_ONE, LINE_TWO, LINE_THREE]
     _undo(page, 0)
     page.wait_for_function("() => document.querySelectorAll('.pw-span-box').length === 4", timeout=10000)
+
+
+# -- FNT-20: an icon/emoji glyph is its own unit, and the inspector shows it as such --
+
+
+@pytest.fixture
+def icon_pdf(corpus: Corpus, tmp_path: Path) -> Path:
+    dest = tmp_path / "icon_labels.pdf"
+    shutil.copy(corpus.icon_labels, dest)
+    return dest
+
+
+@pytest.mark.feature("FNT-20")
+def test_clicking_an_icon_in_word_mode_selects_only_it(page: Page, app_url: str, icon_pdf: Path) -> None:
+    _open(page, app_url, icon_pdf, mode="word")
+    _click_text(page, "✅")
+    page.wait_for_selector(_SELECTED, timeout=3000)
+    assert page.text_content(".pw-unit-kind") == "Word"
+    assert page.input_value(_EDITOR) == "✅"
+    assert page.is_visible(".pw-icon-badge")  # the "(icon)" badge beside "Word"
+    assert page.is_disabled(_EDITOR) is False and page.eval_on_selector(_EDITOR, "el => el.readOnly") is True
+    assert page.is_disabled("#pw-edit-bold") is True
+    assert page.is_disabled("#pw-edit-apply") is True
+
+    # The word right after it is an ordinary, fully editable word.
+    _click_text(page, "OBJECTIVES")
+    page.wait_for_function(f"() => document.querySelector('{_EDITOR}')?.value === 'OBJECTIVES'", timeout=3000)
+    assert page.is_hidden(".pw-icon-badge")
+    assert page.eval_on_selector(_EDITOR, "el => el.readOnly") is False
+    assert page.is_disabled("#pw-edit-bold") is False

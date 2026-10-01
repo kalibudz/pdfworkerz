@@ -48,6 +48,7 @@ from engine.fonts import research as font_research
 from engine.fonts.blocks import TextBlock, detect_alignment, detect_blocks
 from engine.fonts.classify import classify_font_xref, split_subset_tag
 from engine.fonts.fit import fit_to_width
+from engine.fonts.icons import icon_members, is_icon_char
 from engine.fonts.kerning import build_kern_pairs
 from engine.fonts.match import FontCandidate, loose_font_key, normalize_font_name
 from engine.fonts.merge import program_postscript_name, with_postscript_name
@@ -936,6 +937,18 @@ def _row_references(block: TextBlock, reference: SpanTrace) -> list[SpanTrace]:
     return [row[0] if len(row) == 1 else reference for row in block.rows]
 
 
+def _block_icon(block: TextBlock) -> str | None:
+    """The first icon/emoji glyph (engine.fonts.icons) anywhere in `block`, or None.
+    FNT-20: a block re-wrap or full-width move redraws every line from scratch, which
+    would lose an icon glyph it can't reproduce exactly (most commonly Type3, FNT-15)."""
+    runs = [span for row in block.rows for span in row] if block.rows else list(block.lines)
+    for span in runs:
+        for char in span.style.chars:
+            if is_icon_char(char.char, span.style.font):
+                return char.char
+    return None
+
+
 def _style_loss_note(block: TextBlock, reference: SpanTrace) -> str:
     """What a re-layout in one style costs a block with several styles on a line; empty
     when nothing is lost. Never silent: callers put this in the result's note."""
@@ -980,6 +993,13 @@ def move_resize_block(
     that is one change, so one EditResult. Re-wrapping such a block to a new `width`
     can't keep runs on the words they belonged to, so it is redrawn in the block's main
     style and the last result's note says what was lost (and asks for approval).
+
+    FNT-20: a block with an icon/emoji glyph (engine.fonts.icons) is always
+    `fragmented` (the icon is its own style run), so a plain move always takes the
+    run-by-run path above, which already keeps the icon in its own font exactly where
+    it lands. A `width` resize is refused instead: unlike a run-by-run move, it redraws
+    every line from scratch, which would lose the icon (most commonly a Type3 glyph,
+    FNT-15).
     """
     if not block.lines:
         return []
@@ -1001,6 +1021,12 @@ def move_resize_block(
                 verify=verify,
             )
         ]
+    if width is not None and (icon := _block_icon(block)) is not None:
+        raise OpValidationError(
+            f"this block has the icon {icon!r}, which resizing can't keep (it can't be redrawn "
+            "exactly); move it instead of resizing it, or edit the width-changing text in Line or "
+            "Word mode"
+        )
     page = document.raw[target_index]
     reference = _block_reference(block)
     row_references = _row_references(block, reference)
@@ -1122,9 +1148,19 @@ def reflow_block(
     still be edited as a block, but never silently: the last result's note says how many
     runs lost their own style and its `requires_approval` is set. Editing in Line or Word
     mode (rewrite_line_range) keeps every other run as it is.
+
+    FNT-20: refused outright, nothing changed, when the block has an icon/emoji glyph
+    (engine.fonts.icons) anywhere -- a re-wrap redraws every line from scratch, which
+    would lose it (most commonly a Type3 glyph, FNT-15). Edit the block's text in Line
+    or Word mode instead, which leaves the icon's own line untouched.
     """
     if not block.lines:
         return []
+    if (icon := _block_icon(block)) is not None:
+        raise OpValidationError(
+            f"this paragraph has the icon {icon!r}, which a re-wrap can't keep (it can't be "
+            "redrawn exactly); edit it in Line or Word mode instead"
+        )
     if align not in ("left", "justify"):
         raise OpValidationError(f"unknown alignment {align!r}: use left or justify")
     if align == "justify" or grow or block.fragmented:
@@ -1735,10 +1771,23 @@ def move_glyph_ranges(
     Every other glyph on the page, the rest of the same line included, is left alone.
 
     With `keep_original` the glyphs are copied instead, onto `target_page_index` if given
-    (paste and duplicate); a copy may overlap other text."""
+    (paste and duplicate); a copy may overlap other text.
+
+    FNT-20: refused outright, nothing moved, when a range holds an icon/emoji glyph
+    (engine.fonts.icons) -- moving or copying redraws it at a new position, and it can't
+    be reproduced exactly (most commonly a Type3 glyph, FNT-15)."""
     ranges = [(span, start, end) for span, start, end in ranges if end > start]
     if not ranges:
         raise OpValidationError("there is no text to move")
+    for span, start, end in ranges:
+        icon = next(
+            (char.char for char in span.style.chars[start:end] if is_icon_char(char.char, span.style.font)), None
+        )
+        if icon is not None:
+            raise OpValidationError(
+                f"the icon {icon!r} can't be moved or copied yet (it can't be redrawn exactly); "
+                "move the surrounding text instead, or delete the icon on its own"
+            )
     target_index = page_index if target_page_index is None else target_page_index
     if target_index != page_index and not keep_original:
         raise OpValidationError("text can only be copied to another page, not moved there")
@@ -1864,12 +1913,23 @@ def _relayout_line(
     in exactly the same place (_EXACT_DRIFT_PT) in exactly the same font -- the same
     pixels. When that can't be promised (their font only resolves to a look-alike, or
     their text is unknown), they are not touched, the changed parts are still drawn in
-    reading order, and the result's note says extraction may read out of order."""
+    reading order, and the result's note says extraction may read out of order.
+
+    FNT-20: refused outright, nothing changed, if an icon/emoji glyph (engine.fonts.icons)
+    not being removed would have to shift -- a glyph that can't be redrawn exactly (most
+    commonly Type3, FNT-15) would be lost if something tried to slide it to a new spot."""
     glyphs = _line_glyphs(line, spans)
     direction = _direction(line.rotation_degrees)
     pens = _Pens(document, page_index, font_index)
     gone = set(removed)
     colors = recolor or {}
+    icons = icon_members(line.icon_ranges)
+    moved_icon = next((offset for offset in icons if offset not in gone and abs(shifts.get(offset, 0.0)) > 1e-6), None)
+    if moved_icon is not None:
+        raise OpValidationError(
+            f"the icon {line.text[moved_icon]!r} can't be shifted yet (it can't be redrawn exactly); "
+            "try a change that doesn't move text past it"
+        )
     kept = [(offset, glyph) for offset, glyph in enumerate(glyphs) if glyph is not None and offset not in gone]
 
     def changes(offset: int) -> bool:
@@ -1960,15 +2020,26 @@ def _style_key(span: SpanTrace) -> tuple[str, float, _Color]:
     return span.style.font, round(span.style.size, 2), span.style.color
 
 
+def _is_icon_glyph(glyph: tuple[SpanTrace, int] | None) -> bool:
+    if glyph is None:
+        return False
+    span, index = glyph
+    return is_icon_char(span.style.chars[index].char, span.style.font)
+
+
 def _style_anchor(glyphs: list[tuple[SpanTrace, int] | None], start: int, end: int) -> tuple[SpanTrace, int] | None:
     """The character whose style a hunk's new text takes: its first character; for an
     insertion, the character it follows (appending to a bold word stays bold), unless that
-    is a space -- text inserted at a word's start takes the word's style."""
+    is a space or an icon/emoji glyph (FNT-20, engine.fonts.icons) -- text inserted at a
+    word's start, or right after an icon, takes the following text's style instead, never
+    the icon's own (it can't be reproduced, most commonly Type3, FNT-15)."""
     if start == end:
         previous = glyphs[start - 1] if start > 0 else None
         following = glyphs[start] if start < len(glyphs) else None
         if previous is not None and not previous[0].style.chars[previous[1]].char.isspace():
-            return previous
+            if not _is_icon_glyph(previous):
+                return previous
+            return following or previous
         return following or previous
     real = [glyph for glyph in glyphs[start:end] if glyph is not None]
     if real:
@@ -2037,6 +2108,7 @@ def rewrite_line_hunks(
     glyphs = _line_glyphs(line, spans)
     direction = _direction(line.rotation_degrees)
     restyle = restyle or LineRestyle()
+    icons = icon_members(line.icon_ranges)
 
     planned: list[tuple[int, int, tuple[float, float], _Pen | None, float]] = []
     removed: list[int] = []
@@ -2048,6 +2120,14 @@ def rewrite_line_hunks(
         if origin is None or (text and anchor is None):
             raise OpValidationError("an edit has to start at a character of the line")
         real = [offset for offset in range(start, end) if glyphs[offset] is not None]
+        # FNT-20: deleting an icon (text == "") is fine -- nothing is drawn through its font.
+        # Drawing new text at or over one would be: it can't be reproduced exactly (most
+        # commonly a Type3 glyph, FNT-15), so that specific change is refused, nothing else.
+        if text and any(offset in icons for offset in range(start, end)):
+            raise OpValidationError(
+                f"this change would need to redraw the icon {line.text[start:end]!r}, which can't be "
+                "reproduced exactly; edit only the text around it, or delete the icon on its own"
+            )
         removed += real
         pen = None
         if text:
@@ -2187,12 +2267,22 @@ def recolor_line_range(
     verify: bool = True,
 ) -> EditResult:
     """EDT-17: give characters ``[start, end)`` of `line`'s text a new color. Each glyph is
-    drawn again exactly where it is, in its own font and size, so nothing on the line moves."""
+    drawn again exactly where it is, in its own font and size, so nothing on the line moves.
+
+    FNT-20: an icon/emoji glyph (engine.fonts.icons) in the range keeps its own color --
+    recoloring would need to redraw it, and it can't be reproduced exactly (most commonly a
+    Type3 glyph, FNT-15). Silent, not refused: the rest of the range still recolors."""
     if not 0 <= start < end <= len(line.text):
         raise OpValidationError(f"characters {start}-{end} are outside the line ({len(line.text)} characters)")
     spans = extract_page_spans(document.raw, page_index)
     glyphs = _line_glyphs(line, spans)
-    recolor = {offset: color for offset in range(start, end) if glyphs[offset] is not None}
+    recolor = {
+        offset: color
+        for offset in range(start, end)
+        if (glyph := glyphs[offset]) is not None and not is_icon_char(line.text[offset], glyph[0].style.font)
+    }
+    if not recolor:
+        raise OpValidationError("this text is all icon glyphs, which keep their own color; nothing was changed")
     return _relayout_line(
         document,
         page_index,

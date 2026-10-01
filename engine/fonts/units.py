@@ -33,6 +33,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from engine.fonts.blocks import TextBlock, detect_blocks, find_block_containing
+from engine.fonts.icons import icon_ranges as compute_icon_ranges
 from engine.fonts.style import CharBox, SpanTrace
 
 Granularity = Literal["block", "line", "word"]
@@ -77,6 +78,10 @@ class TextLine:
     """The largest font size on the line."""
     boxes: tuple[CharBox | None, ...] = ()
     """Parallel to ``glyph_map``: each character's glyph box, None for a synthetic space."""
+    icon_ranges: tuple[tuple[int, int], ...] = ()
+    """FNT-20: ``[start, end)`` offsets of `text` that are an icon/emoji cluster
+    (engine.fonts.icons), never a word's ordinary text -- an edit must never need to
+    redraw one of these to do something else."""
 
     @property
     def span_indices(self) -> list[int]:
@@ -85,7 +90,9 @@ class TextLine:
 
 @dataclass(frozen=True)
 class TextWord:
-    """A maximal run of non-space glyphs on one line."""
+    """A maximal run of non-space glyphs on one line -- or, when `icon` is set, one
+    whole icon/emoji cluster (engine.fonts.icons) that a space-based split would
+    otherwise have glued to the word next to it."""
 
     index: int
     line_index: int
@@ -97,6 +104,7 @@ class TextWord:
     text: str
     bbox: tuple[float, float, float, float]
     origin: tuple[float, float]
+    icon: bool = False
 
     @property
     def span_indices(self) -> list[int]:
@@ -130,6 +138,9 @@ class TextUnit(BaseModel):
     span_indices: list[int]
     segments: list[Segment]
     line_index: int | None = None
+    icon: bool = False
+    """FNT-20: true for a word that is one whole icon/emoji cluster (engine.fonts.icons)
+    -- never set for a line or block, which can contain an icon among other things."""
 
 
 # -- helpers -------------------------------------------------------------------------
@@ -314,17 +325,19 @@ def group_lines(spans: Sequence[SpanTrace]) -> list[TextLine]:
     lines: list[TextLine] = []
     for index, (rotation, _baseline, _start, glyphs, _row_size) in enumerate(drafts):
         text, placed = _build_line(glyphs)
+        glyph_map = tuple(None if g is None else (g.span_index, g.char_index) for g in placed)
         lines.append(
             TextLine(
                 index=index,
                 segments=_segments([(g.span_index, g.char_index) for g in glyphs]),
                 text=text,
-                glyph_map=tuple(None if g is None else (g.span_index, g.char_index) for g in placed),
+                glyph_map=glyph_map,
                 bbox=_union([g.box.bbox for g in glyphs]),
                 origin=glyphs[0].box.origin,
                 rotation_degrees=rotation,
                 size=max(g.size for g in glyphs),
                 boxes=tuple(None if g is None else g.box for g in placed),
+                icon_ranges=compute_icon_ranges(text, glyph_map, spans),
             )
         )
     return lines
@@ -332,17 +345,26 @@ def group_lines(spans: Sequence[SpanTrace]) -> list[TextLine]:
 
 def split_words(lines: Sequence[TextLine]) -> list[TextWord]:
     """Split lines into words: maximal runs of non-space characters of each line's
-    text. The synthetic spaces group_lines inserted already mark the geometric word
-    gaps, so a word may cross style runs (and spans) but never a gap. Punctuation
-    stays with its word."""
+    text -- except an icon/emoji cluster (FNT-20, engine.fonts.icons) is always its
+    own word, even glued to a word with no space around it ("✅OBJECTIVES"), so the
+    icon is never swept into the text it labels. The synthetic spaces group_lines
+    inserted already mark the geometric word gaps, so a word may cross style runs
+    (and spans) but never a gap. Punctuation stays with its word."""
     words: list[TextWord] = []
     for line in lines:
+        icon_members = {i for start, end in line.icon_ranges for i in range(start, end)}
         start: int | None = None
+        current: str | None = None
         for offset in range(len(line.text) + 1):
-            breaks = offset == len(line.text) or _is_space(line.text[offset])
-            if not breaks and start is None:
-                start = offset
-            elif breaks and start is not None:
+            if offset == len(line.text):
+                this: str | None = None
+            elif offset in icon_members:
+                this = "icon"
+            elif _is_space(line.text[offset]):
+                this = "space"
+            else:
+                this = "text"
+            if start is not None and this != current:
                 glyphs = [g for g in line.glyph_map[start:offset] if g is not None]
                 boxes = [b for b in line.boxes[start:offset] if b is not None]
                 words.append(
@@ -355,9 +377,14 @@ def split_words(lines: Sequence[TextLine]) -> list[TextWord]:
                         text=line.text[start:offset],
                         bbox=_union([box.bbox for box in boxes]),
                         origin=boxes[0].origin,
+                        icon=current == "icon",
                     )
                 )
                 start = None
+                current = None
+            if this is not None and this != "space" and start is None:
+                start = offset
+                current = this
     return words
 
 
@@ -447,6 +474,7 @@ def text_units(spans: Sequence[SpanTrace], granularity: Granularity) -> list[Tex
             span_indices=word.span_indices,
             segments=list(word.segments),
             line_index=word.line_index,
+            icon=word.icon,
         )
         for word in split_words(lines)
     ]

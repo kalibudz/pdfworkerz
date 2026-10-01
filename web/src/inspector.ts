@@ -195,6 +195,12 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   const unitKind = document.createElement("span");
   unitKind.className = "pw-unit-kind";
   editHeading.appendChild(unitKind);
+  // FNT-20: badge shown instead of "Word" when the selected unit is an icon/emoji glyph.
+  const iconBadge = document.createElement("span");
+  iconBadge.className = "pw-icon-badge";
+  iconBadge.textContent = "(icon)";
+  iconBadge.hidden = true;
+  editHeading.appendChild(iconBadge);
   const editText = document.createElement("textarea");
   editText.id = "pw-edit-text";
   editText.rows = 2;
@@ -258,8 +264,9 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   editStatus.hidden = true;
   const editHint = document.createElement("p");
   editHint.className = "pw-hint";
-  editHint.textContent =
-    "Enter applies, Esc reverts. Esc again returns the keyboard to the page: arrows nudge, Delete removes.";
+  const EDIT_HINT = "Enter applies, Esc reverts. Esc again returns the keyboard to the page: arrows nudge, Delete removes.";
+  const ICON_HINT = "This is an icon or emoji glyph, kept as its own item so edits never redraw it away. It can be deleted on its own, but not retyped, restyled or moved yet.";
+  editHint.textContent = EDIT_HINT;
   editor.append(
     editHeading,
     editField("Text", editText, "pw-edit-field pw-edit-text-field"),
@@ -274,6 +281,9 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   let original: TextDraft | null = null;
   /** EDT-16: the style fields still showing "(mixed)": untouched since the unit was shown. */
   let mixed = new Set<StyleField>();
+  /** FNT-20: the selected unit is an icon/emoji glyph -- text and style controls stay
+   * disabled regardless of busy state, since any such edit would be refused anyway. */
+  let iconLocked = false;
 
   function readDraft(): TextDraft {
     return {
@@ -617,6 +627,10 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     }
     showLinks(links);
     unitKind.textContent = UNIT_LABELS[unit.granularity];
+    iconBadge.hidden = !unit.icon;
+    iconLocked = unit.icon;
+    editText.readOnly = unit.icon;
+    editHint.textContent = unit.icon ? ICON_HINT : EDIT_HINT;
     const mixedFields = mixedStyleFields(spans);
     keepFontOption.textContent = mixedFields.includes("font")
       ? "Original fonts (mixed)"
@@ -680,7 +694,10 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     busy = isBusy;
     editStatus.hidden = message === null;
     editStatus.textContent = message ?? "";
-    for (const control of [editText, editFont, editSize, editColor, editBold, editItalic, revertButton]) {
+    for (const control of [editFont, editSize, editColor, editBold, editItalic, applyButton]) {
+      control.disabled = isBusy || iconLocked;
+    }
+    for (const control of [editText, revertButton]) {
       control.disabled = isBusy;
     }
     refreshDirty();

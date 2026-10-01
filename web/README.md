@@ -53,6 +53,20 @@ page's text boxes.
   mode. In Line and Block modes it copies from the selected unit's first
   span onto the run under the next click.
 
+## Icons and emoji are their own word, read-only (FNT-20)
+
+Real documents glue an emoji or icon glyph (almost always its own Type3 font)
+to the word right after it -- `✅OBJECTIVES`, `📆Date:`. `split_words` on the
+server breaks these apart, so the icon is always its own `TextUnit` with
+`icon: true`. The inspector shows this as an "(icon)" badge beside "Word" and
+makes the text box, font, size, color, bold and italic controls read-only,
+with a hint that the icon can be deleted on its own but not retyped,
+restyled or moved yet (a Type3 glyph can't be redrawn outside its own
+document -- FNT-15 -- so any edit that would need to redraw it is refused
+server-side instead of silently losing it; FNT-21 tracks making icons
+movable by reusing the document's own glyph drawing). An ordinary text
+symbol -- `©`, `•`, a plain arrow -- is never treated as an icon.
+
 ## Running it
 
 1. Start the API: `pdfworkerz serve` (prints the port and a session token).

@@ -22,7 +22,7 @@ import pikepdf
 import pymupdf
 
 OUT_DIR = Path(__file__).resolve().parent / "generated"
-CORPUS_VERSION = "2"  # bump whenever a generator below changes
+CORPUS_VERSION = "3"  # bump whenever a generator below changes
 
 USER_PASSWORD = "user-pw"
 OWNER_PASSWORD = "owner-pw"
@@ -55,6 +55,7 @@ class Corpus:
     paragraph: Path
     form_xobject: Path
     shared_form_xobject: Path
+    icon_labels: Path
     user_password: str = USER_PASSWORD
     owner_password: str = OWNER_PASSWORD
 
@@ -227,6 +228,74 @@ def _type3(path: Path) -> None:
     )
     page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(T3=type3_font))
     page.Contents = pdf.make_stream(b"BT\n/T3 24 Tf\n1 0 0 1 72 700 Tm\n(A) Tj\nET\n")
+    pdf.save(path)
+    pdf.close()
+
+
+def _icon_labels(path: Path) -> None:
+    """Icon/emoji glyphs glued to a word, the way Google Docs and Chrome export emoji
+    (FNT-20) -- confirmed against a real document, not assumed: every heading and table
+    label there opens with an emoji drawn in its own Type3 font. Two Type3 fonts here
+    each hold one glyph (the same box-drawing procedure _type3 uses; only the extracted
+    *character* matters to these tests, never how it renders): one with a ToUnicode CMap
+    mapping its code to a real emoji codepoint, including one outside the BMP (a UTF-16BE
+    surrogate pair); one with no ToUnicode at all, which MuPDF then reports as U+FFFD, the
+    other real way an icon glyph shows up (see is_icon_char's own docstring). Helvetica
+    with an explicit WinAnsiEncoding draws two lines of ordinary text symbols -- (c) and a
+    bullet -- that must NOT be classified as icons.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page()
+
+    def type3_font(code: int, glyph_name: str, to_unicode: pikepdf.Object | None) -> pikepdf.Object:
+        glyph_proc = pdf.make_stream(b"500 0 d0\n0 0 400 600 re\nf\n")
+        font_dict = pikepdf.Dictionary(
+            Type=pikepdf.Name.Font,
+            Subtype=pikepdf.Name("/Type3"),
+            FontBBox=pikepdf.Array([0, 0, 500, 700]),
+            FontMatrix=pikepdf.Array([0.001, 0, 0, 0.001, 0, 0]),
+            CharProcs=pikepdf.Dictionary(**{glyph_name: glyph_proc}),
+            Encoding=pikepdf.Dictionary(Differences=pikepdf.Array([code, pikepdf.Name(f"/{glyph_name}")])),
+            FirstChar=code,
+            LastChar=code,
+            Widths=pikepdf.Array([500]),
+            Resources=pikepdf.Dictionary(),
+        )
+        if to_unicode is not None:
+            font_dict["/ToUnicode"] = to_unicode
+        return pdf.make_indirect(font_dict)
+
+    def to_unicode_cmap(code: int, utf16be_hex: str) -> pikepdf.Object:
+        stream = (
+            b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+            b"/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
+            b"/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n"
+            b"1 begincodespacerange\n<00> <FF>\nendcodespacerange\n"
+            b"1 beginbfchar\n<%02X> <%s>\nendbfchar\nendcmap\n"
+            b"CMapType /CIDFont usecmap\nend\nend\n" % (code, utf16be_hex.encode("ascii"))
+        )
+        return pdf.make_stream(stream)
+
+    checkmark = type3_font(1, "g1", to_unicode_cmap(1, "2705"))  # U+2705 WHITE HEAVY CHECK MARK
+    calendar = type3_font(1, "g1", to_unicode_cmap(1, "D83DDCC6"))  # U+1F4C6 CALENDAR (outside the BMP)
+    unnamed = type3_font(1, "g1", None)  # no ToUnicode: MuPDF reports U+FFFD for this glyph
+
+    helv = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name.Font,
+            Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name("/Helvetica"),
+            Encoding=pikepdf.Name("/WinAnsiEncoding"),
+        )
+    )
+    page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(Check=checkmark, Cal=calendar, Icon=unnamed, F1=helv))
+    page.Contents = pdf.make_stream(
+        b"BT /Check 14 Tf 1 0 0 1 72 700 Tm (\x01) Tj /F1 14 Tf (OBJECTIVES AND GOALS) Tj ET\n"
+        b"BT /Cal 14 Tf 1 0 0 1 72 670 Tm (\x01) Tj /F1 14 Tf (Date:) Tj ET\n"
+        b"BT /Icon 14 Tf 1 0 0 1 72 640 Tm (\x01) Tj /F1 14 Tf (NoName) Tj ET\n"
+        b"BT /F1 14 Tf 1 0 0 1 72 610 Tm (\xa92026 Acme Corp) Tj ET\n"
+        b"BT /F1 14 Tf 1 0 0 1 72 580 Tm (\x95 Item one) Tj ET\n"
+    )
     pdf.save(path)
     pdf.close()
 
@@ -410,6 +479,7 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         "paragraph": out_dir / "paragraph.pdf",
         "form_xobject": out_dir / "form_xobject.pdf",
         "shared_form_xobject": out_dir / "shared_form_xobject.pdf",
+        "icon_labels": out_dir / "icon_labels.pdf",
     }
 
     if force or not paths["simple"].exists():
@@ -452,6 +522,8 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         _form_xobject(paths["form_xobject"])
     if force or not paths["shared_form_xobject"].exists():
         _shared_form_xobject(paths["shared_form_xobject"])
+    if force or not paths["icon_labels"].exists():
+        _icon_labels(paths["icon_labels"])
 
     stamp.write_text(CORPUS_VERSION, encoding="utf-8")
     return Corpus(
@@ -478,6 +550,7 @@ def build_corpus(out_dir: Path = OUT_DIR, *, force: bool = False) -> Corpus:
         paragraph=paths["paragraph"],
         form_xobject=paths["form_xobject"],
         shared_form_xobject=paths["shared_form_xobject"],
+        icon_labels=paths["icon_labels"],
     )
 
 
