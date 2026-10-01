@@ -321,6 +321,67 @@ def test_restyling_a_block_recolors_and_resizes_every_line() -> None:
 
 
 @pytest.mark.feature("EDT-17", criterion=4)
+def test_restyling_a_block_bold_does_not_falsely_report_overflow() -> None:
+    """Found from live use: a single-row block restyled bold+italic (text unchanged) was
+    refused with "overflow: 1 more line(s) needed than this block has", because the restyle
+    went through reflow_block's re-wrap, and a bolder, wider font needed more lines at the
+    block's own width than the original text did -- even though no wording changed and
+    nothing needed to move to a new line. A restyle-only edit must never re-wrap."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=PAGE_WIDTH, height=842)
+    page.insert_text((72, 100), "Khaliel Howell", fontname="helv", fontsize=10)
+    journal = UndoRedoJournal(Document.from_bytes(doc.tobytes()))
+    block = _unit(journal, "block", "Khaliel Howell")
+    op = {
+        "op": "edit_text_unit",
+        "page_index": 0,
+        "unit": "block",
+        "index": block.index,
+        "expect_text": block.text,
+        "bold": True,
+        "italic": True,
+        "require_tier": "exact",
+    }
+
+    result = journal.record(parse_op(op))
+
+    assert isinstance(result, list) and len(result) == 1
+    assert "overflow" not in result[0].note
+    assert result[0].tier == "exact"
+    after = extract_page_spans(journal.document.raw, 0)
+    assert after[0].style.text == "Khaliel Howell"
+    assert after[0].style.font == "Helvetica-BoldOblique"
+    assert _unit(journal, "block", "Khaliel Howell").origin == pytest.approx(block.origin, abs=0.01)
+
+
+@pytest.mark.feature("EDT-17", criterion=4)
+def test_restyling_a_multiline_block_bold_keeps_its_own_line_count() -> None:
+    """The same false-overflow bug, on the fixture's 3-line paragraph: bold is wide enough
+    that re-wrapping it (the old, buggy path) would need a 4th line, which the block
+    doesn't have."""
+    journal = _journal()
+    block = _unit(journal, "block", "Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel India")
+    op = {
+        "op": "edit_text_unit",
+        "page_index": 0,
+        "unit": "block",
+        "index": block.index,
+        "expect_text": block.text,
+        "bold": True,
+        "require_tier": "exact",
+    }
+
+    results = journal.record(parse_op(op))
+
+    assert isinstance(results, list) and len(results) == 3
+    assert all("overflow" not in r.note for r in results)
+    bold_texts = {s.style.text for s in extract_page_spans(journal.document.raw, 0) if s.style.font == "Helvetica-Bold"}
+    assert bold_texts >= {"Alpha Bravo Charlie", "Delta Echo Foxtrot", "Golf Hotel India"}
+    journal.undo()
+    assert _unit(journal, "block", block.text)
+
+
+@pytest.mark.feature("EDT-17", criterion=4)
 def test_a_block_edit_that_does_not_fit_is_refused_unless_overflow_is_allowed() -> None:
     journal = _journal()
     block = _unit(journal, "block", "Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel India")

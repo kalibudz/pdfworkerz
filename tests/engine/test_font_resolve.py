@@ -193,3 +193,83 @@ def test_any_other_non_embedded_font_is_never_silently_exact(font_index: list, b
 def test_a_non_embedded_font_that_is_installed_is_embedded_exactly(font_index: list) -> None:
     result = _resolve_non_embedded("BitstreamVeraSans-Roman", font_index)  # bundled, so always "installed"
     assert result.tier == TIER_EXACT and result.font_bytes is not None  # type: ignore[attr-defined]
+
+
+# -- a standard-14 fallback that can't actually draw the needed text --------------------
+#
+# Found from live use: a block containing a checkmark glyph (its own font, Type3, routes
+# to a standard-font fallback per FNT-15) was restyled bold -- the checkmark silently
+# vanished from the page, confirmed to be PyMuPDF drawing a replacement-glyph mark for any
+# character above U+00FF when inserting through one of its own 14 built-in fonts, not
+# refusing or reporting it. Every return path in resolve_font/resolve_non_embedded that
+# names one of those 14 fonts now checks `needed_text` against exactly that limit.
+
+
+@pytest.mark.feature("FNT-06")
+def test_standard_14_builtin_flags_a_character_it_cannot_draw(font_index: list) -> None:
+    result = _resolve_non_embedded("Helvetica", font_index)  # resolves exact via test_standard_14_names_... above
+    with_emoji = resolve_font(
+        _non_embedded("Helvetica"),  # type: ignore[arg-type]
+        original_font_bytes=None,
+        already_rendered_text="",
+        needed_text="✅ done",
+        font_index=font_index,
+    )
+    assert result.requires_approval is False  # the baseline (no uncoverable character) stays silent
+    assert with_emoji.tier == TIER_EXACT  # still the right standard font...
+    assert with_emoji.requires_approval is True  # ...but now flagged before anything is drawn
+    assert "\\u2705" in with_emoji.note or "✅" in with_emoji.note
+    assert "would not be drawn correctly" in with_emoji.note
+
+
+@pytest.mark.feature("FNT-15")
+def test_type3_fallback_flags_a_character_the_fallback_cannot_draw(corpus: Corpus, font_index: list) -> None:
+    with pikepdf.open(corpus.type3) as pdf:
+        classification = classify_font(pdf, 0, "T3")
+    result = resolve_font(
+        classification,
+        original_font_bytes=None,
+        already_rendered_text="",
+        needed_text="✅ Approved",
+        font_index=font_index,
+    )
+    assert result.tier == TIER_FALLBACK
+    assert result.requires_approval is True
+    assert "would not be drawn correctly" in result.note
+
+
+@pytest.mark.feature("FNT-15")
+def test_type3_fallback_with_only_ordinary_text_is_not_flagged(corpus: Corpus, font_index: list) -> None:
+    with pikepdf.open(corpus.type3) as pdf:
+        classification = classify_font(pdf, 0, "T3")
+    result = resolve_font(
+        classification,
+        original_font_bytes=None,
+        already_rendered_text="",
+        needed_text="Approved",
+        font_index=font_index,
+    )
+    assert "would not be drawn correctly" not in result.note
+
+
+@pytest.mark.feature("FNT-07")
+def test_metric_compatible_fallback_also_flags_an_uncoverable_character(font_index: list) -> None:
+    result = resolve_font(
+        _non_embedded("ArialMT"),  # type: ignore[arg-type]
+        original_font_bytes=None,
+        already_rendered_text="",
+        needed_text="★ star",
+        font_index=font_index,
+    )
+    assert result.tier == TIER_APPROXIMATE
+    assert result.requires_approval is True
+    assert "would not be drawn correctly" in result.note
+
+
+@pytest.mark.feature("FNT-06")
+def test_symbolic_builtins_are_never_flagged_by_the_latin1_check(font_index: list) -> None:
+    """Symbol and ZapfDingbats use their own encodings entirely outside Latin-1 by design;
+    the coverage check only ever applies to the ordinary standard-14 text fonts."""
+    result = _resolve_non_embedded("Symbol", font_index)
+    assert result.requires_approval is False
+    assert "would not be drawn correctly" not in result.note

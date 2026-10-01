@@ -34,6 +34,7 @@ would otherwise take.
 
 from __future__ import annotations
 
+import dataclasses
 import io
 from dataclasses import dataclass
 
@@ -41,6 +42,7 @@ from fontTools.pens.boundsPen import BoundsPen
 from fontTools.ttLib import TTFont
 
 from engine.fonts.classify import FontClassification, fingerprint_style, infer_style_from_name, split_subset_tag
+from engine.fonts.coverage import check_coverage
 from engine.fonts.match import (
     FontCandidate,
     extract_metrics,
@@ -180,6 +182,29 @@ def _standard_fallback_name(bold: bool, italic: bool, family_class: str) -> str:
     return table[(bold, italic)]
 
 
+def _with_coverage_note(resolution: FontResolution, needed_text: str) -> FontResolution:
+    """Flag it when `needed_text` has characters a PyMuPDF standard-14 built-in can't
+    actually draw -- confirmed empirically: those 14 fonts cover plain Latin-1 only
+    (not full WinAnsiEncoding), and PyMuPDF silently draws a replacement-glyph mark for
+    anything else instead of refusing, which otherwise reached the page with no warning
+    at all, sometimes (the "standard-14, not embedded" case) at the *exact* tier, which
+    needs no approval and so was never seen before the edit landed. Only applies to a
+    resolution naming a built-in font (`fontname` set, never `font_bytes`); the project's
+    own symbolic fonts (Symbol, ZapfDingbats) use a different encoding entirely and are
+    never routed through this check."""
+    coverage = check_coverage(
+        font_type="TrueType", embedded=False, font_bytes=None, already_rendered_text="", characters=needed_text
+    )
+    if coverage.fully_covered:
+        return resolution
+    missing = "".join(sorted(coverage.missing))
+    note = (
+        f"{resolution.note}; {len(coverage.missing)} character(s) ({missing!r}) have no glyph in "
+        f"{resolution.fontname} and would not be drawn correctly"
+    )
+    return dataclasses.replace(resolution, requires_approval=True, note=note)
+
+
 def _resolve_non_embedded(
     classification: FontClassification, already_rendered_text: str, needed_text: str, font_index: list[FontCandidate]
 ) -> FontResolution:
@@ -192,15 +217,27 @@ def _resolve_non_embedded(
     fingerprint = infer_style_from_name(classification.base_font)
     standard = _standard_fallback_name(fingerprint.bold, fingerprint.italic, fingerprint.family_class)
 
-    builtin = _SYMBOLIC_BUILTINS.get(key) or (standard if key in _STANDARD_14 else None)
-    if builtin is not None:
+    symbolic = _SYMBOLIC_BUILTINS.get(key)
+    if symbolic is not None:
         return FontResolution(
             tier=TIER_EXACT,
             confidence=1.0,
-            fontname=builtin,
+            fontname=symbolic,
             font_bytes=None,
             requires_approval=False,
             note="standard-14 font (not embedded), drawn with PyMuPDF's built-in copy",
+        )
+    if key in _STANDARD_14:
+        return _with_coverage_note(
+            FontResolution(
+                tier=TIER_EXACT,
+                confidence=1.0,
+                fontname=standard,
+                font_bytes=None,
+                requires_approval=False,
+                note="standard-14 font (not embedded), drawn with PyMuPDF's built-in copy",
+            ),
+            needed_text,
         )
 
     installed = find_by_name(font_index, classification.base_font)
@@ -217,21 +254,27 @@ def _resolve_non_embedded(
         )
 
     if key in _METRIC_COMPATIBLE:
-        return FontResolution(
-            tier=TIER_APPROXIMATE,
-            confidence=_METRIC_COMPATIBLE_CONFIDENCE,
+        return _with_coverage_note(
+            FontResolution(
+                tier=TIER_APPROXIMATE,
+                confidence=_METRIC_COMPATIBLE_CONFIDENCE,
+                fontname=standard,
+                font_bytes=None,
+                requires_approval=True,
+                note=f"{base} is not embedded or installed; drawn with its metric-compatible standard font",
+            ),
+            needed_text,
+        )
+    return _with_coverage_note(
+        FontResolution(
+            tier=TIER_FALLBACK,
+            confidence=_FALLBACK_CONFIDENCE,
             fontname=standard,
             font_bytes=None,
             requires_approval=True,
-            note=f"{base} is not embedded or installed; drawn with its metric-compatible standard font",
-        )
-    return FontResolution(
-        tier=TIER_FALLBACK,
-        confidence=_FALLBACK_CONFIDENCE,
-        fontname=standard,
-        font_bytes=None,
-        requires_approval=True,
-        note=f"{base} is not embedded or installed; using a standard-font fallback",
+            note=f"{base} is not embedded or installed; using a standard-font fallback",
+        ),
+        needed_text,
     )
 
 
@@ -259,16 +302,19 @@ def resolve_font(
     if classification.font_type == "Type3":
         fingerprint = infer_style_from_name(classification.base_font)
         name = _standard_fallback_name(fingerprint.bold, fingerprint.italic, fingerprint.family_class)
-        return FontResolution(
-            tier=TIER_FALLBACK,
-            confidence=_FALLBACK_CONFIDENCE,
-            fontname=name,
-            font_bytes=None,
-            requires_approval=True,
-            note=(
-                "Type3 font (FNT-15): its glyph procedures can't be drawn through "
-                "PyMuPDF's text API, so a standard-font fallback is used instead"
+        return _with_coverage_note(
+            FontResolution(
+                tier=TIER_FALLBACK,
+                confidence=_FALLBACK_CONFIDENCE,
+                fontname=name,
+                font_bytes=None,
+                requires_approval=True,
+                note=(
+                    "Type3 font (FNT-15): its glyph procedures can't be drawn through "
+                    "PyMuPDF's text API, so a standard-font fallback is used instead"
+                ),
             ),
+            needed_text,
         )
 
     if not classification.embedded:
@@ -305,13 +351,16 @@ def resolve_font(
     target_metrics = extract_metrics(original_font_bytes) if original_font_bytes else None
     if target_metrics is None:
         name = _standard_fallback_name(fingerprint.bold, fingerprint.italic, fingerprint.family_class)
-        return FontResolution(
-            tier=TIER_FALLBACK,
-            confidence=_FALLBACK_CONFIDENCE,
-            fontname=name,
-            font_bytes=None,
-            requires_approval=True,
-            note="no matching or measurable font found; using a standard-font fallback",
+        return _with_coverage_note(
+            FontResolution(
+                tier=TIER_FALLBACK,
+                confidence=_FALLBACK_CONFIDENCE,
+                fontname=name,
+                font_bytes=None,
+                requires_approval=True,
+                note="no matching or measurable font found; using a standard-font fallback",
+            ),
+            needed_text,
         )
 
     ranked = rank_by_metrics(
@@ -335,11 +384,14 @@ def resolve_font(
         )
 
     name = _standard_fallback_name(fingerprint.bold, fingerprint.italic, fingerprint.family_class)
-    return FontResolution(
-        tier=TIER_FALLBACK,
-        confidence=_FALLBACK_CONFIDENCE,
-        fontname=name,
-        font_bytes=None,
-        requires_approval=True,
-        note="no font covers the needed characters; using a standard-font fallback",
+    return _with_coverage_note(
+        FontResolution(
+            tier=TIER_FALLBACK,
+            confidence=_FALLBACK_CONFIDENCE,
+            fontname=name,
+            font_bytes=None,
+            requires_approval=True,
+            note="no font covers the needed characters; using a standard-font fallback",
+        ),
+        needed_text,
     )

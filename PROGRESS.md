@@ -26,6 +26,50 @@ A phase is complete when all of its features are **done** through the evidence g
 
 ## Session log
 
+### 2026-09-30 (later) — Two real bugs found in live use of EDT-16..19
+
+Owner retested a real document right after EDT-16..19 landed and found two
+real defects within minutes:
+
+- **A block restyle (text unchanged) could be falsely refused as an
+  "overflow".** `EditTextUnitOp._edit_block` routed every block edit through
+  `reflow_block`'s re-wrap, even a pure style change. A bolder or larger font
+  is wider, so re-wrapping the *same* wording at the block's own width could
+  need more lines than it has, and got refused with "overflow: 1 more
+  line(s) needed than this block has (1), not drawn" -- for a one-line table
+  cell, the simplest possible bold request. Fixed with a new
+  `_restyle_block`: when the text itself doesn't change, each line is
+  restyled in place (the same per-run mechanism EDT-17's line restyle
+  already uses), never re-wrapped, so a style change can't need a line count
+  that was never going to change. `_recolor_block` (color-only) is
+  unaffected; `_restyle_block` now also covers color combined with a font/
+  size/weight/slant change, which previously fell through to the buggy
+  reflow path too (masked in the existing test suite because its one
+  color+size test happened to use a *smaller* size, which never overflows).
+- **A fallback standard-14 font could silently lose characters it can't
+  draw.** A Type3 "icon" font (a ✅ checkmark) falls back to a standard font
+  (FNT-15); approving that is normal and expected. What wasn't expected:
+  PyMuPDF's own 14 built-in fonts cover plain Latin-1 only, and drawing a
+  character outside it -- confirmed empirically -- draws a replacement-glyph
+  mark instead of refusing, with no warning anywhere before that. Worse,
+  the plain "standard-14, not embedded" case resolves at the *exact* tier,
+  which needs no approval at all, so that path could lose characters with
+  nothing shown before the edit landed. Fixed in `engine/fonts/resolve.py`:
+  every return path that names a standard-14 built-in (six sites, all but
+  the Symbol/ZapfDingbats case, which uses its own encoding) now checks
+  `needed_text` against `engine.fonts.coverage.check_coverage`'s existing
+  Latin-1-range method, and when something's missing, names exactly which
+  characters won't draw correctly and forces `requires_approval=True` --
+  turning a silent loss into the same up-front warning the rest of the
+  font-resolution pipeline already gives for a weaker match.
+- 14 new tests (8 font-resolution, 2 block-restyle regressions on the exact
+  shapes reported, plus 4 more covering the Type3/metric-compatible/
+  symbolic-builtin paths individually); the two pre-existing block-restyle
+  tests were re-verified to still pass through the new `_restyle_block`
+  path. Full local gate 14/14 (1030 tests total, engine + server + web).
+  No feature status changes -- these are fixes to EDT-16..19 and FNT-15/
+  FNT-06/FNT-07, all already "done".
+
 ### 2026-09-30 (latest) — Select Block / Line / Word (EDT-16..19)
 
 - **Owner's request:** Nitro PDF's paragraph/line/word selection granularity. A toolbar

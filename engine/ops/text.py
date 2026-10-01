@@ -956,6 +956,52 @@ class EditTextUnitOp(_StyleChange):
             raise OpValidationError(f"edit_text_unit: the {self.unit} is already {' and '.join(met)}")
         return remaining
 
+    def _restyle_block(self, document: Document, block: TextBlock) -> list[EditResult]:
+        """A font/size/bold/italic/color change to a block, text unchanged, restyles each of
+        its lines in place -- the same per-run restyle a line's own edit uses (EDT-17) --
+        rather than re-wrapping (reflow_block). Re-wrapping a restyle-only edit was a real
+        bug: a bolder or larger style widens the text, which could need more lines than the
+        block has and get refused as an "overflow" even though the wording never changed and
+        nothing needed to move to a new line."""
+        members = {span.style.span_index for span in block.lines}
+        spans = extract_page_spans(document.raw, self.page_index)
+        keys = [
+            (line.origin, line.text)
+            for line in group_lines(spans)
+            if {segment.span_index for segment in line.segments} <= members
+        ]
+        font_index = _font_index()
+        results: list[EditResult] = []
+        for origin, text in keys:
+            spans = extract_page_spans(document.raw, self.page_index)
+            lines = group_lines(spans)
+            line = next(
+                (c for c in lines if c.text == text and math.dist(c.origin, origin) < _SAME_ORIGIN_TOLERANCE), None
+            )
+            if line is None:
+                raise OpValidationError(f"edit_text_unit: the line {text!r} changed while the block was restyled")
+            glyphs = [None if entry is None else spans[entry[0]] for entry in line.glyph_map]
+            styles = [None if span is None else _style_of(span) for span in glyphs]
+            hunks = _unit_hunks(line, styles, 0, len(line.text), line.text, restyle=True)
+            scale = None
+            if self.size is not None:
+                largest = max(span.style.size for span in glyphs if span is not None)
+                scale = self.size / largest
+            changes_font = self.font is not None or self.bold is not None or self.italic is not None
+            restyle = LineRestyle(
+                size_scale=scale,
+                color=self.color,
+                font_for=(lambda span, text: self._chosen_font(span, text, font_index)) if changes_font else None,
+            )
+            results.append(
+                rewrite_line_hunks(
+                    document, self.page_index, line, hunks, restyle=restyle, font_index=font_index, verify=self.verify
+                )
+            )
+        for result in results:
+            _check_tier(result, self.require_tier, where=type(self).__name__)
+        return results
+
     def _recolor_block(self, document: Document, block: TextBlock) -> list[EditResult]:
         """C4: a color-only change to a block recolors each of its lines in place, so every
         run keeps its own font and size -- re-wrapping would redraw it in one style."""
@@ -1002,9 +1048,15 @@ class EditTextUnitOp(_StyleChange):
             return without_no_ops._edit_block(document)
         new_text = self._checked_text(block.text)
         only_color = self.color is not None and all(v is None for v in (self.size, self.font, self.bold, self.italic))
-        if only_color and new_text in (current, block.text) and self.align == "left" and not self.grow:
+        text_unchanged = new_text in (current, block.text) and self.align == "left" and not self.grow
+        if only_color and text_unchanged:
             return self._recolor_block(document, block)
-        if new_text in (current, block.text) and not self._restyles() and self.align == "left" and not self.grow:
+        if text_unchanged and self._restyles():
+            # A style change with the same wording never needs to re-wrap: restyle each
+            # line in place, so a bolder or larger style can't be refused as an "overflow"
+            # just because it would be wider than the block's own width.
+            return self._restyle_block(document, block)
+        if text_unchanged:
             raise OpValidationError(
                 "edit_text_unit: change the text, the alignment or at least one of size, color, font, bold or italic"
             )
