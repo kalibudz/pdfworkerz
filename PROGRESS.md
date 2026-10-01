@@ -12,7 +12,7 @@ Feature-level status lives in [`tracker/features.json`](tracker/features.json) a
 | P3 | Web UI with click-to-edit | ✅ Done: 15/15 features proven by tests | Independent reviewer: signed off 2026-09-28 after fixes |
 | P4 | Command bar & recipes | ✅ Done: 8/8 features proven by tests | Independent reviewer: signed off 2026-09-29 after two rounds of fixes |
 | P5 | Organize, page design, annotate, document structure | ✅ Done: 40/40 features proven by tests | Independent reviewer: signed off 2026-09-29 (EDT-01..15) and 2026-09-30 after two rounds of fixes (EDT-16..19) |
-| P6 | Forms, signatures, security, redaction | Planned | |
+| P6 | Forms, signatures, security, redaction | 🟡 In progress: 13/21 features proven by tests | Independent reviewer: signed off wave 1 (SEC-04/05/06/08/09/10/11, FRM-01/02/05/06, SIG-01/06) 2026-10-01 after one round of fixes |
 | P7 | OCR, scans, conversions | Planned | |
 | P8 | Optimize, compare, accessibility, batch, extras | Planned | |
 | P9 | Packaging & documentation | Planned | |
@@ -73,6 +73,88 @@ movable later (tracked as the new FNT-21).
   state). `python tools/gate.py`: 14/14. FNT-20 moved to "done"; FNT-21
   (move/copy icons by reusing the document's own glyph drawing) added as
   planned, P6.
+
+### 2026-10-01 — P6 wave 1: protect/unlock/permissions, true redaction, sanitize, forms basics, visual signatures, cert generator
+
+Owner's request: start P6, using as many parallel sub-agents as the work
+allows, with the token-free local gate as the final arbiter.
+
+- **Four builder agents ran in parallel** in an isolated worktree
+  (`C:\Users\hi-ka\PDFeditor-p6`, branch `wip/P6`), each owning its own new
+  files so they never collided, with only small additive edits to shared
+  files (`server/app.py`, `cli/main.py`, `engine/ops/__init__.py`,
+  `web/src/api.ts`):
+  - **Security-A (SEC-04/05/06):** `engine/protect.py` extends
+    `Document.save`'s existing PyMuPDF encryption plumbing (never a second
+    pikepdf writer) to add a password (AES-256/R6), remove one, and set
+    print/copy/modify/annotate permissions independently, each requiring an
+    owner password.
+  - **Security-B (SEC-08/09/10/11):** `engine/redact.py` removes covered
+    text glyphs, images (pixels genuinely blackened, not just cropped) and
+    vector paths (full clipping for a line or an axis-aligned rectangle,
+    full removal otherwise -- documented, not silently partial) from a
+    rectangular area, verified automatically afterward by re-opening the
+    saved bytes and confirming nothing redacted is still extractable
+    (`engine/sanitize.py` strips metadata, XMP, JavaScript -- doc- and
+    field-level -- embedded files and hidden (Tr 3) text the same way).
+  - **Forms-A (FRM-01/02/05/06):** `engine/forms.py` lists AcroForm fields
+    (a true PDF-spec radio group collapses to one logical field), fills
+    them, sets tab order by rewriting the page's raw `/Annots` order, and
+    flattens a page or the whole document to static content.
+  - **Signatures-A (SIG-01/06):** `engine/signatures.py` places a drawn,
+    typed or image signature as ordinary page content (never an AcroForm
+    widget); `engine/certs.py` generates a local self-signed certificate
+    (RSA ≥2048, correct KeyUsage/BasicConstraints for a PAdES end-entity
+    cert) with `cryptography`, no network call, shaped for a later SIG-02
+    signer to consume directly.
+- New dependencies, pinned and pip-audited clean: `pyhanko==0.37.0`,
+  `cryptography==50.0.2`, `opencv-python-headless==5.0.0.93` (the last two
+  are used this wave; pyHanko is prepared for wave 2's PAdES signing).
+- **Two independent-review rounds, run in parallel, found and fixed three
+  real defects, one critical:**
+  - **Critical:** `SetPasswordOp` accepted an *explicit* `owner_password=""`
+    alongside a real user password, silently granting full owner-level
+    access to anyone opening the file with no password at all -- the exact
+    "empty owner password" hole the module's own docstring said had
+    already been fixed, reopened from a different angle the first fix
+    didn't cover. `SetPermissionsOp`'s equivalent guard was already correct;
+    `encrypt_document` now rejects an explicit empty string the same way.
+  - The built-in SSN pattern only matched the dashed form (`123-45-6789`),
+    missing the equally common plain-digit and space-separated forms.
+  - Filling a form field with a character outside its current font (an
+    emoji, say) produced a silently invisible appearance (PyMuPDF's widget
+    `update()` collapses to `0 Tf`) -- traced to the font being hard-locked
+    to one of 4 base-14 faces inside PyMuPDF's own widget code, so the fix
+    detects the degenerate appearance and refuses clearly instead; checkbox
+    fill also no longer coerces the string `"false"` to checked.
+  - Nothing else survived adversarial probing: hand-built spec-correct
+    radio groups, encrypted/damaged documents, y-axis flip attempts, weak
+    RSA key rejection, partial-image pixel verification, a planted
+    "black box merely drawn over live text" trap for SEC-11's verifier.
+- Found and fixed one unrelated pre-existing bug along the way: a stray
+  `if __name__ == "__main__": app()` has sat mid-file in `cli/main.py`
+  since P1, silently dropping every CLI command defined after it (~15 by
+  now) from direct-script invocation. The installed `pdfworkerz` console
+  script was never affected, which is why it went unnoticed this long.
+- 102 new tests; full local gate 14/14 (ruff, mypy --strict, both
+  spec-sync checks, pytest + coverage, the evidence gate, bandit,
+  pip-audit, npm audit, both builds). SEC-04/05/06/08/09/10/11,
+  FRM-01/02/05/06 and SIG-01/06 moved to "done" by the evidence gate
+  (13/21 in P6).
+- **Deferred to wave 2** (depend on wave 1's field/cert model or need
+  deeper pyHanko/OpenCV work): FRM-03 (create/edit fields), FRM-04
+  (OpenCV auto-detection on flat forms), FRM-07 (FDF/XFDF/JSON/CSV
+  import-export), FRM-08 (XFA detection), SIG-02..05 (PAdES signing,
+  validation, RFC 3161 timestamps, the signed-document workflow).
+- **Known limitations, documented rather than silently accepted:**
+  partial redaction of a curve or multi-segment path removes it in full
+  rather than clipping (only a straight line or an axis-aligned rectangle
+  clip); SEC-11's verification can't see a fully orphaned, never-invoked
+  XObject (not recoverable by any renderer, but a raw object-stream
+  reader could still find its bytes); a form field needing a character
+  outside Helvetica/Times/Courier/ZapfDingbats is refused rather than
+  filled, since PyMuPDF's own widget appearance machinery offers no way
+  to attach a different font to it.
 
 ### 2026-09-30 (later) — Two real bugs found in live use of EDT-16..19
 

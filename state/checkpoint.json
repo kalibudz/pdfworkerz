@@ -1,11 +1,31 @@
 {
-  "phase": "P5",
-  "taskId": "FNT-20 icon units: protect emoji/Type3 icons from being redrawn away",
-  "step": "FNT-20: icons and emoji are their own unit, never edited away. Root cause (from a read-only probe of the owner's real document): every heading/label opens with an icon in its own Type3 font, which split_words glued to the following word (\"\u2705OBJECTIVES\"); bolding, inserting next to it, moving it or re-wrapping its block all redrew the icon, and a Type3 glyph can't be redrawn outside its own document (FNT-15), so it silently fell back to a font with no such glyph. New engine/fonts/icons.py classifies emoji/PUA/Type3-U+FFFD/dingbat-font glyphs; engine/fonts/units.py splits them into their own TextWord/TextUnit (icon: bool, served over the wire); engine/edit.py + engine/ops/text.py make restyle/recolor skip them silently, fix _style_anchor so an insertion next to an icon takes the neighbour's style (the actual bug the owner hit), and refuse -- rather than silently lose -- any edit that would have to redraw one (text-touching hunk, a shift from a neighbour's width change, move/duplicate, block re-wrap, width-changing resize). web/src/inspector.ts shows an \"(icon)\" badge and makes its controls read-only. Owner chose \"protect now, move later\" when asked; FNT-21 (move/copy icons by reusing the document's own glyph drawing) added as planned, P6. 30 new engine tests, 1 new server test, 1 new Playwright test; full local gate 14/14, 1062 tests total.",
-  "branch": "main",
-  "lastGreenCommit": "(this commit) local gate, Windows 11, Python 3.14.3, 14/14 steps, 1062 tests",
-  "nextAction": "Rebuild the C:\\Users\\hi-ka\\PDFeditor-work clone, restart both servers, and give the owner a fresh ?token= URL so they can retest the icon-protection behaviour directly on their proposal (the bold-then-insert sequence that lost the \u2705 before). Then P6 (forms, signatures, security, redaction), starting with FNT-21 if the owner wants icons movable sooner. Gate before every commit; push only with the owner's approval.",
+  "phase": "P6",
+  "taskId": "P6 wave 1: 13/21 features done. 118/170 total",
+  "step": "Owner's request (2026-10-01): start P6 with heavy sub-agent parallelism, token-free gate as the final arbiter. Four builder agents in parallel, each owning its own new files (engine/protect.py SEC-04/05/06, engine/redact.py+sanitize.py SEC-08/09/10/11, engine/forms.py FRM-01/02/05/06, engine/signatures.py+certs.py SIG-01/06), built in worktree C:\\Users\\hi-ka\\PDFeditor-p6 on wip/P6. Two independent reviewers (one per security-weighted half) then found and fixed 3 real defects, one critical: SetPasswordOp accepted an explicit owner_password=\"\" alongside a real user password, silently granting full owner access with no password at all -- the exact 'empty owner password' hole a prior fix in the same module was supposed to have already closed, reopened from an angle that fix didn't cover. Also fixed: the SSN pattern only matched the dashed form; filling a form field with a character outside its font (an emoji) produced a silently invisible appearance (PyMuPDF's widget font is hard-locked to 4 base faces) -- now refused clearly instead. Also fixed one unrelated pre-existing bug: a stray `if __name__ == \"__main__\"` has sat mid-cli/main.py since P1, silently dropping every command defined after it from direct-script invocation (the installed console script was never affected). (Also absorbed FNT-20, committed to main just before this branch: icons/emoji are now their own text unit, protected from being redrawn away during an edit, restyle, move or re-wrap -- see its own openQuestions entries below.)",
+  "branch": "wip/P6",
+  "lastGreenCommit": "(this commit, worktree C:\\Users\\hi-ka\\PDFeditor-p6) local gate, Windows 11, Python 3.14.3, 14/14 steps",
+  "nextAction": "Wave 2: FRM-03 (create/edit fields), FRM-04 (OpenCV auto-detect on flat forms), FRM-07 (FDF/XFDF/JSON/CSV import-export), FRM-08 (XFA detection), SIG-02..05 (PAdES signing via pyHanko -- already installed and pinned -- validation, RFC 3161 timestamps, signed-document workflow), building on wave 1's FieldInfo/cert model. Then rebase wip/P6 onto main, full gate, merge, rebuild the C:\\Users\\hi-ka\\PDFeditor-work clone for live review. Gate before every commit; push only with the owner's approval.",
   "openQuestions": [
+    {
+      "phase": "P6",
+      "kind": "limitation",
+      "text": "SEC-08: partial redaction of a curve or multi-segment path removes it in full rather than clipping -- only a single straight line or an axis-aligned rectangle get real sub-rectangle/segment clipping. General polygon clipping was out of scope for the first pass."
+    },
+    {
+      "phase": "P6",
+      "kind": "limitation",
+      "text": "SEC-11: redaction verification re-extracts text/images/vectors and checks the raw content stream, but can't see a fully orphaned XObject that's present in /Resources but never invoked by a Do operator -- not visually recoverable by any renderer, but a raw object-stream reader could still find its bytes. Documented in verify_redaction's docstring as out of scope."
+    },
+    {
+      "phase": "P6",
+      "kind": "limitation",
+      "text": "FRM-02: a form field needing a character outside Helvetica/Times/Courier/ZapfDingbats (e.g. an emoji, a currency symbol the field's current font lacks) is refused rather than filled -- confirmed by reading PyMuPDF's installed source that Widget.update() hard-locks the appearance font to one of those 4 base-14 faces, so there is no API path to attach a Unicode-coverage font to an AcroForm text field's appearance."
+    },
+    {
+      "phase": "P6",
+      "kind": "todo",
+      "text": "FRM-06: single-page flatten pastes a captured pixmap (not PyMuPDF's own document-wide bake()), since 1.28.2 has no page-scoped bake. Measured ~0.2-0.3% pixel diff vs a full bake (antialiasing residue, not missing content) -- fine for now, revisit if PyMuPDF adds page-scoped flattening."
+    },
     {
       "phase": "P6",
       "kind": "todo",

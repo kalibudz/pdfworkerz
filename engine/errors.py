@@ -74,3 +74,8 @@ class OpValidationError(PdfWorkerzError):
 class FontResourceNotFoundError(PdfWorkerzError):
     """The font a text span was drawn with could not be located in the document's
     font resources, so the span can't be edited in its original style."""
+
+
+class RedactionVerificationError(PdfWorkerzError):
+    """SEC-11: after a redaction, re-extracting the saved content still found something
+    inside a redacted area -- the redaction did not really remove what it claimed to."""

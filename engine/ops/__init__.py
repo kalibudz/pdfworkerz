@@ -23,7 +23,9 @@ from engine.ops.annotations import (
 )
 from engine.ops.base import InspectOp, Op, RenderPageOp, op_registry, parse_op
 from engine.ops.batch import BatchOp
+from engine.ops.certs import GenerateCertificateOp
 from engine.ops.design import BackgroundOp, BatesOp, HeaderFooterOp, PageNumbersOp, StampOp, WatermarkOp
+from engine.ops.forms import FillFieldsOp, FlattenFormOp, PageFieldsOp, SetTabOrderOp
 from engine.ops.images import (
     CropImageOp,
     DeleteImageOp,
@@ -48,7 +50,10 @@ from engine.ops.pages import (
     RotatePagesOp,
     SplitOp,
 )
+from engine.ops.protect import RemovePasswordOp, SetPasswordOp, SetPermissionsOp
+from engine.ops.redact import FindRedactionCandidatesOp, RedactAreasOp, SanitizeOp
 from engine.ops.shapes import DeleteShapeOp, DrawShapeOp, EditShapeOp, PageShapesOp
+from engine.ops.signatures import PlaceSignatureOp
 from engine.ops.spellcheck import CorrectWordOp, SpellCheckOp
 from engine.ops.structure import (
     AddBookmarkOp,
@@ -111,8 +116,12 @@ __all__ = [
     "EditSpanOp",
     "ExtractAttachmentOp",
     "ExtractPagesOp",
+    "FillFieldsOp",
     "FindBlankPagesOp",
+    "FindRedactionCandidatesOp",
     "FlattenAnnotationsOp",
+    "FlattenFormOp",
+    "GenerateCertificateOp",
     "GetMetadataOp",
     "HeaderFooterOp",
     "InsertImageOp",
@@ -132,15 +141,19 @@ __all__ = [
     "Op",
     "PageAnnotationsOp",
     "PageBlocksOp",
+    "PageFieldsOp",
     "PageImagesOp",
     "PageLinksOp",
     "PageNumbersOp",
     "PageShapesOp",
     "PageTextUnitsOp",
+    "PlaceSignatureOp",
+    "RedactAreasOp",
     "ReflowTextOp",
     "RemoveAttachmentOp",
     "RemoveBlankPagesOp",
     "RemoveLinkOp",
+    "RemovePasswordOp",
     "RenderPageOp",
     "ReorderPagesOp",
     "ReplaceImageOp",
@@ -149,10 +162,14 @@ __all__ = [
     "RestyleSpanOp",
     "RestyleTextOp",
     "RotatePagesOp",
+    "SanitizeOp",
     "SetBookmarksOp",
     "SetLayerVisibilityOp",
     "SetMetadataOp",
     "SetPageLabelsOp",
+    "SetPasswordOp",
+    "SetPermissionsOp",
+    "SetTabOrderOp",
     "SpellCheckOp",
     "SplitOp",
     "StampOp",

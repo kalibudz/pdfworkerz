@@ -280,6 +280,8 @@ class Document:
         owner_password: str | None = None,
         user_password: str | None = None,
         deterministic: bool = False,
+        encryption: int | None = None,
+        permissions: int | None = None,
     ) -> SaveResult:
         """Save the document (COR-06, COR-07, COR-08).
 
@@ -294,6 +296,13 @@ class Document:
         ``"auto"`` (default) picks incremental only when the source
         document already carries a signature field, and full rewrite
         otherwise (SPEC.md section 4.2 rule 4).
+
+        ``encryption``/``permissions`` (SEC-04/05/06): a ``pymupdf.PDF_ENCRYPT_*``
+        value and/or a ``pymupdf.PDF_PERM_*`` bitmask, forwarded straight
+        to the underlying ``pymupdf.Document.save``. Left as ``None``
+        (the default for every ordinary edit), encryption defaults to
+        ``PDF_ENCRYPT_KEEP`` exactly as before -- this is purely additive.
+        See engine.protect for the one feature area that passes these.
         """
         if mode not in ("auto", "incremental", "full"):
             raise OpValidationError(f"unknown save mode {mode!r}: use 'auto', 'incremental' or 'full'")
@@ -317,16 +326,26 @@ class Document:
             # An incremental save appends to the original file, so its trailer /ID can't be pinned.
             note = (note + "; " if note else "") + "an incremental save is not byte-for-byte reproducible"
 
-        save_kwargs: dict[str, object] = {"encryption": PDF_ENCRYPT_KEEP}
+        save_kwargs: dict[str, object] = {"encryption": encryption if encryption is not None else PDF_ENCRYPT_KEEP}
         if deterministic:
             # CMD-07: keep the file's /ID instead of generating a random one, so the same
             # recipe on the same input writes byte-identical output (verified, pymupdf 1.28.2).
             # Unencrypted files only: AES re-encrypts every stream with a fresh random IV on
             # each save, which is part of what makes it secure.
             save_kwargs["no_new_id"] = True
-        if owner_password is not None or user_password is not None:
-            save_kwargs["owner_pw"] = owner_password or ""
-            save_kwargs["user_pw"] = user_password or ""
+        # Each password is forwarded only if the caller actually gave it -- NOT coerced from
+        # None to "" when only the other one is given. pymupdf.Document.save's own default
+        # (omitting the kwarg entirely) picks a safe internal default for the missing one;
+        # forcing owner_pw="" here instead once silently made a user-password-protected file
+        # openable with no password at all, since an empty *owner* password authenticates
+        # successfully (as the owner) when no password is supplied at all (verified against
+        # pikepdf 10.14.0 before this was caught -- see engine.protect's module docstring).
+        if owner_password is not None:
+            save_kwargs["owner_pw"] = owner_password
+        if user_password is not None:
+            save_kwargs["user_pw"] = user_password
+        if permissions is not None:
+            save_kwargs["permissions"] = permissions
 
         tmp = target.with_name(f".{target.name}.pdfworkerz-tmp")
         unsaved = self.snapshot()  # to recover the edits if the file can't be replaced after closing it
@@ -391,7 +410,11 @@ class Document:
         needs_pass = bool(self._doc.needs_pass)
         if needs_pass and not self._doc.authenticate(password or ""):
             raise WrongPasswordError(f"saved {target}, but could not reopen it with the document's password")
-        self._password_used = password if needs_pass else self._password_used
+        # Not `else self._password_used`: that would keep a stale password after SEC-05
+        # (RemovePasswordOp) decrypts a document that used to need one -- is_encrypted checks
+        # `password_used is not None` as well as the live doc, so a leftover password here
+        # would wrongly report a just-decrypted document as still encrypted.
+        self._password_used = password if needs_pass else None
         remember_password(self._doc, self._password_used)
         self._file_backed = True
 

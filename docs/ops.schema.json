@@ -802,6 +802,44 @@
     },
     {
       "additionalProperties": false,
+      "description": "Generate an RSA key pair and a self-signed X.509 certificate for it,\nlocally, with no network call (see engine.certs.generate_self_signed_cert).\n`passphrase`, if given, encrypts the private key in both the standalone\nPEM and the PKCS#12 bundle the result carries.",
+      "properties": {
+        "op": {
+          "const": "generate_certificate",
+          "default": "generate_certificate",
+          "title": "Op",
+          "type": "string"
+        },
+        "common_name": {
+          "title": "Common Name",
+          "type": "string"
+        },
+        "key_size": {
+          "default": 2048,
+          "title": "Key Size",
+          "type": "integer"
+        },
+        "passphrase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Passphrase"
+        }
+      },
+      "required": [
+        "common_name"
+      ],
+      "title": "GenerateCertificateOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "DES-01: number pages; `template` uses {n} and {total}.",
       "properties": {
         "op": {
@@ -1349,6 +1387,107 @@
         }
       },
       "title": "StampOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FRM-01: every AcroForm field on one page (a radio group counts as one\nlogical field). Read-only, so -- like PageAnnotationsOp -- never journaled;\nserver/app.py serves it from a GET route.",
+      "properties": {
+        "op": {
+          "const": "page_fields",
+          "default": "page_fields",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        }
+      },
+      "title": "PageFieldsOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FRM-02: set several named fields' values on one page in a single undo step.",
+      "properties": {
+        "op": {
+          "const": "fill_fields",
+          "default": "fill_fields",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "values": {
+          "additionalProperties": true,
+          "title": "Values",
+          "type": "object"
+        }
+      },
+      "required": [
+        "page_index",
+        "values"
+      ],
+      "title": "FillFieldsOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FRM-05: reorder a page's fields for tab navigation.",
+      "properties": {
+        "op": {
+          "const": "set_tab_order",
+          "default": "set_tab_order",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "field_names": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Field Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_index",
+        "field_names"
+      ],
+      "title": "SetTabOrderOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "FRM-06: draw every widget's appearance into page content and drop the\nAcroForm. ``page_index=None`` flattens the whole document.",
+      "properties": {
+        "op": {
+          "const": "flatten_form",
+          "default": "flatten_form",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Index"
+        }
+      },
+      "title": "FlattenFormOp",
       "type": "object"
     },
     {
@@ -3927,6 +4066,292 @@
     },
     {
       "additionalProperties": false,
+      "description": "SEC-04: add (or replace) a password, encrypting with AES-256 (R6).\n\nAt least one of ``user_password``/``owner_password`` is required (both\nmay be given, and they may differ); refused with\n:class:`~engine.errors.OpValidationError` otherwise. Permission flags\ndefault to allow -- set them here too, or follow up with\n:class:`SetPermissionsOp`, to restrict them.",
+      "properties": {
+        "op": {
+          "const": "set_password",
+          "default": "set_password",
+          "title": "Op",
+          "type": "string"
+        },
+        "user_password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Password"
+        },
+        "owner_password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Password"
+        },
+        "allow_print": {
+          "default": true,
+          "title": "Allow Print",
+          "type": "boolean"
+        },
+        "allow_copy": {
+          "default": true,
+          "title": "Allow Copy",
+          "type": "boolean"
+        },
+        "allow_modify": {
+          "default": true,
+          "title": "Allow Modify",
+          "type": "boolean"
+        },
+        "allow_annotate": {
+          "default": true,
+          "title": "Allow Annotate",
+          "type": "boolean"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "overwrite": {
+          "default": false,
+          "title": "Overwrite",
+          "type": "boolean"
+        }
+      },
+      "title": "SetPasswordOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "SEC-05: remove all encryption from an already-open document.\n\nTakes no password field of its own: reaching ``apply`` at all already\nproves the password used to open the document (if any) was correct --\n``Document.open`` raises :class:`~engine.errors.PasswordRequiredError`\nor :class:`~engine.errors.WrongPasswordError` first, before any file is\ntouched, so a wrong password never reaches this Op and never changes\nthe file on disk.",
+      "properties": {
+        "op": {
+          "const": "remove_password",
+          "default": "remove_password",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "overwrite": {
+          "default": false,
+          "title": "Overwrite",
+          "type": "boolean"
+        }
+      },
+      "title": "RemovePasswordOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "SEC-06: set print/copy/modify/annotate independently.\n\n``owner_password`` is required (SEC-06's third criterion: a\nrestriction with no owner password could trivially be removed by\nreopening the file with no password at all). ``user_password``\ndefaults to the document's own current password when omitted, so\nreapplying permissions doesn't silently drop an existing user\npassword; pass ``user_password=\"\"`` explicitly to keep the document\nopening freely while still restricting what an opener may do.",
+      "properties": {
+        "op": {
+          "const": "set_permissions",
+          "default": "set_permissions",
+          "title": "Op",
+          "type": "string"
+        },
+        "owner_password": {
+          "title": "Owner Password",
+          "type": "string"
+        },
+        "user_password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Password"
+        },
+        "allow_print": {
+          "default": true,
+          "title": "Allow Print",
+          "type": "boolean"
+        },
+        "allow_copy": {
+          "default": true,
+          "title": "Allow Copy",
+          "type": "boolean"
+        },
+        "allow_modify": {
+          "default": true,
+          "title": "Allow Modify",
+          "type": "boolean"
+        },
+        "allow_annotate": {
+          "default": true,
+          "title": "Allow Annotate",
+          "type": "boolean"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "overwrite": {
+          "default": false,
+          "title": "Overwrite",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "owner_password"
+      ],
+      "title": "SetPermissionsOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "SEC-08: true redaction -- removes the glyphs, image pixels and vector paths\nunder each of `rects` on `page_index`, not a box drawn over them. Runs SEC-11's\nverification automatically; raises RedactionVerificationError if it finds anything\nstill recoverable, which -- like any other Op raising -- leaves the document\nexactly as it was before this Op ran (the undo journal rolls it back).",
+      "properties": {
+        "op": {
+          "const": "redact_areas",
+          "default": "redact_areas",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "rects": {
+          "items": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Rects",
+          "type": "array"
+        },
+        "verify": {
+          "default": true,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page_index",
+        "rects"
+      ],
+      "title": "RedactAreasOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "SEC-09: every match of a built-in pattern (\"email\", \"phone\", \"ssn\",\n\"credit_card\") or a custom regex on one page. Read-only -- like PageSpansOp, never\njournaled; nothing is redacted until the caller takes the returned rects and\napplies RedactAreasOp to the ones it wants, in one undo step.",
+      "properties": {
+        "op": {
+          "const": "find_redaction_candidates",
+          "default": "find_redaction_candidates",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "pattern": {
+          "title": "Pattern",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page_index",
+        "pattern"
+      ],
+      "title": "FindRedactionCandidatesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "SEC-10: remove metadata/XMP, JavaScript, embedded files and hidden (invisible)\ntext from the whole document, each independently opt-out-able. One journal entry\nfor every category removed together.",
+      "properties": {
+        "op": {
+          "const": "sanitize",
+          "default": "sanitize",
+          "title": "Op",
+          "type": "string"
+        },
+        "remove_metadata": {
+          "default": true,
+          "title": "Remove Metadata",
+          "type": "boolean"
+        },
+        "remove_javascript": {
+          "default": true,
+          "title": "Remove Javascript",
+          "type": "boolean"
+        },
+        "remove_embedded_files": {
+          "default": true,
+          "title": "Remove Embedded Files",
+          "type": "boolean"
+        },
+        "remove_hidden_text": {
+          "default": true,
+          "title": "Remove Hidden Text",
+          "type": "boolean"
+        }
+      },
+      "title": "SanitizeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "Every vector path on one page. Read-only, so -- like PageSpansOp --\nnever journaled; server/app.py serves it from a GET route.",
       "properties": {
         "op": {
@@ -4204,6 +4629,122 @@
         "index"
       ],
       "title": "DeleteShapeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Draw a signature (drawn strokes, typed text, or an image) as ordinary\npage content inside `rect` (see engine.signatures.place_signature).\n`image_base64` travels as base64 like InsertImageOp's `image_base64`, so\nthe Op stays plain JSON end to end.",
+      "properties": {
+        "op": {
+          "const": "place_signature",
+          "default": "place_signature",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "rect": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Rect",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "drawn",
+            "typed",
+            "image"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "strokes": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strokes"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "font": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font"
+        },
+        "image_base64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Base64"
+        }
+      },
+      "required": [
+        "page_index",
+        "rect",
+        "kind"
+      ],
+      "title": "PlaceSignatureOp",
       "type": "object"
     },
     {

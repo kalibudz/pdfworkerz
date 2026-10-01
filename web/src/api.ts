@@ -201,6 +201,60 @@ export interface ShapeInfo {
   line_width: number | null;
 }
 
+/** Mirrors engine.forms.FieldInfo (FRM-01). A radio group is one logical field,
+ * reported with `field_type: "radio"` and one option per button. */
+export interface FieldInfo {
+  name: string;
+  field_type: "text" | "checkbox" | "radio" | "dropdown" | "listbox" | "signature" | "unknown";
+  rect: [number, number, number, number];
+  value: string | boolean | null;
+  options: string[] | null;
+  page_index: number;
+}
+
+/** Mirrors engine.forms.FillResult (FRM-02). */
+export interface FillResult {
+  filled: string[];
+}
+
+/** Mirrors engine.forms.FlattenResult (FRM-06). */
+export interface FlattenResult {
+  fields_flattened: number;
+  pages_affected: number[];
+}
+
+/** Mirrors engine.signatures.PlaceResult (SIG-01). */
+export interface SignatureResult {
+  page_index: number;
+  rect: [number, number, number, number];
+  kind: "drawn" | "typed" | "image";
+}
+
+/** PlaceSignatureOp's own params (engine.ops.signatures): give exactly one of
+ * `strokes` (kind "drawn"), `text` (kind "typed") or `image_base64` (kind
+ * "image"), matching `kind`. No UI panel sends this yet (SIG-01 has no
+ * toolbar button or draw-pad/upload affordance as of this change) -- see
+ * Api.placeSignature below. */
+export interface PlaceSignatureRequest {
+  page_index: number;
+  rect: [number, number, number, number];
+  kind: "drawn" | "typed" | "image";
+  strokes?: [number, number][][];
+  text?: string;
+  font?: string;
+  image_base64?: string;
+}
+
+/** Mirrors engine.certs.CertResult (SIG-06). */
+export interface CertResult {
+  common_name: string;
+  key_size: number;
+  cert_pem: string;
+  key_pem: string;
+  key_encrypted: boolean;
+  pkcs12_base64: string;
+}
+
 /** Mirrors engine.spellcheck.Misspelling (EDT-11). */
 export interface Misspelling {
   span_index: number;
@@ -263,6 +317,48 @@ export interface HistoryState {
   ops: HistoryOp[];
   can_undo: boolean;
   can_redo: boolean;
+}
+
+/** Mirrors engine.redact.PatternMatch (SEC-09): one proposed redaction area, not yet
+ * redacted -- a caller reviews these and redacts the accepted ones via redactAreas. */
+export interface PatternMatch {
+  page_index: number;
+  span_index: number;
+  start: number;
+  end: number;
+  text: string;
+  rect: [number, number, number, number];
+}
+
+/** Mirrors engine.redact.RectStats (SEC-08): what was removed under one redacted rect. */
+export interface RedactionRectStats {
+  rect: [number, number, number, number];
+  glyphs_removed: number;
+  images_removed: number;
+  images_altered: number;
+  shapes_removed: number;
+  shapes_clipped: number;
+}
+
+/** Mirrors engine.redact.RedactionVerification (SEC-11). */
+export interface RedactionVerification {
+  ok: boolean;
+  problems: string[];
+}
+
+/** Mirrors engine.redact.RedactionResult (SEC-08/11): what RedactAreasOp returns. */
+export interface RedactionResult {
+  stats: RedactionRectStats[];
+  outside_changed_fraction: number;
+  verification: RedactionVerification;
+}
+
+/** Mirrors engine.sanitize.SanitizeReport (SEC-10): what SanitizeOp found and removed. */
+export interface SanitizeReport {
+  metadata_removed: boolean;
+  javascript_actions_removed: number;
+  embedded_files_removed: number;
+  hidden_text_chars_removed: number;
 }
 
 async function toApiError(response: Response): Promise<ApiError> {
@@ -394,6 +490,57 @@ export class Api {
     return (await response.json()) as ShapeInfo[];
   }
 
+  /** FRM-01: every AcroForm field on one page (a radio group counts as one field). */
+  async pageFields(documentId: string, pageIndex: number): Promise<FieldInfo[]> {
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/fields`);
+    return (await response.json()) as FieldInfo[];
+  }
+
+  /** FRM-02: set several named fields' values on one page in one undo step.
+   * `values` keys are field names; a checkbox's value is boolean, a radio/dropdown/
+   * listbox's is one of that field's `options`, a text field's is a string. */
+  async fillFields(documentId: string, pageIndex: number, values: Record<string, string | boolean>): Promise<FillResult> {
+    return this.applyOp<FillResult>(documentId, { op: "fill_fields", page_index: pageIndex, values });
+  }
+
+  /** FRM-05: reorder one page's fields for tab navigation. A field left out of
+   * `fieldNames` is placed after every named field, in its current relative order. */
+  async setTabOrder(documentId: string, pageIndex: number, fieldNames: string[]): Promise<null> {
+    return this.applyOp<null>(documentId, { op: "set_tab_order", page_index: pageIndex, field_names: fieldNames });
+  }
+
+  /** FRM-06: draw every field's current appearance into static page content and drop
+   * the interactive AcroForm. `pageIndex` of `null`/`undefined` flattens the whole
+   * document; a document with no AcroForm is left unchanged. */
+  async flattenForm(documentId: string, pageIndex?: number | null): Promise<FlattenResult> {
+    return this.applyOp<FlattenResult>(documentId, { op: "flatten_form", page_index: pageIndex ?? null });
+  }
+
+  /** SIG-01: place a drawn/typed/image signature as ordinary page content
+   * (never an AcroForm field) through the generic, journaled ops endpoint, so
+   * it's undoable like any other edit. The same `request` (same strokes/text/
+   * image_base64) can be sent again with a different `page_index`/`rect` to
+   * place the same signature elsewhere without the person re-drawing, re-typing
+   * or re-uploading it -- that re-send, kept client-side, is this feature's
+   * "reuse without redrawing from scratch" (no separate server-side signature
+   * library exists yet). No toolbar button calls this yet; a signature pad /
+   * upload UI is still needed (see the P6 session report). */
+  async placeSignature(documentId: string, request: PlaceSignatureRequest): Promise<SignatureResult> {
+    return this.applyOp<SignatureResult>(documentId, { op: "place_signature", ...request });
+  }
+
+  /** SIG-06: a local self-signed certificate and private key pair, generated
+   * entirely on this machine (no network call). Not document-scoped, so --
+   * unlike placeSignature above -- this hits its own top-level route rather
+   * than an open document's ops endpoint. No UI calls this yet. */
+  async generateCertificate(commonName: string, keySize = 2048, passphrase?: string): Promise<CertResult> {
+    const response = await this.request("/certs/generate", {
+      method: "POST",
+      body: JSON.stringify({ common_name: commonName, key_size: keySize, passphrase: passphrase ?? null }),
+    });
+    return (await response.json()) as CertResult;
+  }
+
   /** EDT-11: misspelled words on one page, minus `ignore`d ones. */
   async pageSpelling(documentId: string, pageIndex: number, ignore: string[] = []): Promise<Misspelling[]> {
     const params = new URLSearchParams(ignore.length ? { ignore: ignore.join(",") } : {});
@@ -446,6 +593,120 @@ export class Api {
       body: JSON.stringify(op),
     });
     return (await response.json()) as T;
+  }
+
+  /** SEC-04/05/06: print/copy/modify/annotate flags, each independently allow/deny.
+   * Mirrors engine.ops.protect's three Ops' own flags; omitted fields default to allow. */
+  protectDocument(
+    documentId: string,
+    options: {
+      userPassword?: string;
+      ownerPassword?: string;
+      allowPrint?: boolean;
+      allowCopy?: boolean;
+      allowModify?: boolean;
+      allowAnnotate?: boolean;
+      path?: string;
+      overwrite?: boolean;
+    },
+  ): Promise<SaveResponse> {
+    return this.applyOp<SaveResponse>(documentId, {
+      op: "set_password",
+      user_password: options.userPassword ?? null,
+      owner_password: options.ownerPassword ?? null,
+      allow_print: options.allowPrint ?? true,
+      allow_copy: options.allowCopy ?? true,
+      allow_modify: options.allowModify ?? true,
+      allow_annotate: options.allowAnnotate ?? true,
+      path: options.path ?? null,
+      overwrite: options.overwrite ?? false,
+    });
+  }
+
+  /** SEC-05: remove encryption from an already-open document. No password field --
+   * a wrong password was already refused when the document was opened. */
+  unlockDocument(
+    documentId: string,
+    options: { path?: string; overwrite?: boolean } = {},
+  ): Promise<SaveResponse> {
+    return this.applyOp<SaveResponse>(documentId, {
+      op: "remove_password",
+      path: options.path ?? null,
+      overwrite: options.overwrite ?? false,
+    });
+  }
+
+  /** SEC-06: set permissions independently. `ownerPassword` is required by the
+   * server (engine.ops.protect.SetPermissionsOp) -- without one, the restriction
+   * could be removed by anyone who reopens the file with no password at all. */
+  setPermissions(
+    documentId: string,
+    options: {
+      ownerPassword: string;
+      userPassword?: string;
+      allowPrint?: boolean;
+      allowCopy?: boolean;
+      allowModify?: boolean;
+      allowAnnotate?: boolean;
+      path?: string;
+      overwrite?: boolean;
+    },
+  ): Promise<SaveResponse> {
+    return this.applyOp<SaveResponse>(documentId, {
+      op: "set_permissions",
+      owner_password: options.ownerPassword,
+      user_password: options.userPassword ?? null,
+      allow_print: options.allowPrint ?? true,
+      allow_copy: options.allowCopy ?? true,
+      allow_modify: options.allowModify ?? true,
+      allow_annotate: options.allowAnnotate ?? true,
+      path: options.path ?? null,
+      overwrite: options.overwrite ?? false,
+    });
+  }
+
+  /** SEC-09: proposed redaction rects on one page matching a built-in pattern
+   * ("email", "phone", "ssn", "credit_card") or a custom regex. Read-only --
+   * nothing is redacted; pass the accepted matches' `rect`s to redactAreas.
+   * No toolbar button calls this yet (see the P6 session report). */
+  async findRedactionCandidates(documentId: string, pageIndex: number, pattern: string): Promise<PatternMatch[]> {
+    const params = new URLSearchParams({ pattern });
+    const response = await this.request(`/documents/${documentId}/pages/${pageIndex}/redaction_candidates?${params}`);
+    return (await response.json()) as PatternMatch[];
+  }
+
+  /** SEC-08: true redaction -- removes the glyphs, image pixels and vector paths
+   * under each of `rects` on `pageIndex`, never just a box drawn over them.
+   * SEC-11's verification runs automatically; a failed verification surfaces as a
+   * 422 ApiError, same as any other OpValidationError-like failure. No toolbar
+   * button calls this yet (see the P6 session report). */
+  async redactAreas(
+    documentId: string,
+    pageIndex: number,
+    rects: [number, number, number, number][],
+  ): Promise<RedactionResult> {
+    return this.applyOp<RedactionResult>(documentId, { op: "redact_areas", page_index: pageIndex, rects });
+  }
+
+  /** SEC-10: remove metadata/XMP, JavaScript, embedded files and hidden text from the
+   * whole document; each category defaults on, pass `false` to keep it. No toolbar
+   * button calls this yet (see the P6 session report). */
+  async sanitizeDocument(
+    documentId: string,
+    options: {
+      removeMetadata?: boolean;
+      removeJavascript?: boolean;
+      removeEmbeddedFiles?: boolean;
+      removeHiddenText?: boolean;
+    } = {},
+  ): Promise<SanitizeReport> {
+    return this.applyOp<SanitizeReport>(documentId, {
+      op: "sanitize",
+      remove_metadata: options.removeMetadata ?? true,
+      remove_javascript: options.removeJavascript ?? true,
+      remove_embedded_files: options.removeEmbeddedFiles ?? true,
+      remove_hidden_text: options.removeHiddenText ?? true,
+    });
   }
 
   /** UI-05's before/after split view: one page rendered server-side to PNG

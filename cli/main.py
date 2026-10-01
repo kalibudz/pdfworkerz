@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -26,9 +27,14 @@ from engine.fonts import research as font_research
 from engine.fonts.choose import available_families
 from engine.fonts.style import extract_page_spans
 from engine.ops.base import InspectOp, Op, PageSpansOp, RenderPageOp, parse_op
+from engine.ops.certs import GenerateCertificateOp
+from engine.ops.forms import FillFieldsOp, FlattenFormOp, PageFieldsOp, SetTabOrderOp
 from engine.ops.images import CropImageOp, DeleteImageOp, InsertImageOp, MoveImageOp, PageImagesOp, ReplaceImageOp
 from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp
+from engine.ops.protect import RemovePasswordOp, SetPasswordOp, SetPermissionsOp
+from engine.ops.redact import FindRedactionCandidatesOp, RedactAreasOp, SanitizeOp
 from engine.ops.shapes import DeleteShapeOp, DrawShapeOp, EditShapeOp, PageShapesOp
+from engine.ops.signatures import PlaceSignatureOp
 from engine.ops.spellcheck import SpellCheckOp
 from engine.ops.text import (
     CopyStyleOp,
@@ -45,6 +51,8 @@ from engine.recipes import dump_recipe, load_recipe
 from server.app import create_app, run_server
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="PDFWorkerz: free, offline, token-free PDF editing.")
+forms_app = typer.Typer(add_completion=False, no_args_is_help=True, help="AcroForm fields (FRM-01/02/05/06).")
+app.add_typer(forms_app, name="forms")
 
 TierOption = Annotated[
     Literal["exact", "approximate", "fallback"],
@@ -752,10 +760,6 @@ def version() -> None:
     typer.echo(__version__)
 
 
-if __name__ == "__main__":
-    app()
-
-
 @app.command()
 def fonts(
     research: Annotated[
@@ -927,3 +931,402 @@ def run(
         raise _fail(exc) from exc
     steps = [(f"step {i}: {op['op']}", op) for i, op in enumerate(loaded.ops, start=1)]
     _apply_steps(path, steps, dry_run=dry_run, out=out, overwrite=overwrite, password=password)
+
+
+@app.command()
+def protect(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to protect")],
+    user_password: Annotated[
+        str | None, typer.Option("--user-password", help="Password required to open the file")
+    ] = None,
+    owner_password: Annotated[
+        str | None, typer.Option("--owner-password", help="Password required to change permissions")
+    ] = None,
+    no_print: Annotated[bool, typer.Option("--no-print", help="Deny printing")] = False,
+    no_copy: Annotated[bool, typer.Option("--no-copy", help="Deny copying/extracting text")] = False,
+    no_modify: Annotated[bool, typer.Option("--no-modify", help="Deny editing the document")] = False,
+    no_annotate: Annotated[bool, typer.Option("--no-annotate", help="Deny annotations and form filling")] = False,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Add a password and encrypt with AES-256 (SEC-04). Give --user-password,
+    --owner-password, or both; at least one is required."""
+    op = SetPasswordOp(
+        user_password=user_password,
+        owner_password=owner_password,
+        allow_print=not no_print,
+        allow_copy=not no_copy,
+        allow_modify=not no_modify,
+        allow_annotate=not no_annotate,
+        path=str(out) if out is not None else None,
+        overwrite=overwrite,
+    )
+    try:
+        with Document.open(path, password=password) as document:
+            result = _run(op, document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"saved -> {result.path}")
+
+
+@app.command()
+def unlock(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to unlock")],
+    password: Annotated[
+        str | None, typer.Option(help="The user or owner password that currently unlocks this file")
+    ] = None,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+) -> None:
+    """Remove encryption, given the correct password (SEC-05). A wrong password is
+    refused before anything is touched; the file is left exactly as it was."""
+    op = RemovePasswordOp(path=str(out) if out is not None else None, overwrite=overwrite)
+    try:
+        with Document.open(path, password=password) as document:
+            result = _run(op, document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"saved -> {result.path}")
+
+
+@app.command("set-permissions")
+def set_permissions_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to restrict")],
+    owner_password: Annotated[
+        str, typer.Option("--owner-password", help="Required: the permissions can't be bypassed without this")
+    ],
+    user_password: Annotated[
+        str | None, typer.Option("--user-password", help="Password required to open the file; default keeps it")
+    ] = None,
+    no_print: Annotated[bool, typer.Option("--no-print", help="Deny printing")] = False,
+    no_copy: Annotated[bool, typer.Option("--no-copy", help="Deny copying/extracting text")] = False,
+    no_modify: Annotated[bool, typer.Option("--no-modify", help="Deny editing the document")] = False,
+    no_annotate: Annotated[bool, typer.Option("--no-annotate", help="Deny annotations and form filling")] = False,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Set print/copy/modify/annotate permissions independently (SEC-06).
+    Requires --owner-password, so the restriction can't be removed by anyone
+    who simply opens the file with no password."""
+    op = SetPermissionsOp(
+        owner_password=owner_password,
+        user_password=user_password,
+        allow_print=not no_print,
+        allow_copy=not no_copy,
+        allow_modify=not no_modify,
+        allow_annotate=not no_annotate,
+        path=str(out) if out is not None else None,
+        overwrite=overwrite,
+    )
+    try:
+        with Document.open(path, password=password) as document:
+            result = _run(op, document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"saved -> {result.path}")
+
+
+@app.command("sign-place")
+def sign_place_command(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to edit")],
+    rect: Annotated[str, typer.Option(help='Area to place it in, "x0,y0,x1,y1" in points')],
+    kind: Annotated[Literal["drawn", "typed", "image"], typer.Option(help="drawn, typed, or image")],
+    page: PageOption = 0,
+    text: Annotated[str | None, typer.Option(help='Signature text, for --kind typed (e.g. "Jane Doe")')] = None,
+    font: Annotated[
+        str | None,
+        typer.Option(help="Reserved for a future font choice; typed signatures use the bundled script font today"),
+    ] = None,
+    image: Annotated[
+        Path | None, typer.Option(exists=True, dir_okay=False, help="PNG/JPEG (or other) image file, for --kind image")
+    ] = None,
+    strokes_json: Annotated[
+        Path | None,
+        typer.Option(
+            "--strokes-json",
+            exists=True,
+            dir_okay=False,
+            help="JSON file: a list of strokes, each a list of [x, y] points, for --kind drawn",
+        ),
+    ] = None,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """Place a drawn, typed or image signature as ordinary page content (SIG-01) --
+    never an AcroForm field. Give exactly one of --strokes-json (drawn),
+    --text (typed) or --image, matching --kind."""
+    strokes = None
+    if strokes_json is not None:
+        try:
+            strokes = json.loads(strokes_json.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise typer.BadParameter(f"{strokes_json} is not valid JSON: {exc}") from exc
+    op = PlaceSignatureOp(
+        page_index=page,
+        rect=_parse_rect(rect),
+        kind=kind,
+        strokes=strokes,
+        text=text,
+        font=font,
+        image_base64=_image_b64(image) if image is not None else None,
+    )
+    typer.echo(f"saved -> {_apply_and_save(path, op, out=out, overwrite=overwrite, password=password)}")
+
+
+@app.command("cert-generate")
+def cert_generate_command(
+    common_name: Annotated[str, typer.Option("--common-name", help="The certificate's subject/issuer common name")],
+    out_dir: Annotated[
+        Path, typer.Option("--out-dir", file_okay=False, help="Directory to write cert.pem/key.pem/bundle.p12 into")
+    ],
+    key_size: Annotated[int, typer.Option(help="RSA key size in bits; 2048 or more")] = 2048,
+    passphrase: Annotated[
+        str | None,
+        typer.Option(help="Encrypts the private key (both key.pem and bundle.p12); strongly recommended"),
+    ] = None,
+) -> None:
+    """Generate a local self-signed certificate and private key (SIG-06), with
+    no network call, and write cert.pem, key.pem and bundle.p12 into --out-dir.
+    Writing the files -- and with what permissions -- is this command's own
+    responsibility: engine.certs itself only returns bytes. On Windows, a
+    POSIX file-mode bit is not a meaningful protection (there's no POSIX mode
+    to restrict to begin with), so --passphrase is the protection that
+    actually travels with the key; this command still asks the OS for owner-only
+    access via os.open's mode argument, for whatever it's worth on this
+    filesystem, but does not rely on it."""
+    try:
+        op = GenerateCertificateOp(common_name=common_name, key_size=key_size, passphrase=passphrase)
+        result = op.apply(None)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cert_path, key_path, bundle_path = out_dir / "cert.pem", out_dir / "key.pem", out_dir / "bundle.p12"
+    for file_path, data, mode in (
+        (cert_path, result.cert_pem.encode("ascii"), 0o644),  # a certificate is public; the key and bundle are not
+        (key_path, result.key_pem.encode("ascii"), 0o600),
+        (bundle_path, base64.b64decode(result.pkcs12_base64), 0o600),
+    ):
+        fd = os.open(file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
+    typer.echo(f"saved -> {cert_path}, {key_path}, {bundle_path}")
+    if passphrase is None:
+        typer.echo(
+            "warning: no --passphrase given; the private key is unencrypted on disk "
+            "(file permissions are the only protection, and Windows doesn't honor POSIX mode bits)",
+            err=True,
+        )
+
+
+def _parse_field_value(raw: str) -> str | bool:
+    if raw.lower() in ("true", "false"):
+        return raw.lower() == "true"
+    return raw
+
+
+def _parse_field_set(value: str) -> tuple[str, str | bool]:
+    if "=" not in value:
+        raise typer.BadParameter('--set must be "name=value", e.g. --set agree=true')
+    name, _, raw_value = value.partition("=")
+    return name, _parse_field_value(raw_value)
+
+
+@forms_app.command("list")
+def forms_list(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to inspect")],
+    page: PageOption = 0,
+    password: PasswordOption = None,
+) -> None:
+    """FRM-01: list every AcroForm field on one page (a radio group counts as one field)."""
+    try:
+        with Document.open(path, password=password) as document:
+            fields = _run(PageFieldsOp(page_index=page), document)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    if not fields:
+        typer.echo("no fields on this page")
+        return
+    for field in fields:
+        options = f" options={field.options}" if field.options else ""
+        typer.echo(f"{field.name!r}: {field.field_type} value={field.value!r} rect={field.rect}{options}")
+
+
+@forms_app.command("fill")
+def forms_fill(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to fill")],
+    page: PageOption = 0,
+    set_: Annotated[
+        list[str],
+        typer.Option("--set", help='A field to set, "name=value" (repeatable); "true"/"false" for checkboxes'),
+    ] = [],  # noqa: B006 -- typer reads this as the option's default, never mutated
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """FRM-02: fill one or more fields on one page in a single undo step. An
+    unknown field name, or a value that isn't one of a dropdown's/radio's
+    options, refuses the whole call."""
+    if not set_:
+        raise typer.BadParameter("give at least one --set name=value")
+    values = dict(_parse_field_set(item) for item in set_)
+    try:
+        with Document.open(path, password=password) as document:
+            _run(FillFieldsOp(page_index=page, values=values), document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"filled {len(values)} field(s) on page {page}")
+    typer.echo(f"saved -> {saved_to}")
+
+
+@forms_app.command("tab-order")
+def forms_tab_order(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to reorder")],
+    page: PageOption = 0,
+    order: Annotated[str, typer.Option(help="Comma-separated field names, in the desired tab order")] = "",
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """FRM-05: set the tab order of one page's fields. A field left out of
+    --order is placed after every named field, in its current relative order."""
+    if not order:
+        raise typer.BadParameter("give --order as a comma-separated list of field names")
+    field_names = [name.strip() for name in order.split(",") if name.strip()]
+    try:
+        with Document.open(path, password=password) as document:
+            _run(SetTabOrderOp(page_index=page, field_names=field_names), document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"tab order set on page {page}")
+    typer.echo(f"saved -> {saved_to}")
+
+
+@forms_app.command("flatten")
+def forms_flatten(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to flatten")],
+    page: Annotated[int | None, typer.Option(help="0-based page index; omit to flatten the whole document")] = None,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """FRM-06: draw every field's current appearance into static page content and
+    drop the interactive AcroForm. A document with no AcroForm is left unchanged."""
+    try:
+        with Document.open(path, password=password) as document:
+            result = _run(FlattenFormOp(page_index=page), document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"flattened {result.fields_flattened} field(s)")
+    typer.echo(f"saved -> {saved_to}")
+
+
+@app.command()
+def redact(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to redact")],
+    rect: Annotated[list[str], typer.Option("--rect", help='Area to redact, "x0,y0,x1,y1" (repeatable)')] = [],  # noqa: B006 -- typer reads this as the option's default, never mutated
+    page: PageOption = 0,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """SEC-08: true redaction -- removes the glyphs, image pixels and vector paths
+    under each --rect, never just a box drawn over them (see engine.redact). Runs
+    SEC-11's verification automatically; fails loudly if anything is still recoverable."""
+    if not rect:
+        raise typer.BadParameter("give at least one --rect x0,y0,x1,y1")
+    rects = [_parse_rect(value) for value in rect]
+    try:
+        with Document.open(path, password=password) as document:
+            result = _run(RedactAreasOp(page_index=page, rects=rects), document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    for stats in result.stats:
+        typer.echo(
+            f"  {stats.rect}: {stats.glyphs_removed} glyph(s), "
+            f"{stats.images_removed} image(s) removed, {stats.images_altered} image(s) altered, "
+            f"{stats.shapes_removed} shape(s) removed, {stats.shapes_clipped} shape(s) clipped"
+        )
+    typer.echo("verification: passed" if result.verification.ok else "verification: FAILED")
+    typer.echo(f"saved -> {saved_to}")
+
+
+@app.command("redact-pattern")
+def redact_pattern(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to scan")],
+    pattern: Annotated[
+        str, typer.Option(help='Built-in pattern ("email", "phone", "ssn", "credit_card") or a custom regex')
+    ],
+    page: PageOption = 0,
+    apply_: Annotated[bool, typer.Option("--apply", help="Redact every match; default only lists them")] = False,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """SEC-09: find text matching a redaction pattern pack. Without --apply, this is a
+    dry run: it only lists what it found. --apply redacts every match in one undo step
+    (SEC-08's true redaction, SEC-11's verification included)."""
+    try:
+        with Document.open(path, password=password) as document:
+            matches = _run(FindRedactionCandidatesOp(page_index=page, pattern=pattern), document)
+            if not matches:
+                typer.echo("no matches found")
+                return
+            for match in matches:
+                typer.echo(f"  span {match.span_index} [{match.start}:{match.end}] {match.text!r} rect={match.rect}")
+            if not apply_:
+                typer.echo(f"{len(matches)} match(es) found; re-run with --apply to redact them")
+                return
+            result = _run(RedactAreasOp(page_index=page, rects=[m.rect for m in matches]), document)
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo("verification: passed" if result.verification.ok else "verification: FAILED")
+    typer.echo(f"redacted {len(matches)} match(es)")
+    typer.echo(f"saved -> {saved_to}")
+
+
+@app.command()
+def sanitize(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF file to sanitize")],
+    keep_metadata: Annotated[bool, typer.Option("--keep-metadata", help="Don't remove Info/XMP metadata")] = False,
+    keep_javascript: Annotated[bool, typer.Option("--keep-javascript", help="Don't remove JavaScript")] = False,
+    keep_embedded_files: Annotated[
+        bool, typer.Option("--keep-embedded-files", help="Don't remove embedded files")
+    ] = False,
+    keep_hidden_text: Annotated[
+        bool, typer.Option("--keep-hidden-text", help="Don't remove invisible (render mode 3) text")
+    ] = False,
+    out: OutOption = None,
+    overwrite: OverwriteOption = False,
+    password: PasswordOption = None,
+) -> None:
+    """SEC-10: remove metadata/XMP, JavaScript, embedded files and hidden text from the
+    whole document; each category removed by default, keep one with --keep-*."""
+    try:
+        with Document.open(path, password=password) as document:
+            report = _run(
+                SanitizeOp(
+                    remove_metadata=not keep_metadata,
+                    remove_javascript=not keep_javascript,
+                    remove_embedded_files=not keep_embedded_files,
+                    remove_hidden_text=not keep_hidden_text,
+                ),
+                document,
+            )
+            saved_to = _save(document, path, out, overwrite)
+    except PdfWorkerzError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"metadata removed: {report.metadata_removed}")
+    typer.echo(f"javascript actions removed: {report.javascript_actions_removed}")
+    typer.echo(f"embedded files removed: {report.embedded_files_removed}")
+    typer.echo(f"hidden text characters removed: {report.hidden_text_chars_removed}")
+    typer.echo(f"saved -> {saved_to}")

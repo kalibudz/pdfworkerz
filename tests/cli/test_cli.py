@@ -745,3 +745,43 @@ def test_fonts_library_add_and_harvest(work_dir: Path) -> None:
     listed = runner.invoke(app, ["fonts", "--library"])
     assert _POSTSCRIPT in listed.output and "PWMine-Regular" in listed.output
     assert "PWTestSans" in runner.invoke(app, ["fonts"]).output
+
+
+# -- P6: forms (FRM-01/02/05/06) --
+
+
+@pytest.mark.feature("FRM-01")
+def test_forms_list_command(work_dir: Path) -> None:
+    from tests.engine.test_forms import _build_full_form
+
+    path = _build_full_form(work_dir)
+    result = runner.invoke(app, ["forms", "list", str(path), "--page", "0"])
+    assert result.exit_code == 0, result.output
+    assert "'name': text" in result.output
+    assert "'plan': radio" in result.output
+
+
+@pytest.mark.feature("FRM-02")
+def test_forms_fill_command(work_dir: Path) -> None:
+    from tests.engine.test_forms import _build_full_form
+
+    path = _build_full_form(work_dir)
+    out = work_dir / "filled.pdf"
+    result = runner.invoke(app, ["forms", "fill", str(path), "--page", "0", "--set", "name=Hello", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+
+    unknown = runner.invoke(app, ["forms", "fill", str(path), "--page", "0", "--set", "bogus=x"])
+    assert unknown.exit_code == 1
+    assert "bogus" in unknown.output
+
+
+@pytest.mark.feature("FRM-06")
+def test_forms_flatten_command(work_dir: Path) -> None:
+    from tests.engine.test_forms import _build_full_form
+
+    path = _build_full_form(work_dir)
+    out = work_dir / "flat.pdf"
+    result = runner.invoke(app, ["forms", "flatten", str(path), "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert out.exists()

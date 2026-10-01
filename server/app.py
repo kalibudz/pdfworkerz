@@ -57,6 +57,7 @@ from engine.errors import (
     OverwriteRefusedError,
     PasswordRequiredError,
     PdfWorkerzError,
+    RedactionVerificationError,
     RepairFailedError,
     SaveFailedError,
     SaveNotPossibleError,
@@ -67,10 +68,13 @@ from engine.fonts import research as font_research
 from engine.fonts.choose import available_families
 from engine.ops.annotations import PageAnnotationsOp
 from engine.ops.base import MAX_RENDER_DPI, MIN_RENDER_DPI, Op, PageSpansOp, RenderPageOp, parse_op
+from engine.ops.certs import GenerateCertificateOp
+from engine.ops.forms import PageFieldsOp
 from engine.ops.images import PageImagesOp
 from engine.ops.journal import UndoRedoJournal
 from engine.ops.links import PageLinksOp
 from engine.ops.objects import PageBlocksOp
+from engine.ops.redact import FindRedactionCandidatesOp
 from engine.ops.shapes import PageShapesOp
 from engine.ops.spellcheck import SpellCheckOp
 from engine.ops.text import PreviewTextOp, _font_index
@@ -94,6 +98,7 @@ _STATUS_BY_ERROR: dict[type[PdfWorkerzError], int] = {
     NothingToUndoError: 409,
     OpValidationError: 400,
     FontResourceNotFoundError: 422,
+    RedactionVerificationError: 422,
 }
 
 
@@ -284,6 +289,14 @@ def page_shapes(document_id: str, page_index: int, journal: JournalDep) -> Any:
     return _jsonable(_read(PageShapesOp(page_index=page_index), journal.document))
 
 
+@router.get("/documents/{document_id}/pages/{page_index}/fields")
+def page_fields(document_id: str, page_index: int, journal: JournalDep) -> Any:
+    """FRM-01: every AcroForm field on one page (a radio group counts as one
+    logical field). Read-only (PageFieldsOp), applied directly like
+    page_annotations; filling, reordering and flattening go through the ops endpoint."""
+    return _jsonable(_read(PageFieldsOp(page_index=page_index), journal.document))
+
+
 @router.get("/documents/{document_id}/pages/{page_index}/blocks")
 def page_blocks(page_index: int, journal: JournalDep) -> Any:
     """EDT-13: the page's text blocks, as span indices plus the box around them."""
@@ -309,6 +322,17 @@ def page_spelling(
     accept anyway; a correction goes through the ops endpoint (correct_word)."""
     words = [word for word in ignore.split(",") if word]
     op = SpellCheckOp(page_index=page_index, language=language, ignore=words)
+    return _jsonable(_read(op, journal.document))
+
+
+@router.get("/documents/{document_id}/pages/{page_index}/redaction_candidates")
+def redaction_candidates(document_id: str, page_index: int, pattern: str, journal: JournalDep) -> Any:
+    """SEC-09: proposed redaction rects matching a built-in pattern ("email", "phone",
+    "ssn", "credit_card") or a custom regex. Read-only (FindRedactionCandidatesOp),
+    applied directly like page_spelling; nothing is redacted here -- accepting some or
+    all of the matches is a RedactAreasOp through the generic ops endpoint, with their
+    `rect`s as its `rects`."""
+    op = FindRedactionCandidatesOp(page_index=page_index, pattern=pattern)
     return _jsonable(_read(op, journal.document))
 
 
@@ -458,6 +482,22 @@ def harvest_font(body: HarvestFontRequest, journal: JournalDep) -> dict[str, Any
 def remove_font_from_library(postscript_name: str) -> Response:
     font_library.remove_font(postscript_name)
     return Response(status_code=204)
+
+
+class GenerateCertificateRequest(BaseModel):
+    common_name: str
+    key_size: int = 2048
+    passphrase: str | None = None
+
+
+@router.post("/certs/generate")
+def generate_certificate(body: GenerateCertificateRequest) -> Any:
+    """SIG-06: a local self-signed certificate and private key pair, with no
+    network call. Not document-scoped (no document_id, nothing to journal),
+    so it's its own top-level route rather than going through
+    .../documents/{id}/ops like PlaceSignatureOp (SIG-01) does."""
+    op = GenerateCertificateOp(common_name=body.common_name, key_size=body.key_size, passphrase=body.passphrase)
+    return _jsonable(op.apply(None))
 
 
 @router.get("/documents/{document_id}/download")
