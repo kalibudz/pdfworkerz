@@ -26,6 +26,72 @@ A phase is complete when all of its features are **done** through the evidence g
 
 ## Session log
 
+### 2026-10-01 (later still) — Selection fix: Esc, clicking away and clicking another object all deselect, visibly, everywhere
+
+The owner's recipe log from live use showed the cost of this directly: a
+`move_objects` moved four words **and a shape** that were never meant to
+move together, because the shape stayed selected after an earlier click
+with no highlight to show it. Reading `web/src` found four separate
+selections (the shared one in `arrange.ts`, plus `overlay.ts`'s,
+`images.ts`'s and `shapes.ts`'s own), kept in sync only by convention, and
+several real gaps once a shape or image was involved:
+
+- Clicking a shape or image never cleared a previous **text** selection
+  (only the reverse direction worked). Selecting a shape or image left it
+  selected in the shared `arrange.ts` set after the next redraw, but with
+  no highlight at all -- `shapes.ts`/`images.ts` dropped their own
+  selection on every `update()` and nothing restored it -- so a later
+  Shift+click, marquee or Ctrl+D could sweep it into a move or copy
+  silently.
+- Esc only cleared the shared selection, never the tool-level highlight,
+  handles or inspector panel, and `viewer.ts` put text back into the
+  shared selection on the next render regardless. Shapes had no Esc
+  handling at all.
+- A plain click on empty page cleared only the shared selection; the grey
+  area around the page did nothing; images/shapes had their own separate
+  Delete/Escape keydown listener, so Delete on a selected image could fire
+  two Ops (`delete_image` and the shared `delete_objects`) for one
+  keypress.
+- A text Apply/Enter kept the edited unit selected, which the owner said
+  should stop: "selection remains even after application and confuses the
+  user."
+
+Fixed with one rule, enforced centrally (`viewer.ts`'s `deselectAll`,
+`arrange.ts`'s new `onSelectOnly`/`onActivate` callbacks) rather than
+scattered per tool:
+
+- A plain click on any object replaces the selection with just that one,
+  clearing the *other* kinds' tool-level highlight -- but, root cause of
+  the first empirical test failure, `overlay.ts`'s `clearSelection()` used
+  to call `inspector.showEmpty()` unconditionally, which clobbered the
+  panel the *just-selected* object's own `select()` had put up moments
+  earlier in the same click; it no longer touches the inspector at all,
+  and every caller that actually wants the empty state calls
+  `showEmpty()` itself.
+- Esc (page focus, after the editor's own revert-then-blur steps), or a
+  plain click on empty page or the grey area around it, deselects
+  everything -- confirming an unapplied text draft first.
+- Ctrl/Cmd+click joins Shift+click; a plain click (no drag) on one member
+  of a multi-selection narrows it to that member.
+- After a move/nudge/align/duplicate/paste, the object stays selected and
+  *visibly* highlighted: new `shapeTool.selectIndex`/`imageTool.
+  selectIndex` follow a new `arrange.sole()` after every redraw.
+  `arrange.ts`'s own re-find-after-a-change logic, for a non-text object,
+  used to work by proximity to its *old* rectangle only -- which a shape
+  or image tool's own drag, crop, replace or restyle never updates (only
+  `arrange.ts`'s own `moveSelection`/`align` do) -- so it now also matches
+  by the object's own (stable-across-an-edit) index.
+- Delete, and an applied text edit, clear the selection -- the latter
+  always, even when the text is unchanged (a style-only Apply): an
+  "Applied. Undo with Ctrl+Z." note takes the empty panel's place instead
+  of reselecting. Undo/redo and a command-bar edit clear it too, since
+  what either lands on may no longer mean the same thing.
+- Images/shapes' own separate Delete/Escape keydown listener is gone:
+  Delete goes through the one shared `arrange.ts` path for every kind now.
+
+16 Playwright tests rewritten or added (`tests/web/test_ui.py`,
+`tests/web/test_select_modes.py`); full local gate 14/14.
+
 ### 2026-10-01 (later) — P6 wave 2: field creation, OpenCV auto-detection, import/export, XFA detection, PAdES signing — P6 complete
 
 Finished P6 the same day it started: two more parallel builder agents, then

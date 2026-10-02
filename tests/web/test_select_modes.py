@@ -316,18 +316,13 @@ def test_editing_a_word_is_one_undo_and_leaves_the_rest_of_the_line(page: Page, 
     _wait_history(page, 1, "BETA")
     assert dialogs == []
 
-    # The edited word is selected again, ready for the next change.
-    page.wait_for_function(
-        f"() => document.querySelector('{_SELECTED}')?.textContent === 'BETA'"
-        f" && document.querySelector('{_EDITOR}')?.value === 'BETA'",
-        timeout=10000,
-    )
-    assert page.text_content(".pw-unit-kind") == "Word"
+    # The edit cleared the selection (owner, 2026-10-01): a text/style Apply always does,
+    # even though the edited word is still right there.
+    assert page.query_selector(_SELECTED) is None
     # Re-extracted from the server: only that word changed; its neighbours did not move.
     assert _texts(page) == ["Alpha", "BETA", "gamma", "Delta", "epsilon", "Zeta", "eta", "Plain", "Bold"]
     assert _box(page, "Alpha") == pytest.approx(alpha, abs=0.5)
     assert _box(page, "Delta") == pytest.approx(delta, abs=0.5)
-    page.keyboard.press("Escape")  # unchanged editor: the keyboard goes back to the page
     page.keyboard.press("l")
     _wait_mode(page, "line")
     assert _texts(page) == ["Alpha BETA gamma", LINE_TWO, LINE_THREE, MIXED_LINE]
@@ -342,16 +337,19 @@ def test_editing_a_word_is_one_undo_and_leaves_the_rest_of_the_line(page: Page, 
 
 
 @pytest.mark.feature("EDT-17", criterion=5)
-def test_editing_a_line_commits_once_and_reselects_it(page: Page, app_url: str, units_pdf: Path) -> None:
+def test_editing_a_line_commits_once_and_clears_the_selection(page: Page, app_url: str, units_pdf: Path) -> None:
+    """Owner's rule (2026-10-01): a text/style Apply or Enter always clears the
+    selection, even though the edited line is still right there -- the edit is
+    done, and an "Applied" note takes the inspector's empty state instead."""
     _open(page, app_url, units_pdf)
     _click_text(page, LINE_TWO)
     page.wait_for_selector(_SELECTED, timeout=3000)
     page.fill(_EDITOR, "Delta zeta")
     page.keyboard.press("Enter")
     _wait_history(page, 1, "Delta zeta")
-    page.wait_for_function(f"() => document.querySelector('{_SELECTED}')?.textContent === 'Delta zeta'", timeout=10000)
-    assert page.input_value(_EDITOR) == "Delta zeta"
     assert _texts(page) == [LINE_ONE, "Delta zeta", LINE_THREE, MIXED_LINE]  # the other lines are untouched
+    assert page.query_selector(_SELECTED) is None
+    assert "Applied" in (page.text_content(".pw-inspector-empty") or "")
     _undo(page, 0)
 
 
@@ -499,19 +497,16 @@ def test_deleting_a_word_is_one_undo(page: Page, app_url: str, units_pdf: Path) 
 
 
 @pytest.mark.feature("EDT-17", criterion=5)
-def test_a_word_edited_into_two_words_reselects_the_first(page: Page, app_url: str, units_pdf: Path) -> None:
+def test_a_word_edited_into_two_words_clears_the_selection(page: Page, app_url: str, units_pdf: Path) -> None:
+    """Owner's rule (2026-10-01): the edit clears the selection, even though
+    the word is now two words and one of them is still right at its origin."""
     _open(page, app_url, units_pdf, mode="word")
     _click_text(page, "beta")
     page.wait_for_selector(_SELECTED, timeout=3000)
     page.fill(_EDITOR, "BE TA")
     page.keyboard.press("Enter")
     _wait_history(page, 1, "BE TA")
-    # Two words now; the one at the edit's origin is selected, not a fragment elsewhere.
-    page.wait_for_function(
-        f"() => document.querySelector('{_SELECTED}')?.textContent === 'BE'"
-        f" && document.querySelector('{_EDITOR}')?.value === 'BE'",
-        timeout=10000,
-    )
+    assert page.query_selector(_SELECTED) is None
     assert _texts(page)[:4] == ["Alpha", "BE", "TA", "gamma"]
     _undo(page, 0)
 

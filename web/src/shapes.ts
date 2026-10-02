@@ -24,6 +24,9 @@ export interface ShapeToolOptions {
   documentId: string;
   inspector: InspectorHandle;
   onCommitted: () => void;
+  /** Before selecting this shape away from whatever (text) is selected now:
+   * true to proceed, false (after asking) to leave things as they are. */
+  confirmDiscard?: () => boolean;
 }
 
 export interface ShapeToolHandle {
@@ -32,6 +35,12 @@ export interface ShapeToolHandle {
   setDrawMode(kind: DrawKind | null): void;
   restyle(style: ShapeStyle): void;
   deleteSelected(): void;
+  /** Show this shape (by index) as selected -- the shared selection landed on
+   * it (after a move, a copy, or just a redraw that found it again). */
+  selectIndex(index: number): void;
+  /** Nothing selected without being highlighted: clear this shape's
+   * selection, its handle and the inspector. */
+  deselect(): void;
 }
 
 /** Shapes covering more than this share of the page get no selection box. */
@@ -45,6 +54,7 @@ export function createShapeTool(layer: HTMLElement, options: ShapeToolOptions): 
   let selected: { shape: ShapeInfo; box: HTMLElement } | null = null;
   let drawKind: DrawKind | null = null;
   let surface: HTMLElement | null = null;
+  let currentShapes: ShapeInfo[] = [];
 
   async function send(op: HistoryOp): Promise<void> {
     try {
@@ -137,6 +147,7 @@ export function createShapeTool(layer: HTMLElement, options: ShapeToolOptions): 
     const pageArea = (vx1 - vx0) * (vy1 - vy0);
     const area = (s: ShapeInfo): number => (s.rect[2] - s.rect[0]) * (s.rect[3] - s.rect[1]);
     const selectable = shapes.filter((s) => area(s) < pageArea * BACKGROUND_AREA_SHARE).sort((a, b) => area(b) - area(a));
+    currentShapes = selectable;
     for (const shape of selectable) {
       const rect = bboxToRect(nextViewport, shape.rect);
       const width = Math.max(rect.width, MIN_BOX_PX);
@@ -153,8 +164,15 @@ export function createShapeTool(layer: HTMLElement, options: ShapeToolOptions): 
           return;
         }
         if (selected?.box !== box) {
-          select(shape, box);
+          if (options.confirmDiscard && !options.confirmDiscard()) {
+            return;
+          }
+          // selectOnly first: it clears the other tools' own selections (overlay's
+          // among them, which also resets the inspector to empty) before select()
+          // below shows this shape there -- the other order let that reset run
+          // *after* and wipe out the inspector content select() had just shown.
           options.arrange?.selectOnly("shape", shape.index);
+          select(shape, box);
         }
         drag(
           event,
@@ -197,11 +215,19 @@ export function createShapeTool(layer: HTMLElement, options: ShapeToolOptions): 
     }
   }
 
+  function selectIndex(index: number): void {
+    const shape = currentShapes.find((s) => s.index === index);
+    const box = layer.querySelector<HTMLElement>(`.pw-shape-box[data-index="${index}"]`);
+    if (shape && box) {
+      select(shape, box);
+    }
+  }
+
   layer.addEventListener("mousedown", (event) => {
     const target = event.target as HTMLElement;
     if (selected && !target.closest(".pw-shape-box, .pw-object-resize, .pw-inspector")) {
       deselect();
     }
   });
-  return { update, setDrawMode, restyle, deleteSelected };
+  return { update, setDrawMode, restyle, deleteSelected, selectIndex, deselect };
 }

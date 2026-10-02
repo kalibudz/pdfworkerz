@@ -313,22 +313,53 @@ def test_escape_reverts_the_draft(page: Page, app_url: str, corpus: Corpus) -> N
 
 
 @pytest.mark.feature("UI-02")
-def test_clicking_away_keeps_the_draft(page: Page, app_url: str, corpus: Corpus) -> None:
-    """The owner's rule (2026-09-29): clicking elsewhere never throws an edit
-    away. Clicking empty page, the toolbar or the panel keeps the selection
-    and the typed draft; only Revert/Esc or choosing other text discards it."""
+def test_clicking_away_with_no_draft_deselects_at_once(page: Page, app_url: str, corpus: Corpus) -> None:
+    """Owner's rule (2026-10-01, replacing 2026-09-29's "clicking elsewhere
+    never discards anything"): with nothing unapplied to lose, clicking the
+    grey area around the page, or empty page itself, deselects right away."""
+    _open_and_click_first_span(page, app_url, str(corpus.simple))
+    errors: list[str] = []
+    page.on("pageerror", lambda exc: errors.append(str(exc)))
+    page.click(".pw-page-area", position={"x": 5, "y": 5})
+    assert page.query_selector(_SELECTED) is None
+    assert page.is_visible(".pw-inspector-empty")
+    assert errors == []
+
+    page.click(".pw-span-box")
+    page.wait_for_selector(_SELECTED, timeout=3000)
+    page.click(".pw-canvas-wrap canvas", position={"x": 2, "y": 2})
+    assert page.query_selector(_SELECTED) is None
+
+
+@pytest.mark.feature("UI-02")
+def test_clicking_away_with_a_draft_asks_first(page: Page, app_url: str, corpus: Corpus) -> None:
+    """Owner's rule (2026-10-01): an unapplied draft is confirmed before a
+    click away discards it. Declining keeps the selection and the draft;
+    accepting deselects. Clicking the toolbar or the inspector itself never
+    asks, since neither one throws the draft away."""
     _open_and_click_first_span(page, app_url, str(corpus.simple))
     original = page.eval_on_selector(".pw-span-box", "el => el.textContent")
     errors: list[str] = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))
     page.keyboard.type("Kept While I Look Around")
+
+    page.click(".pw-inspector h2")  # the inspector itself: never asks, never discards
+    page.wait_for_timeout(200)
+    assert _editor_value(page) == "Kept While I Look Around"
+    assert page.query_selector(_SELECTED) is not None
+
+    page.once("dialog", lambda dialog: dialog.dismiss())  # keep it
     page.click(".pw-page-area", position={"x": 5, "y": 5})
-    page.click(".pw-inspector h2")
-    page.wait_for_timeout(300)
+    page.wait_for_timeout(200)
     assert _editor_value(page) == "Kept While I Look Around"
     assert page.query_selector(_SELECTED) is not None
     assert page.eval_on_selector(".pw-span-box", "el => el.textContent") == original  # not applied yet
     assert _history_count(page) == 0
+
+    page.once("dialog", lambda dialog: dialog.accept())  # discard it
+    page.click(".pw-page-area", position={"x": 5, "y": 5})
+    page.wait_for_selector(_SELECTED, state="detached", timeout=3000)
+    assert page.is_visible(".pw-inspector-empty")
     assert errors == []
 
 
@@ -346,9 +377,10 @@ def test_enter_commits_an_exact_match_without_a_confirmation_dialog(page: Page, 
     page.wait_for_function(
         "() => document.querySelector('.pw-span-box')?.textContent === 'Hello, Editor.'", timeout=5000
     )
-    # The edited text stays selected, ready for the next change.
-    page.wait_for_selector(_SELECTED, timeout=5000)
-    assert _editor_value(page) == "Hello, Editor."
+    # Apply clears the selection (owner, 2026-10-01): the empty panel takes over
+    # with an "Applied" note, rather than the edited text staying selected.
+    page.wait_for_selector(".pw-hint:has-text('Applied')", timeout=5000)
+    assert page.query_selector(_SELECTED) is None
 
 
 @pytest.mark.feature("UI-02")
@@ -403,7 +435,10 @@ def _commit_edit(page: Page, app_url: str, path: str, new_text: str) -> None:
     page.wait_for_timeout(400)  # let the debounced preview resolve before committing
     page.keyboard.press("Enter")
     page.wait_for_selector(".pw-history-entry", timeout=5000)
-    page.wait_for_selector(_SELECTED, timeout=5000)  # the reload finished and reselected it
+    # the reload finished and settled: Apply clears the selection now (owner, 2026-10-01)
+    # rather than reselecting the edited unit, so the empty panel's "Applied" note is the
+    # reliable late signal instead of _SELECTED reappearing.
+    page.wait_for_selector(".pw-hint:has-text('Applied')", timeout=5000)
 
 
 _FIRST_THUMB = "document.querySelector('.pw-thumb canvas')"
@@ -1597,13 +1632,10 @@ def test_text_and_style_apply_together_as_one_history_entry(page: Page, app_url:
     assert len(entries) == 1
     assert "Hello, Bold Editor." in entries[0] and "bold" in entries[0] and "16pt" in entries[0]
     assert dialogs == []
-    # Reselected with its new text and style, ready for the next change.
-    page.wait_for_function(f"() => document.querySelector('{_EDITOR}')?.value === 'Hello, Bold Editor.'", timeout=5000)
-    page.wait_for_function(
-        "() => (document.querySelector('.pw-inspector')?.textContent ?? '').includes('Helvetica-Bold')", timeout=5000
-    )
-    assert page.input_value("#pw-edit-size") == "16"
-    assert page.is_disabled("#pw-edit-apply")
+    # Apply clears the selection (owner, 2026-10-01): the empty panel takes over
+    # with an "Applied" note, rather than reselecting with the new text/style.
+    page.wait_for_selector(".pw-hint:has-text('Applied')", timeout=5000)
+    assert page.query_selector(_SELECTED) is None
 
 
 @pytest.mark.feature("UI-03")
@@ -1710,6 +1742,10 @@ def test_edited_text_can_be_moved_without_an_approval_prompt(page: Page, app_url
     page.fill(_EDITOR, "Alpha title")
     page.keyboard.press("Enter")
     page.wait_for_selector(".pw-history-entry", timeout=10000)
+    # Apply clears the selection (owner, 2026-10-01): reselect the edited paragraph
+    # before dragging it, since the move handle no longer appears on its own.
+    page.wait_for_selector(".pw-hint:has-text('Applied')", timeout=5000)
+    page.click(".pw-span-box:has-text('Alpha title')")
     page.wait_for_selector(".pw-move-handle", timeout=5000)
     _drag(page, ".pw-move-handle", 0, 60)
     page.wait_for_selector(".pw-history-entry:has-text('Move paragraph')", timeout=10000)
@@ -1826,3 +1862,154 @@ def test_text_can_be_duplicated_and_deleted_from_the_keyboard(page: Page, app_ur
     page.keyboard.press("Delete")
     page.wait_for_selector(".pw-history-entry:has-text('Delete 1 object')", timeout=10000)
     page.wait_for_function(f"() => ({count})() === 1", timeout=5000)
+
+
+# -- Selection fix, 2026-10-01: Esc, clicking away and clicking another object all --
+# -- deselect in one clear, visible way, across text, images and shapes together.  --
+
+
+@pytest.mark.feature("EDT-13")
+def test_escape_deselects_text_completely(page: Page, app_url: str, arrange_pdf: Path) -> None:
+    page.goto(app_url)
+    page.wait_for_selector("#pw-open-path", timeout=5000)
+    _open_path(page, str(arrange_pdf))
+    _wait_overlay_ready(page)
+    page.click(".pw-span-box:has-text('Alpha heading')")
+    page.wait_for_selector(_SELECTED, timeout=3000)
+    page.keyboard.press("Escape")  # unchanged text box: returns the keyboard to the page
+    page.keyboard.press("Escape")  # now on the page: deselects
+    assert page.query_selector(_SELECTED) is None
+    assert page.locator(".pw-move-handle").count() == 0
+    assert page.is_visible(".pw-inspector-empty")
+    assert page.is_disabled(".pw-align-select")
+
+
+@pytest.mark.feature("EDT-13")
+def test_escape_deselects_a_shape_and_an_image(page: Page, app_url: str, arrange_pdf: Path) -> None:
+    _open_arrange(page, app_url, arrange_pdf)
+    page.locator(".pw-shape-box").first.click()
+    page.wait_for_selector(".pw-shape-section:not([hidden])", timeout=3000)
+    page.keyboard.press("Escape")
+    assert page.locator(".pw-shape-box.pw-shape-selected").count() == 0
+    assert page.is_visible(".pw-inspector-empty")
+
+    page.click(".pw-image-box")
+    page.wait_for_selector(".pw-image-section:not([hidden])", timeout=3000)
+    page.keyboard.press("Escape")
+    assert page.locator(".pw-image-box.pw-image-selected").count() == 0
+    assert page.is_visible(".pw-inspector-empty")
+
+
+@pytest.mark.feature("EDT-13")
+def test_clicking_empty_page_deselects_a_shape_an_image_and_text(page: Page, app_url: str, arrange_pdf: Path) -> None:
+    _open_arrange(page, app_url, arrange_pdf)
+
+    page.locator(".pw-shape-box").first.click()
+    page.wait_for_selector(".pw-shape-section:not([hidden])", timeout=3000)
+    page.click(".pw-canvas-wrap canvas", position={"x": 2, "y": 2})
+    assert page.locator(".pw-shape-box.pw-shape-selected").count() == 0
+    assert page.is_visible(".pw-inspector-empty")
+
+    page.click(".pw-image-box")
+    page.wait_for_selector(".pw-image-section:not([hidden])", timeout=3000)
+    page.click(".pw-canvas-wrap canvas", position={"x": 2, "y": 2})
+    assert page.locator(".pw-image-box.pw-image-selected").count() == 0
+    assert page.is_visible(".pw-inspector-empty")
+
+    page.click(".pw-span-box:has-text('Alpha heading')")
+    page.wait_for_selector(_SELECTED, timeout=3000)
+    page.click(".pw-page-area", position={"x": 5, "y": 5})
+    assert page.query_selector(_SELECTED) is None
+    assert page.is_visible(".pw-inspector-empty")
+
+
+@pytest.mark.feature("EDT-13")
+def test_clicking_a_shape_clears_the_text_selection_so_duplicate_copies_only_the_shape(
+    page: Page, app_url: str, arrange_pdf: Path
+) -> None:
+    """The reported bug: a shape left invisibly selected while text was picked
+    with Shift+click or a fresh click meant Ctrl+D (or a move) acted on both."""
+    _open_arrange(page, app_url, arrange_pdf)
+    page.click(".pw-span-box:has-text('Alpha heading')")
+    page.wait_for_selector(_SELECTED, timeout=3000)
+
+    page.locator(".pw-shape-box").first.click()
+    page.wait_for_selector(".pw-shape-section:not([hidden])", timeout=3000)
+    assert page.query_selector(_SELECTED) is None  # the text highlight is gone, not just hidden
+
+    page.keyboard.press("Control+d")
+    page.wait_for_selector(".pw-history-entry:has-text('Copy 1 object')", timeout=10000)
+    assert page.locator(".pw-span-box:has-text('Alpha heading')").count() == 1  # text was never touched
+    assert page.locator(".pw-shape-box").count() == 4
+
+
+@pytest.mark.feature("EDT-09")
+def test_a_dragged_shape_is_still_visibly_selected_after_the_redraw(
+    page: Page, app_url: str, arrange_pdf: Path
+) -> None:
+    """Every redraw used to drop the shape tool's own highlight without
+    restoring it, even though the shared selection still held the shape --
+    selected, but invisibly, so a later Shift+click or Ctrl+D could sweep it
+    into a move or copy with something else."""
+    _open_arrange(page, app_url, arrange_pdf)
+    box = page.locator(".pw-shape-box").first
+    box.scroll_into_view_if_needed()  # _drag's raw mouse coords don't auto-scroll like .click() does
+    before = box.bounding_box()
+    _drag(page, ".pw-shape-box >> nth=0", 40, 0)
+    page.wait_for_selector(".pw-history-entry:has-text('Edit shape')", timeout=10000)
+    # However far the drag actually landed (smart guides may have snapped it), the
+    # point of this test is what's selected afterwards, not the exact end position.
+    page.wait_for_function(
+        "e => Math.abs(document.querySelector('.pw-shape-box').getBoundingClientRect().left - e) > 5",
+        arg=before["x"],
+        timeout=5000,
+    )
+    assert page.locator(".pw-shape-box.pw-shape-selected").count() == 1
+    assert page.is_visible(".pw-shape-section:not([hidden])")
+
+
+@pytest.mark.feature("EDT-13")
+def test_after_escape_a_shift_click_selects_only_that_word_no_stale_shape(
+    page: Page, app_url: str, arrange_pdf: Path
+) -> None:
+    _open_arrange(page, app_url, arrange_pdf)
+    page.locator(".pw-shape-box").first.click()
+    page.wait_for_selector(".pw-shape-section:not([hidden])", timeout=3000)
+    page.keyboard.press("Escape")
+
+    page.click(".pw-span-box:has-text('Beta note')", modifiers=["Shift"])
+    assert page.locator(".pw-span-box.pw-span-selected, .pw-arrange-outline").count() == 1
+    assert page.locator(".pw-shape-box.pw-shape-selected").count() == 0
+
+    page.keyboard.press("Control+d")
+    page.wait_for_selector(".pw-history-entry:has-text('Copy 1 object')", timeout=10000)
+    assert page.locator(".pw-shape-box").count() == 3  # the shape was never part of this
+
+
+@pytest.mark.feature("EDT-13")
+def test_a_plain_click_narrows_a_multi_selection_to_just_that_member(
+    page: Page, app_url: str, arrange_pdf: Path
+) -> None:
+    _open_arrange(page, app_url, arrange_pdf)
+    page.click(".pw-span-box:has-text('Alpha heading')")
+    page.click(".pw-span-box:has-text('Beta note')", modifiers=["Shift"])
+    assert page.locator(".pw-arrange-outline").count() == 2
+
+    page.click(".pw-span-box:has-text('Beta note')")  # a plain click, no drag
+    assert page.locator(".pw-arrange-outline").count() == 1  # just this one now, not both
+    assert page.query_selector(_SELECTED) is not None
+    assert page.input_value(_EDITOR) == "Beta note"
+
+
+@pytest.mark.feature("EDT-08")
+def test_delete_on_a_selected_image_is_exactly_one_history_entry(page: Page, app_url: str, image_pdf: Path) -> None:
+    """The reported risk: images.ts's own Delete handler and arrange.ts's
+    shared one could both fire for one keypress, each sending delete_image or
+    delete_objects -- two Ops, and the second could hit a different image
+    once indices shifted. Delete now goes through one shared path only."""
+    _open_image_pdf(page, app_url, image_pdf)
+    page.click(".pw-image-box")
+    page.wait_for_selector(".pw-image-section:not([hidden])", timeout=3000)
+    page.keyboard.press("Delete")
+    page.wait_for_selector(".pw-image-box", state="detached", timeout=5000)
+    assert page.locator(".pw-history-entry").count() == 1

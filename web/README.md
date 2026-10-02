@@ -110,11 +110,47 @@ font-resolution pipeline the CLI and server use (`engine.edit`), which
 
 Text is never edited on the page. Clicking a box selects it and puts the
 cursor in the inspector's **Edit text** textarea (`inspector.ts`); Enter or
-Apply commits, Esc or Revert restores the draft, and Esc in an unchanged
-textarea hands the keyboard back to the page. The boxes are not
+Apply commits and clears the selection (the empty panel's "Applied. Undo
+with Ctrl+Z." note takes its place, rather than the edited unit staying
+selected), Esc or Revert restores the draft, and Esc in an unchanged
+textarea hands the keyboard back to the page -- Esc again, now on the
+page, deselects (`viewer.ts`'s `deselectAll`). The boxes are not
 `contenteditable`, so there is no blur/cancel handling in `overlay.ts` to
-be careful with: clicking elsewhere keeps the draft, and choosing other
-text with an unapplied draft asks first.
+be careful with: clicking elsewhere deselects, asking first when there's
+an unapplied draft to lose, and so does choosing other text with one
+(owner's rule, 2026-10-01, replacing an earlier one that always kept it).
+
+## Selection rules, across text, images and shapes (2026-10-01)
+
+One click-driven bug report (a shape left selected while text was picked
+next moved and copied along with it) turned into a single rule, enforced
+in one place (`viewer.ts`'s `deselectAll` and `arrange.ts`'s
+`onSelectOnly`/`onActivate` callbacks) rather than scattered per tool:
+
+- A plain click on any object -- text, image or shape -- replaces the
+  selection with just that one, clearing the other kinds' own highlight,
+  handles and inspector panel, not just the shared outline underneath.
+  Shift+click (or Ctrl/Cmd+click) adds or removes; a plain click on one
+  member of an existing multi-selection narrows it down to that member.
+- Esc, or a plain click on empty page or the grey area around it,
+  deselects everything in one go. An unapplied text draft is confirmed
+  first (`overlay.confirmDiscard`); clicking the toolbar, the inspector or
+  the history panel never deselects, since none of them discard anything.
+- After a move, nudge, align, duplicate or paste, the object stays
+  selected -- visibly, through its own tool's highlight (`shapeTool.
+  selectIndex` / `imageTool.selectIndex` follow `arrange.sole()` after
+  every redraw), not only in the shared `arrange.ts` selection a `.
+  pw-arrange-outline` alone used to show. Before this fix, a shape or
+  image left `arrange`-selected after a redraw had no visible highlight at
+  all (shapes.ts/images.ts dropped their own selection on every `update()`
+  with nothing to restore it) -- selected, but invisibly, so a later
+  Shift+click, marquee or Ctrl+D could sweep it into a move or copy with
+  something else. `arrange.ts` now also re-finds a moved shape or image by
+  its own (stable) index, not just by how close its new rectangle is to
+  the old one -- the position guess alone missed any move made through
+  the object's own box (a drag, crop, replace or restyle), none of which
+  go through `arrange.ts`'s own `moveSelection`/`align`.
+- Applying a text/style edit, or deleting the selection, clears it instead.
 
 ## UI-04's history panel shows what was asked for, not how well it went
 

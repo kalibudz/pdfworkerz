@@ -2,8 +2,9 @@
  * EDT-13..EDT-15: one selection across text, images and shapes, and what
  * can be done with it, the way Nitro does it:
  *
- * - Click an object to select it; Shift+click adds or removes; drag on empty page
- *   to select everything inside a rectangle. Esc clears.
+ * - Click an object to select it; Shift+click or Ctrl/Cmd+click adds or removes; drag
+ *   on empty page to select everything inside a rectangle. Esc clears (viewer.ts, since
+ *   it has to clear the tool-level selections too, not just this shared one).
  * - Drag any selected object to move the whole selection; smart guides snap it to
  *   other objects and to the page (snap.ts). Hold Alt to drag without snapping.
  * - The Align menu aligns (left/center/right/top/middle/bottom) and distributes;
@@ -54,6 +55,15 @@ export interface ArrangeOptions {
   onCommitted: () => void;
   /** The selection changed (count), for the toolbar's Align menu. */
   onSelectionChange: (count: number) => void;
+  /** A plain click (no drag) landed on empty page: nothing under the pointer. */
+  onEmptyClick: () => void;
+  /** The selection just became exactly this one kind (a plain click through a tool's
+   * own box): the other kinds' tool-level selection (highlight, handles, inspector)
+   * should drop, since they're no longer part of what's selected. */
+  onSelectOnly: (kind: ObjectKind) => void;
+  /** A plain click (no drag) narrowed a multi-object selection down to this one:
+   * the owning tool should show its own highlight, handles and inspector for it. */
+  onActivate: (kind: ObjectKind, index: number) => void;
 }
 
 export interface ArrangeHandle {
@@ -75,8 +85,8 @@ export interface ArrangeHandle {
   snapper(kind: ObjectKind, index: number): DragSnapper;
   /** EDT-18: move one object by (dx, dy) page points, as a single-item move_objects. */
   move(kind: ObjectKind, index: number, dxPt: number, dyPt: number): void;
-  /** The indices of the selected text units. */
-  selectedText(): number[];
+  /** The one selected object's kind and index, or null unless exactly one is selected. */
+  sole(): { kind: ObjectKind; index: number } | null;
   count(): number;
   clear(): void;
   align(action: AlignAction): void;
@@ -104,6 +114,12 @@ interface Wanted {
   unit?: SelectMode;
   text?: string;
   origin?: [number, number];
+  /** Images and shapes keep the same index across an in-place edit (unlike a text
+   * unit's, which an edit can renumber), so it finds one reliably after a move too
+   * big, or too far from `pageRect`'s stale guess, for the position match below --
+   * a shape or image dragged through its own tool's box, rather than through this
+   * module's moveSelection/align, never updates `pageRect` to the new place at all. */
+  index?: number;
 }
 
 function unionBox(boxes: Box[]): Box {
@@ -294,6 +310,7 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
       unit: object.unit,
       text: object.text,
       origin: object.origin ? [object.origin[0] + dx, object.origin[1] + dy] : undefined,
+      index: object.kind === "text" ? undefined : object.index,
     };
   }
 
@@ -316,7 +333,9 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
     void send({ op: "move_objects", items: refs([object]), dx: dxPt, dy: dyPt }, [shifted(object, dxPt, dyPt)]);
   }
 
-  function groupDrag(event: MouseEvent): void {
+  /** A plain mousedown on a member of a 2+ selection: drags the whole group, unless
+   * released close to where it started, which narrows the selection to just this one. */
+  function groupDrag(event: MouseEvent, kind: ObjectKind, index: number): void {
     event.preventDefault();
     event.stopPropagation();
     const startX = event.clientX;
@@ -333,6 +352,8 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
       clearGuides();
       if (Math.hypot(dx, dy) < 3) {
         previewShift(0, 0);
+        selectOnly(kind, index);
+        options.onActivate(kind, index);
         return;
       }
       const [dxPt, dyPt] = toPoints(dx, dy);
@@ -347,14 +368,14 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
     if (!object || event.button !== 0) {
       return false;
     }
-    if (event.shiftKey) {
+    if (event.shiftKey || event.ctrlKey || event.metaKey) {
       event.preventDefault();
       event.stopPropagation();
       setSelection(isSelected(object) ? selected.filter((s) => key(s) !== key(object)) : [...selected, object]);
       return true;
     }
     if (selected.length > 1 && isSelected(object)) {
-      groupDrag(event);
+      groupDrag(event, kind, index);
       return true;
     }
     return false;
@@ -363,6 +384,7 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
   function selectOnly(kind: ObjectKind, index: number): void {
     const object = find(kind, index);
     setSelection(object ? [object] : []);
+    options.onSelectOnly(kind);
   }
 
   function snapper(kind: ObjectKind, index: number): DragSnapper {
@@ -454,10 +476,6 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
       setSelection([]);
       return true;
     }
-    if (event.key === "Escape") {
-      setSelection([]);
-      return true;
-    }
     const step = event.shiftKey ? 10 : 1;
     const arrows: Record<string, [number, number]> = {
       ArrowLeft: [-step, 0],
@@ -509,7 +527,7 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
       window.removeEventListener("mouseup", onUp);
       if (!band) {
         if (!e.shiftKey) {
-          setSelection([]); // a plain click on empty page
+          options.onEmptyClick(); // a plain click on empty page
         }
         return;
       }
@@ -573,8 +591,17 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
         (o) => o.kind === "text" && o.unit === w.unit && o.text === w.text && !!o.origin && near(o.origin, origin, ORIGIN_TOLERANCE_PT),
       );
     };
+    // An image or shape: by its own index, which an in-place edit never renumbers --
+    // the one way this reliably survives a move through the object's own tool (a drag
+    // on its box, or a crop/replace/restyle), none of which update `pageRect` here to
+    // match. Only when that fails (the object is gone) does the moved rectangle matter.
+    const byIndex = (w: Wanted): PageObject | undefined =>
+      w.kind === "text" || w.index === undefined ? undefined : objects.find((o) => o.kind === w.kind && o.index === w.index);
     const found = wanted
-      .map((w) => byText(w) ?? objects.find((o) => o.kind === w.kind && o.unit === w.unit && near(o.pageRect, w.pageRect)))
+      .map(
+        (w) =>
+          byText(w) ?? byIndex(w) ?? objects.find((o) => o.kind === w.kind && o.unit === w.unit && near(o.pageRect, w.pageRect)),
+      )
       .filter((o): o is PageObject => o !== undefined);
     setSelection([...new Map(found.map((o) => [key(o), o])).values()]);
   }
@@ -585,7 +612,7 @@ export function createArrange(options: ArrangeOptions): ArrangeHandle {
     selectOnly,
     snapper,
     move,
-    selectedText: () => selected.filter((o) => o.kind === "text").map((o) => o.index),
+    sole: () => (selected.length === 1 ? { kind: selected[0].kind, index: selected[0].index } : null),
     count: () => selected.length,
     clear: () => setSelection([]),
     align,

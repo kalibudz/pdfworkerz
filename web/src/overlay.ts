@@ -15,13 +15,16 @@
  * (move and resize for a block, move only for a line or word), and the
  * inspector's text editor (UI-03) takes the cursor, prefilled with the
  * unit's text and detected style. All typing happens there; clicking
- * elsewhere never discards it. Edits to the draft debounce into
- * PreviewTextOp calls for the live "Match" field; Apply (or Enter) commits
- * text and style together as one edit_text_unit Op (EDT-17) carrying
- * `expect_text` and only the fields that changed -- tried with the exact
- * font first, asking before anything weaker (approval.ts). The caller
- * reloads everything after a commit (`onCommitted`), and the edited unit is
- * selected again so edits can follow one another.
+ * elsewhere asks first when there's an unapplied draft to lose (owner's
+ * decision, 2026-10-01 -- this replaces the 2026-09-29 rule that clicking
+ * elsewhere always kept it), then deselects. Edits to the draft debounce
+ * into PreviewTextOp calls for the live "Match" field; Apply (or Enter)
+ * commits text and style together as one edit_text_unit Op (EDT-17)
+ * carrying `expect_text` and only the fields that changed -- tried with the
+ * exact font first, asking before anything weaker (approval.ts). The caller
+ * reloads everything after a commit (`onCommitted`); the selection clears
+ * rather than following the edited unit, so an "Applied" note takes the
+ * inspector's empty state instead.
  */
 
 import type * as pdfjsLib from "pdfjs-dist";
@@ -66,6 +69,13 @@ export interface OverlayHandle {
   /** Show the unit with this index as selected (the shared selection landed
    * on it after a move or a copy). The keyboard stays where it is. */
   selectIndex(index: number): void;
+  /** Nothing selected without being highlighted: clear this unit's selection,
+   * its handles and the inspector. */
+  deselect(): void;
+  /** True at once when there's nothing to lose. With an unapplied draft, asks
+   * "Discard your unapplied change to…?" first and returns whether to proceed --
+   * on "no", the editor is refocused and false comes back. */
+  confirmDiscard(): boolean;
   /** EDT-07: arm the format painter with the selected unit's first span as
    * its source; the next text clicked (on any page) gets its style.
    * A no-op when nothing is selected, and in Word mode. */
@@ -126,15 +136,7 @@ function overlaps(a: readonly number[], b: readonly number[]): boolean {
   return a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
 }
 
-function overlapArea(a: readonly number[], b: readonly number[]): number {
-  const width = Math.min(a[2], b[2]) - Math.max(a[0], b[0]);
-  const height = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
-  return Math.max(0, width) * Math.max(0, height);
-}
-
 const PREVIEW_DEBOUNCE_MS = 300;
-/** After a commit, the edited unit is the one with the new text whose origin is this close. */
-const RESELECT_ORIGIN_PT = 0.5;
 const UNIT_NOUNS: Record<SelectMode, string> = { block: "paragraph", line: "line", word: "word" };
 
 function approximateFontFamily(fontName: string): string {
@@ -200,8 +202,9 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let latestRequestId = 0;
   let committing = false;
-  /** After a commit reloads the page: select the edited unit again, found by its new text and place. */
-  let reselectAfterCommit: UnitRef | null = null;
+  /** A text/style edit just committed: the next update() clears the selection
+   * instead of trying to keep it, and shows an "Applied" note in the empty panel. */
+  let justApplied = false;
   /** EDT-07: armed format painter source. Survives page changes and
    * update() (cross-page painting is supported); cleared once applied or
    * cancelled, and on any document change, which makes its index stale. */
@@ -403,6 +406,12 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }
   });
 
+  /** Clears only this tool's own highlight and handles -- never the inspector, since a
+   * caller may invoke this right after another tool (image, shape) has already put its
+   * own panel up, which must survive. Whoever wants the resting empty state calls
+   * `options.inspector.showEmpty()` itself (update()'s own "nothing kept" path does,
+   * and so does every caller below that isn't immediately replacing this with a
+   * different panel of its own, such as the format painter's). */
   function clearSelection(): void {
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
@@ -412,7 +421,6 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     selectedBox = null;
     selected = null;
     removeHandles();
-    options.inspector.showEmpty();
   }
 
   function queuePreview(pageIndex: number, spanIndex: number, text: string): void {
@@ -507,7 +515,8 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       options.inspector.focusEditor();
       return;
     }
-    reselectAfterCommit = { ...unit, text: draft.text };
+    justApplied = true;
+    options.arrange?.clear();
     options.onCommitted();
   }
 
@@ -542,6 +551,17 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     previewDraft(options.inspector.draft());
   }
 
+  function confirmDiscard(): boolean {
+    if (!selected || !options.inspector.isDirty()) {
+      return true;
+    }
+    if (!window.confirm(`Discard your unapplied change to “${selected.text}”?`)) {
+      options.inspector.focusEditor();
+      return false;
+    }
+    return true;
+  }
+
   function onUnitClick(position: number, event: MouseEvent): void {
     const unit = pageUnits[position];
     if (painterSource) {
@@ -554,13 +574,10 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     }
     const same =
       selected?.pageIndex === currentPageIndex && selected.unit === unit.granularity && selected.index === unit.index;
-    if (!same && options.inspector.isDirty() && selected) {
-      if (!window.confirm(`Discard your unapplied change to “${selected.text}”?`)) {
-        options.inspector.focusEditor();
+    if (!same) {
+      if (!confirmDiscard()) {
         return;
       }
-    }
-    if (!same) {
       select(position, false);
     }
     options.inspector.focusEditor();
@@ -574,11 +591,13 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     links: LinkInfo[] = [],
   ): void {
     // A zoom or re-render of the same page keeps the selection and its draft when the
-    // unit is still there, unchanged; after a commit the edited unit is found by its
-    // new text. Anything else (another page, the text changed underneath) clears it.
+    // unit is still there, unchanged. A just-applied edit clears it instead, even when
+    // the same text is still there (a style-only change): the edit is done, and an
+    // "Applied" note takes the empty panel's place. Anything else (another page, the
+    // text changed underneath) also clears it.
     const previous = selected;
-    const reselect = reselectAfterCommit;
-    reselectAfterCommit = null;
+    const applied = justApplied;
+    justApplied = false;
     removeHandles();
     selectedBox = null;
     selected = null;
@@ -646,41 +665,14 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
       boxes.push(box);
     }
 
-    const near = (a: readonly number[], b: readonly number[]): boolean =>
-      Math.abs(a[0] - b[0]) <= RESELECT_ORIGIN_PT && Math.abs(a[1] - b[1]) <= RESELECT_ORIGIN_PT;
-    if (reselect && reselect.pageIndex === pageIndex && units[0]?.granularity === reselect.unit) {
-      // The edited unit: its new text at the same origin. A word edited into several
-      // words is now several units: the first of them, at the edit's origin. If the
-      // redraw moved the first glyph (a centered line, a leading space), the unit that
-      // overlaps where it was and starts nearest to its old origin.
-      const wanted = reselect.unit === "word" ? (reselect.text.trim().split(/\s+/)[0] ?? "") : reselect.text;
-      let found = units.findIndex((u) => u.text === wanted && near(u.origin, reselect.origin));
-      if (found < 0) {
-        let best = Infinity;
-        for (const [position, unit] of units.entries()) {
-          const distance = Math.hypot(unit.origin[0] - reselect.origin[0], unit.origin[1] - reselect.origin[1]);
-          if (overlapArea(unit.bbox, reselect.bbox) > 0 && distance < best) {
-            best = distance;
-            found = position;
-          }
-        }
-      }
-      if (found >= 0) {
-        select(found, false);
-        options.inspector.setStatus("Applied. Undo with Ctrl+Z.");
-      } else {
-        options.inspector.showEmpty();
-      }
-      return;
-    }
     const kept =
-      previous && previous.pageIndex === pageIndex && !reselect
+      !applied && previous && previous.pageIndex === pageIndex
         ? units.findIndex((u) => u.granularity === previous.unit && u.index === previous.index && u.text === previous.text)
         : -1;
     if (kept >= 0) {
       select(kept, true);
     } else {
-      options.inspector.showEmpty();
+      options.inspector.showEmpty(applied ? "Applied. Undo with Ctrl+Z." : undefined);
     }
   }
 
@@ -705,6 +697,8 @@ export function createOverlay(layer: HTMLElement, options: OverlayOptions): Over
     setMode,
     selectedIndex: () => selected?.index ?? null,
     selectIndex,
+    deselect: clearSelection,
+    confirmDiscard,
     armPainter,
     cancelPainter: disarmPainter,
     addLink,

@@ -304,7 +304,12 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     api: options.api,
     documentId: options.documentId,
     currentPage: () => currentPage - 1,
-    onApplied: () => reloadDocument(),
+    onApplied: async () => {
+      // A command-bar edit can touch arbitrary content elsewhere on the page:
+      // whatever was selected before it may no longer mean the same thing.
+      deselectAll({ ask: false });
+      await reloadDocument();
+    },
     title: options.title,
   });
   root.append(toolbar, commandBar.element, body, historyPanel, shortcutsDialog);
@@ -346,6 +351,28 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
         option.disabled = option.value.startsWith("distribute") && count < 3;
       }
     },
+    onEmptyClick: () => deselectAll({ ask: true }),
+    // A plain click through one tool's own box replaces the selection with just that
+    // object: the other two kinds' tool-level highlight, handles and inspector are no
+    // longer part of what's selected, so they drop (owner, 2026-10-01 -- previously a
+    // shape or image left selected this way stayed invisibly selected, and a later
+    // Shift+click, marquee or Ctrl+D could sweep it into a move or copy with it).
+    onSelectOnly: (kind) => {
+      if (kind !== "text") overlay.deselect();
+      if (kind !== "image") imageTool.deselect();
+      if (kind !== "shape") shapeTool.deselect();
+    },
+    // A plain click narrowed a multi-object selection down to one member: that one
+    // object's own tool shows its highlight, handles and inspector for it.
+    onActivate: (kind, index) => {
+      if (kind === "text") {
+        overlay.selectIndex(index);
+      } else if (kind === "shape") {
+        shapeTool.selectIndex(index);
+      } else {
+        imageTool.selectIndex(index);
+      }
+    },
   });
   const overlay = createOverlay(editLayer, {
     arrange,
@@ -368,6 +395,7 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     documentId: options.documentId,
     inspector,
     onCommitted: () => void reloadDocument(),
+    confirmDiscard: () => overlay.confirmDiscard(),
   });
   const imageTool = createImageTool(editLayer, {
     arrange,
@@ -375,13 +403,41 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     documentId: options.documentId,
     inspector,
     onCommitted: () => void reloadDocument(),
+    confirmDiscard: () => overlay.confirmDiscard(),
   });
   const history = createHistoryPanel(historyPanel, {
     api: options.api,
     documentId: options.documentId,
-    onChanged: () => void reloadDocument(),
+    onChanged: () => {
+      // UI-04: jumping through history doesn't try to carry a selection along --
+      // whatever was selected before the jump may no longer mean the same thing.
+      deselectAll({ ask: false });
+      void reloadDocument();
+    },
   });
   const compare = createComparePanel({ api: options.api, documentId: options.documentId });
+
+  /** Clear every selection -- the shared one and each tool's own -- in one go, so
+   * nothing is ever left selected in one place and not another. With `ask`, an
+   * unapplied text draft is confirmed first (and the editor refocused on "no"). */
+  function deselectAll(opts: { ask: boolean }): void {
+    if (opts.ask && !overlay.confirmDiscard()) {
+      return;
+    }
+    overlay.deselect();
+    shapeTool.deselect();
+    imageTool.deselect();
+    arrange.clear();
+    inspector.showEmpty();
+  }
+
+  // Clicking the grey area around the page (inside .pw-page-area but outside the
+  // canvas it wraps) deselects, the same as a plain click on empty page itself.
+  pageArea.addEventListener("mousedown", (event) => {
+    if (event.target === pageArea) {
+      deselectAll({ ask: true });
+    }
+  });
 
   const renderer = new PageRenderer();
   let pdf: PdfDocument | null = null;
@@ -413,7 +469,12 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
     storeSelectMode(next);
     showSelectMode();
     overlay.setMode(next);
+    // EDT-16: changing mode drops every kind of selection, not just text's -- none of
+    // them mean the same thing once the page redraws in the new granularity.
+    shapeTool.deselect();
+    imageTool.deselect();
     arrange.clear();
+    inspector.showEmpty();
     await renderCurrentPage();
   }
   showSelectMode();
@@ -468,16 +529,21 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
       shapeTool.update(pageIndex, shapes, viewport);
       imageTool.update(pageIndex, images, viewport);
       arrange.update(pageIndex, viewport, units, images, shapes);
-      // The inspector follows the shared selection: a moved or copied unit may have a new
-      // index, and a just-edited unit should answer to the arrow keys and Delete.
-      const texts = arrange.selectedText();
-      if (texts.length === 1 && arrange.count() === 1 && overlay.selectedIndex() !== texts[0] && !inspector.isDirty()) {
-        overlay.selectIndex(texts[0]);
-      } else if (arrange.count() === 0) {
-        const index = overlay.selectedIndex();
-        if (index !== null) {
-          arrange.selectOnly("text", index);
+      // Nothing is ever selected without being highlighted: whatever arrange.update just
+      // found again (a moved or copied object answers to the arrow keys and Delete) gets
+      // its own tool's highlight, handles and inspector too, not just the shared outline.
+      const sole = arrange.sole();
+      if (sole?.kind === "text") {
+        if (overlay.selectedIndex() !== sole.index) {
+          overlay.selectIndex(sole.index);
         }
+      } else if (sole?.kind === "shape") {
+        shapeTool.selectIndex(sole.index);
+      } else if (sole?.kind === "image") {
+        imageTool.selectIndex(sole.index);
+      } else if (arrange.count() === 0 && overlay.selectedIndex() !== null && !inspector.isDirty()) {
+        overlay.deselect();
+        inspector.showEmpty();
       }
       await spellTool.update(pageIndex, viewport);
     }
@@ -726,6 +792,17 @@ export async function renderViewer(container: HTMLElement, options: ViewerOption
       shapeTool.setDrawMode(null);
       return;
     }
+    // The format painter's own Escape (overlay.ts, registered before this handler)
+    // already ran and called preventDefault: this Escape cancels the painter, not
+    // the selection. Otherwise, with focus on the page (isTypingTarget above has
+    // already ruled out the text editor), Escape always deselects -- nothing to
+    // revert or hand the keyboard back from, since that already happened in the
+    // editor's own Escape handling before focus could get here (inspector.ts).
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      event.preventDefault();
+      deselectAll({ ask: false });
+      return;
+    }
     if (arrange.handleKey(event)) {
       event.preventDefault();
       return;
@@ -806,7 +883,7 @@ const SHORTCUTS: readonly [string, string][] = [
   ["C", "Before/after compare view"],
   ["B / L / W", "Click selects a whole block / a line / a word"],
   ["Enter", "Commit the text being edited"],
-  ["Esc", "Discard an edit, cancel a tool, close a menu; in an unchanged text box, return the keyboard to the page"],
+  ["Esc", "Discard an edit, cancel a tool, close a menu; in an unchanged text box, return the keyboard to the page; press again to deselect"],
   ["Shift+click / drag on empty page", "Select several objects"],
   ["Arrows / Shift+Arrows", "Nudge the selection 1pt / 10pt (page navigation when nothing is selected)"],
   ["Ctrl+C / Ctrl+V / Ctrl+D", "Copy / paste onto this page / duplicate the selection"],

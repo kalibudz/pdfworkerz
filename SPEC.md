@@ -503,17 +503,18 @@ Every feature has a stable ID. The table below is **generated** from `tracker/fe
 
 ### 8.2 Click-to-edit
 
-1. Hovering shows span boxes. Clicking selects the span and puts the caret in the inspector's **Edit text** box, prefilled with the span's text and its detected style: the original font (the default), size, color, bold and italic. All typing happens there, never on the page (owner's decision, 2026-09-29): clicking elsewhere keeps the draft, and choosing other text with an unapplied draft asks first.
+1. Hovering shows span boxes. Clicking selects the span and puts the caret in the inspector's **Edit text** box, prefilled with the span's text and its detected style: the original font (the default), size, color, bold and italic. All typing happens there, never on the page. Clicking elsewhere deselects; with an unapplied draft, that asks first, and so does choosing other text (owner's decision, 2026-10-01, replacing 2026-09-29's "clicking elsewhere always keeps the draft").
 2. The inspector shows the detected style and the match tier (Exact / High / Approximate / Low), live as the draft changes.
-3. Pressing Enter (or Apply) commits text and style together as one `edit_span` Op: one history entry, one undo. The edited span stays selected. Escape (or Revert) restores the draft. A weaker tier than Exact asks for confirmation first.
+3. Pressing Enter (or Apply) commits text and style together as one `edit_span` Op: one history entry, one undo. The selection clears -- the edit is done, and the empty panel shows "Applied. Undo with Ctrl+Z." in its place, rather than the edited span staying selected. Escape (or Revert) restores the draft. A weaker tier than Exact asks for confirmation first.
 4. Selecting a block exposes move, resize, reflow, style change and format painter. Images and shapes offer replace, crop, resize and delete.
 5. Arranging objects, Nitro-style (EDT-13..15, owner's request 2026-09-30):
-   - **Selection:** text blocks, images and shapes share one selection. Shift+click adds or removes an object; dragging on empty page selects everything inside the rectangle.
+   - **Selection:** text blocks, images and shapes share one selection, and a plain click on any one of them replaces it -- selecting a shape, say, clears whatever text was selected, visibly, not just underneath its own panel (owner's fix, 2026-10-01). Shift+click (or Ctrl/Cmd+click) adds or removes an object; dragging on empty page selects everything inside the rectangle. A plain click on one member of a multi-object selection, without dragging, narrows the selection down to just that one.
+   - **Deselecting:** Esc, or a plain click on empty page or the grey area around it, deselects everything -- the shared selection and each tool's own highlight, handles and inspector panel together, never just one of them. An unapplied text draft is confirmed first; clicking the toolbar, the inspector or the history panel never deselects.
    - **Guides:** dragging snaps to other objects' edges and centers, and to the page's edges, margins and center, with guide lines shown. Holding Alt turns snapping off.
    - **Align:** the Align menu aligns left, center, right, top, middle or bottom, or distributes evenly. A single object aligns to the page.
-   - **Keys:** arrows nudge 1pt (10pt with Shift). Ctrl+C, Ctrl+V and Ctrl+D copy, paste and duplicate, and Delete removes.
-   - **Undo:** each action is one Op (`move_objects`, `duplicate_objects` or `delete_objects`), so one undo reverses it.
-   - **Text editing:** clicking text still puts the cursor in the inspector. Esc in an unchanged text box hands the keyboard back to the page.
+   - **Keys:** arrows nudge 1pt (10pt with Shift). Ctrl+C, Ctrl+V and Ctrl+D copy, paste and duplicate, and Delete removes -- one shared path for every kind, so Delete on an image is never two Ops.
+   - **Undo:** each action is one Op (`move_objects`, `duplicate_objects` or `delete_objects`), so one undo reverses it. After a move, nudge, align, duplicate or paste, the object stays selected and visibly highlighted by its own tool, not just in the shared outline; an undo or redo clears the selection instead, since what it jumps to may no longer mean the same thing.
+   - **Text editing:** clicking text still puts the cursor in the inspector. Esc in an unchanged text box hands the keyboard back to the page; Esc again, now on the page, deselects.
 6. Selection mode, Nitro-style (EDT-16..19, owner's request 2026-09-30):
    - **Modes:** a toolbar toggle, **Block | Line | Word** (keys B, L and W), decides what one click selects. The default is Line, and the last choice is remembered per browser. Changing mode clears the selection.
    - **Parity:** every mode supports everything the others do: edit text and style in the inspector, drag, nudge, align, copy, paste, duplicate and delete. Each action is one Op and one undo.

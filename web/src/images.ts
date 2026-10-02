@@ -22,6 +22,9 @@ export interface ImageToolOptions {
   documentId: string;
   inspector: InspectorHandle;
   onCommitted: () => void;
+  /** Before selecting this image away from whatever (text) is selected now:
+   * true to proceed, false (after asking) to leave things as they are. */
+  confirmDiscard?: () => boolean;
 }
 
 export interface ImageToolHandle {
@@ -32,6 +35,12 @@ export interface ImageToolHandle {
   act(action: ImageAction): void;
   /** Prompt for an image file and place it in the middle of the current page. */
   insert(): void;
+  /** Show this image (by index) as selected -- the shared selection landed on
+   * it (after a move, a copy, or just a redraw that found it again). */
+  selectIndex(index: number): void;
+  /** Nothing selected without being highlighted: clear this image's
+   * selection, its handle and the inspector. */
+  deselect(): void;
 }
 
 /** A file picker, resolved with the chosen file's bytes as base64 (or null). */
@@ -67,6 +76,7 @@ export function createImageTool(layer: HTMLElement, options: ImageToolOptions): 
   let viewport: pdfjsLib.PageViewport | null = null;
   let selected: { image: ImageInfo; box: HTMLElement } | null = null;
   let cropping = false;
+  let currentImages: ImageInfo[] = [];
 
   async function send(op: HistoryOp): Promise<void> {
     try {
@@ -133,6 +143,7 @@ export function createImageTool(layer: HTMLElement, options: ImageToolOptions): 
     deselect();
     pageIndex = nextPageIndex;
     viewport = nextViewport;
+    currentImages = images;
     for (const image of images) {
       const rect = bboxToRect(nextViewport, image.rect);
       const box = document.createElement("div");
@@ -147,8 +158,15 @@ export function createImageTool(layer: HTMLElement, options: ImageToolOptions): 
           return;
         }
         if (selected?.box !== box) {
-          select(image, box);
+          if (options.confirmDiscard && !options.confirmDiscard()) {
+            return;
+          }
+          // selectOnly first: it clears the other tools' own selections (overlay's
+          // among them, which also resets the inspector to empty) before select()
+          // below shows this image there -- the other order let that reset run
+          // *after* and wipe out the inspector content select() had just shown.
           options.arrange?.selectOnly("image", image.index);
+          select(image, box);
         }
         if (cropping) {
           startCropDrag(image, event);
@@ -209,25 +227,24 @@ export function createImageTool(layer: HTMLElement, options: ImageToolOptions): 
     });
   }
 
+  function selectIndex(index: number): void {
+    const image = currentImages.find((i) => i.index === index);
+    const box = layer.querySelector<HTMLElement>(`.pw-image-box[data-index="${index}"]`);
+    if (image && box) {
+      select(image, box);
+    }
+  }
+
   // Clicking anywhere in the layer that isn't the selected image (or its
   // handle) drops the selection -- including clicking a span to edit it.
+  // Delete and Escape go through arrange.ts/viewer.ts instead (one shared
+  // path for every kind, so Delete on a selected image is one Op, not two).
   layer.addEventListener("mousedown", (event) => {
     const target = event.target as HTMLElement;
     if (selected && !target.closest(".pw-image-box, .pw-object-resize")) {
       deselect();
     }
   });
-  window.addEventListener("keydown", (event) => {
-    const target = event.target as HTMLElement | null;
-    const typing = target && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA");
-    if (selected && !typing && (event.key === "Delete" || event.key === "Backspace")) {
-      event.preventDefault();
-      act("delete");
-    } else if (selected && event.key === "Escape") {
-      deselect();
-      options.inspector.showEmpty();
-    }
-  });
 
-  return { update, act, insert };
+  return { update, act, insert, selectIndex, deselect };
 }

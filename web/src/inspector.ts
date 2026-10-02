@@ -21,6 +21,7 @@ export interface TextDraft extends StyleChoice {
 }
 
 const UNIT_LABELS: Record<SelectMode, string> = { block: "Block", line: "Line", word: "Word" };
+const EMPTY_HINT = "Click text on the page to inspect it. Block, Line or Word in the toolbar decides how much one click selects.";
 
 /** EDT-16: the style fields that are not the same across every one of `spans`. */
 export function mixedStyleFields(spans: SpanTrace[]): StyleField[] {
@@ -35,8 +36,9 @@ export function mixedStyleFields(spans: SpanTrace[]): StyleField[] {
 }
 
 export interface InspectorHandle {
-  /** Nothing selected -- the panel's resting state. */
-  showEmpty(): void;
+  /** Nothing selected -- the panel's resting state. `note` replaces the usual
+   * hint once (e.g. "Applied. Undo with Ctrl+Z." right after a commit). */
+  showEmpty(note?: string): void;
   /** EDT-16: a unit of text (block, line or word) was just selected, before any
    * preview has come back for it. `spans` are the unit's own spans, first one
    * first: the editor starts from the unit's text and the first span's style,
@@ -179,12 +181,12 @@ export function createInspector(container: HTMLElement, options: InspectorOption
   container.appendChild(heading);
 
   const empty = document.createElement("p");
-  empty.className = "pw-hint";
-  empty.textContent = "Click text on the page to inspect it. Block, Line or Word in the toolbar decides how much one click selects.";
+  empty.className = "pw-hint pw-inspector-empty";
+  empty.textContent = EMPTY_HINT;
   container.appendChild(empty);
 
   // UI-03: the text editor. Clicking a span puts the cursor here; nothing typed is lost
-  // by clicking elsewhere -- only Revert, Esc, or choosing different text discards it.
+  // by clicking elsewhere with an unapplied draft -- that asks first (owner, 2026-10-01).
   const editor = document.createElement("div");
   editor.className = "pw-edit-section";
   editor.hidden = true;
@@ -610,8 +612,9 @@ export function createInspector(container: HTMLElement, options: InspectorOption
     setStatus(null);
   }
 
-  function showEmpty(): void {
+  function showEmpty(note?: string): void {
     hideEditor();
+    empty.textContent = note ?? EMPTY_HINT;
     empty.hidden = false;
     fields.hidden = true;
     actions.hidden = true;
