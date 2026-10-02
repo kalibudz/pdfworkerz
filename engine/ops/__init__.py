@@ -48,6 +48,7 @@ from engine.ops.images import (
 from engine.ops.layout import BookletOp, CropPagesOp, NUpOp, ResizePagesOp, UncropPagesOp
 from engine.ops.links import AddLinkOp, PageLinksOp, RemoveLinkOp, UpdateLinkOp
 from engine.ops.objects import DeleteObjectsOp, DuplicateObjectsOp, MoveObjectsOp, PageBlocksOp
+from engine.ops.ocr import OcrLanguagesOp, OcrOp
 from engine.ops.pages import (
     DeletePagesOp,
     DuplicatePagesOp,
@@ -63,6 +64,8 @@ from engine.ops.pages import (
 )
 from engine.ops.protect import RemovePasswordOp, SetPasswordOp, SetPermissionsOp
 from engine.ops.redact import FindRedactionCandidatesOp, RedactAreasOp, SanitizeOp
+from engine.ops.scanned import EditScannedTextOp, EstimateScannedStyleOp, ScannedLinesOp
+from engine.ops.scanprep import CleanScanOp
 from engine.ops.shapes import DeleteShapeOp, DrawShapeOp, EditShapeOp, PageShapesOp
 from engine.ops.sign import DocumentSignatureStatusOp, SignDocumentOp, ValidateSignaturesOp
 from engine.ops.signatures import PlaceSignatureOp
@@ -110,6 +113,7 @@ __all__ = [
     "BatchOp",
     "BatesOp",
     "BookletOp",
+    "CleanScanOp",
     "ContentsPageOp",
     "CorrectWordOp",
     "CreateFieldOp",
@@ -129,8 +133,10 @@ __all__ = [
     "DuplicateObjectsOp",
     "DuplicatePagesOp",
     "EditFieldOp",
+    "EditScannedTextOp",
     "EditShapeOp",
     "EditSpanOp",
+    "EstimateScannedStyleOp",
     "ExportFormDataOp",
     "ExtractAttachmentOp",
     "ExtractPagesOp",
@@ -157,6 +163,8 @@ __all__ = [
     "MoveObjectsOp",
     "MovePagesOp",
     "NUpOp",
+    "OcrLanguagesOp",
+    "OcrOp",
     "Op",
     "PageAnnotationsOp",
     "PageBlocksOp",
@@ -182,6 +190,7 @@ __all__ = [
     "RestyleTextOp",
     "RotatePagesOp",
     "SanitizeOp",
+    "ScannedLinesOp",
     "SetBookmarksOp",
     "SetLayerVisibilityOp",
     "SetMetadataOp",

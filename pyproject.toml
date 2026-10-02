@@ -29,6 +29,10 @@ dependencies = [
   "cryptography==50.0.2",
   "pyhanko==0.37.0",
   "opencv-python-headless==5.0.0.93",
+  "openpyxl==3.1.5",
+  "python-pptx==1.0.2",
+  "pdf2docx==0.5.13",
+  "markdown-it-py==4.2.0",
 ]
 
 [project.scripts]
@@ -80,7 +84,7 @@ mypy_path = "tools"
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["fitz.*", "pymupdf.*", "pikepdf.*", "fontTools.*", "reportlab.*", "spylls.*", "cv2.*", "pyhanko.*", "pyhanko_certvalidator.*", "asn1crypto.*", "oscrypto.*"]
+module = ["fitz.*", "pymupdf.*", "pikepdf.*", "fontTools.*", "reportlab.*", "spylls.*", "cv2.*", "pyhanko.*", "pyhanko_certvalidator.*", "asn1crypto.*", "oscrypto.*", "openpyxl.*", "pdf2docx.*"]
 ignore_missing_imports = true
 
 # pymupdf and pikepdf ship partial, inconsistent type stubs (some methods carry

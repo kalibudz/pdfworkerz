@@ -4169,6 +4169,66 @@
     },
     {
       "additionalProperties": false,
+      "description": "Recognise the text on scanned pages and add it as an invisible layer (OCR-01).",
+      "properties": {
+        "op": {
+          "const": "ocr",
+          "default": "ocr",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Indices"
+        },
+        "language": {
+          "default": "eng",
+          "title": "Language",
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "title": "Force",
+          "type": "boolean"
+        },
+        "dpi": {
+          "default": 300,
+          "maximum": 600,
+          "minimum": 72,
+          "title": "Dpi",
+          "type": "integer"
+        }
+      },
+      "title": "OcrOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The OCR languages that are installed (OCR-02). Read-only, never journaled.",
+      "properties": {
+        "op": {
+          "const": "ocr_languages",
+          "default": "ocr_languages",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "title": "OcrLanguagesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "ORG-01: add every page of another PDF, at the end or before page index `at`.",
       "properties": {
         "op": {
@@ -4854,6 +4914,274 @@
         }
       },
       "title": "SanitizeOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The lines of text OCR finds on a scanned page (EDT-12): what a person picks to edit.",
+      "properties": {
+        "op": {
+          "const": "scanned_lines",
+          "default": "scanned_lines",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "language": {
+          "default": "eng",
+          "title": "Language",
+          "type": "string"
+        },
+        "dpi": {
+          "default": 300,
+          "maximum": 600,
+          "minimum": 72,
+          "title": "Dpi",
+          "type": "integer"
+        }
+      },
+      "title": "ScannedLinesOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "How the text inside ``rect`` on a scanned page was typeset (FNT-16).",
+      "properties": {
+        "op": {
+          "const": "estimate_scanned_style",
+          "default": "estimate_scanned_style",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "rect": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Rect",
+          "type": "array"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        }
+      },
+      "required": [
+        "rect"
+      ],
+      "title": "EstimateScannedStyleOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Replace the text inside ``rect`` on a scanned page with ``new_text``, drawn in the style\nestimated from the old text. Any style field given overrides the estimate.",
+      "properties": {
+        "op": {
+          "const": "edit_scanned_text",
+          "default": "edit_scanned_text",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_index": {
+          "default": 0,
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "rect": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Rect",
+          "type": "array"
+        },
+        "new_text": {
+          "title": "New Text",
+          "type": "string"
+        },
+        "old_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Old Text"
+        },
+        "font_class": {
+          "anyOf": [
+            {
+              "enum": [
+                "sans",
+                "serif",
+                "mono"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font Class"
+        },
+        "bold": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bold"
+        },
+        "italic": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Italic"
+        },
+        "size_pt": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 400,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Pt"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        }
+      },
+      "required": [
+        "rect",
+        "new_text"
+      ],
+      "title": "EditScannedTextOp",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Rotate upright, deskew and denoise the scanned pages. Each step can be switched off.",
+      "properties": {
+        "op": {
+          "const": "clean_scan",
+          "default": "clean_scan",
+          "title": "Op",
+          "type": "string"
+        },
+        "page_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Indices"
+        },
+        "rotate": {
+          "default": true,
+          "title": "Rotate",
+          "type": "boolean"
+        },
+        "straighten": {
+          "default": true,
+          "title": "Straighten",
+          "type": "boolean"
+        },
+        "remove_noise": {
+          "default": true,
+          "title": "Remove Noise",
+          "type": "boolean"
+        }
+      },
+      "title": "CleanScanOp",
       "type": "object"
     },
     {

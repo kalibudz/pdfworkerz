@@ -79,3 +79,21 @@ class FontResourceNotFoundError(PdfWorkerzError):
 class RedactionVerificationError(PdfWorkerzError):
     """SEC-11: after a redaction, re-extracting the saved content still found something
     inside a redacted area -- the redaction did not really remove what it claimed to."""
+
+
+class MissingToolError(PdfWorkerzError):
+    """A feature needs an external program (Tesseract, LibreOffice, Ghostscript) that isn't
+    installed. The message names it and says how to install it; nothing was changed."""
+
+    def __init__(self, tool: str, message: str) -> None:
+        super().__init__(message)
+        self.tool = tool
+
+
+class ConversionError(PdfWorkerzError):
+    """A conversion (to or from PDF) could not be done: the input is not what its name
+    claims, or the converter failed. The message says why; nothing was written."""
+
+
+class OcrError(PdfWorkerzError):
+    """OCR (or an edit that depends on it) could not be done on this input."""
