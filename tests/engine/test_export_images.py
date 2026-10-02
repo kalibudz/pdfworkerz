@@ -33,7 +33,7 @@ def _three_pages() -> Document:
 @pytest.mark.parametrize(("fmt", "magic"), [("png", b"\x89PNG"), ("jpg", b"\xff\xd8\xff"), ("tiff", b"II*\x00")])
 def test_pages_export_in_each_format_one_file_per_page(fmt: str, magic: bytes) -> None:
     files = pages_to_images(_three_pages(), fmt=fmt, dpi=72)  # type: ignore[arg-type]
-    assert [f.name for f in files] == [f"page-{n}.{fmt}" for n in (1, 2, 3)]
+    assert [f.name for f in files] == [f"document-page-{n}.{fmt}" for n in (1, 2, 3)]
     assert all(f.data.startswith(magic) for f in files)
     assert all(Image.open(io.BytesIO(f.data)).size == (400, 300) for f in files)
 
@@ -41,7 +41,7 @@ def test_pages_export_in_each_format_one_file_per_page(fmt: str, magic: bytes) -
 @pytest.mark.feature("CVF-04", criterion=2)
 def test_a_page_range_limits_the_export_and_a_bad_page_is_refused() -> None:
     document = _three_pages()
-    assert [f.name for f in pages_to_images(document, [2, 0], dpi=72)] == ["page-3.png", "page-1.png"]
+    assert [f.name for f in pages_to_images(document, [2, 0], dpi=72)] == ["document-page-3.png", "document-page-1.png"]
     with pytest.raises(OpValidationError, match="page 4 is outside"):
         pages_to_images(document, [3])
     with pytest.raises(OpValidationError, match="dpi"):

@@ -66,9 +66,9 @@ def pages_to_images(
     fmt: ImageFormat = "png",
     dpi: int = 150,
     single_tiff: bool = False,
-    stem: str = "page",
+    stem: str = "document",
 ) -> list[ExportedFile]:
-    """One file per page, named ``page-1.png`` (by the page's own number). With
+    """One file per page, named ``document-page-1.png`` (by the page's own number). With
     ``single_tiff``, one multi-page TIFF holding them all."""
     if not MIN_DPI <= dpi <= MAX_DPI:
         raise OpValidationError(f"dpi must be between {MIN_DPI} and {MAX_DPI}")
@@ -86,10 +86,10 @@ def pages_to_images(
         pictures[0].save(
             buffer, format="TIFF", save_all=True, append_images=pictures[1:], compression="tiff_lzw", dpi=(dpi, dpi)
         )
-        return [ExportedFile(f"{stem}s.tiff", buffer.getvalue())]
+        return [ExportedFile(f"{stem}.tiff", buffer.getvalue())]
     files = []
     for index in indices:
-        name = f"{stem}-{index + 1}.{fmt}"
+        name = f"{stem}-page-{index + 1}.{fmt}"
         if fmt == "png":
             data = document.raw[index].get_pixmap(dpi=dpi, alpha=False).tobytes("png")
         else:

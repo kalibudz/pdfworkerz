@@ -1,10 +1,10 @@
 {
   "phase": "P7",
   "taskId": "P7: OCR, scans, conversions (21 features + UI-12/UI-13)",
-  "step": "Engine + tests done for all 21 P7 features (committed 8f41c92 on wip/p7-conversions). Since then, uncommitted: engine/exports.py + engine/convert.py (shared dispatch, tested), server/deps.py + server/uploads.py (new, not yet wired into server/app.py). Paused 2026-10-02 to fix auto-resume (INF-10 follow-up).",
+  "step": "P7 engine + shared dispatch committed: engine/exports.py (one export_document for 10 formats), engine/convert.py (files/URL to PDF), server/deps.py and server/uploads.py (UI-12 groundwork, not yet wired), exports renamed document-page-N. Gate 15/15, 1438 tests. main fast-forwarded and pushed.",
   "branch": "wip/p7-conversions",
   "lastGreenCommit": "(this commit) local gate, Windows 11, Python 3.14.3, 14/14 steps",
-  "nextAction": "Wire server: refactor server/app.py onto server/deps.py, add upload/open-upload/download-with-filename routes (UI-12) and a server/convert.py router (tools, OCR languages, exports, convert to-pdf, scan); then CLI commands (cli/convert.py), web UI (Open picker/drop, Export menu, Convert screen, OCR dialog, scanned-text editing), tests, full gate, PROGRESS.md, merge to main.",
+  "nextAction": "Wire server: refactor server/app.py onto server/deps.py, add upload/open-upload/download-with-filename routes (UI-12) and a server/convert.py router (tools, OCR languages, exports, convert to-pdf, scan); then CLI commands (cli/convert.py), web UI (Open picker/drop, Export menu, Convert screen, OCR dialog, scanned-text editing), tests, full gate, PROGRESS.md.",
   "openQuestions": [
     {
       "phase": "P6",
@@ -124,6 +124,7 @@
   ],
   "updated": "2026-10-02",
   "status": "in-progress",
-  "startedAt": "2026-10-02T11:52:06+00:00",
-  "ownerSession": "70c645f2-ab2b-4b18-bcbe-9d9474ac7823"
+  "startedAt": "2026-10-02T12:19:05+00:00",
+  "ownerSession": "8b874b92-21b4-4aca-a0c4-5d99ed36568b",
+  "progressAt": "2026-10-02T12:32:23+00:00"
 }
