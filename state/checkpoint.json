@@ -1,10 +1,10 @@
 {
-  "phase": "P6",
-  "taskId": "Selection: Esc / click-away / apply clear it",
-  "step": "Selection fix across text/images/shapes (EDT-13..18 UX, not a new feature ID). Owner's live-use recipe showed a shape left invisibly selected get swept into a move_objects with four words that were never meant to move together. Root cause: four separate selections (arrange.ts shared + overlay.ts/images.ts/shapes.ts each their own) kept in sync only by convention. Fixed centrally: viewer.ts's new deselectAll() + arrange.ts's new onSelectOnly/onActivate callbacks. A plain click on any object now clears the other kinds' tool-level highlight (root cause of the first test failure: overlay.ts's clearSelection() used to call inspector.showEmpty() unconditionally, clobbering a shape/image panel just shown moments earlier in the same click -- fixed by never touching the inspector there; every caller that wants the empty state calls showEmpty() itself now). Esc, or a plain click on empty page/the grey area around it, deselects everything, asking first with an unapplied text draft. Ctrl/Cmd+click joins Shift+click; a plain click on one member of a multi-selection narrows to it. After move/nudge/align/duplicate/paste the object stays selected AND visibly highlighted now (new shapeTool.selectIndex/imageTool.selectIndex follow a new arrange.sole() after every redraw -- arrange.ts's own re-find-by-rectangle alone missed any move made through the shape/image's own box, since only arrange.ts's own moveSelection/align update pageRect, so it now also matches by the object's stable index). A text Apply/Enter, Delete, undo/redo and a command-bar edit all clear the selection instead of reselecting (owner: 'selection remains even after application and confuses the user'). Images/shapes' own separate Delete/Escape keydown listener is gone (was a double-Op risk on Delete); one shared path now. 16 Playwright tests rewritten/added.",
-  "branch": "main",
+  "phase": "P7",
+  "taskId": "P7: OCR, scans, conversions (21 features + UI-12/UI-13)",
+  "step": "Engine + tests done for all 21 P7 features (committed 8f41c92 on wip/p7-conversions). Since then, uncommitted: engine/exports.py + engine/convert.py (shared dispatch, tested), server/deps.py + server/uploads.py (new, not yet wired into server/app.py). Paused 2026-10-02 to fix auto-resume (INF-10 follow-up).",
+  "branch": "wip/p7-conversions",
   "lastGreenCommit": "(this commit) local gate, Windows 11, Python 3.14.3, 14/14 steps",
-  "nextAction": "Rebuild the C:\\Users\\hi-ka\\PDFeditor-work clone and restart both servers so the owner can retest the exact recipe that found this bug (edit a heading, click a shape, select words, move) and confirm nothing stale gets swept along. Then P7 (OCR, scans, conversions). Gate before every commit; push only with the owner's approval.",
+  "nextAction": "Wire server: refactor server/app.py onto server/deps.py, add upload/open-upload/download-with-filename routes (UI-12) and a server/convert.py router (tools, OCR languages, exports, convert to-pdf, scan); then CLI commands (cli/convert.py), web UI (Open picker/drop, Export menu, Convert screen, OCR dialog, scanned-text editing), tests, full gate, PROGRESS.md, merge to main.",
   "openQuestions": [
     {
       "phase": "P6",
@@ -123,6 +123,7 @@
     }
   ],
   "updated": "2026-10-02",
-  "status": "clean",
-  "startedAt": null
+  "status": "in-progress",
+  "startedAt": "2026-10-02T11:52:06+00:00",
+  "ownerSession": "70c645f2-ab2b-4b18-bcbe-9d9474ac7823"
 }

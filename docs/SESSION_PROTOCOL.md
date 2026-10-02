@@ -22,13 +22,23 @@ It prints what the last session was doing, whether it finished, the uncommitted 
 A usage limit, a context overflow or an expiry stops a session between two tool calls. There is no chance to write a checkpoint then, so the mark is written **before** the work instead:
 
 ```bash
-python tools/resume.py --begin "EDT-13 slice 2: align bar"   # before starting
+python tools/resume.py --begin "EDT-13 slice 2: align bar" --next "wire the align buttons"   # before starting
+python tools/resume.py --progress "buttons wired" --next "write their tests"                 # at each break
 python tools/resume.py --end                                 # after the gate is green and the work is committed
 ```
 
 A session that starts and finds `status` still `in-progress` knows the one before it was cut off. `python tools/resume.py --check` exits 1 in that case, for any wrapper that wants to branch on it.
 
-**This step 1 is only advisory** -- nothing makes a session actually run it. Found by the owner (2026-10-02): a session was cut off mid-task, and several more sessions' worth of unrelated work went by with the abandoned, uncommitted work sitting untouched the whole time, because none of them happened to run `resume.py` first and nothing forced the question. `python tools/gate.py`'s first step is now `resume.py --check` (INF-10), so the one command every session runs before every commit catches this even when step 1 above was skipped -- a red gate from this step alone means: stop, read its report, and go resume that task before starting anything else, the same as any other gate failure.
+**What actually makes this automatic (fixed 2026-10-02).** Two Claude Code settings in the committed `.claude/settings.json` do the work; nothing depends on a session remembering this section:
+
+- `"autoContinueAtUsageLimit": true` -- when a usage limit stops a session, Claude Code waits for the limit to reset and continues the same session's task by itself. Without it, the session simply sits idle until someone types. The owner found this the hard way: on 2026-10-02 a P7 session hit its limit at 01:12 (Jamaica), the limit reset at 03:20, and the session sat idle until 06:44, because nothing restarted it. Everything below only helped a session someone had already started.
+- A `SessionStart` hook (startup, resume, clear and compact) runs `tools/resume.py --hook`, which puts the resume report straight into the new session's context, with an instruction to resume first. A session continuing its own task after a resume or a compaction is told to carry on instead.
+
+Each task mark records the Claude Code session that set it (`ownerSession`, from `CLAUDE_CODE_SESSION_ID`). `--check`, and with it the gate's first step, flags only a task left unfinished by a *different* session. Before that, `--check` also failed on the asking session's own mark, so the gate could never pass between `--begin` and `--end`. `--begin` also replaces the previous task's `step` and `nextAction`, which it used to leave in place: a resumed session would have been told to redo the finished task. Use `--progress "<step>" --next "<action>"` at each natural break, so an abrupt end loses at most the work since then.
+
+What none of this can do: approve a permission prompt while you are away. A continued session that needs one waits for you. A weekly limit continues only when it resets.
+
+**This step 1 on its own was only advisory** -- nothing made a session actually run it. Found by the owner (2026-10-02): a session was cut off mid-task, and several more sessions' worth of unrelated work went by with the abandoned, uncommitted work sitting untouched the whole time, because none of them happened to run `resume.py` first and nothing forced the question. `python tools/gate.py`'s first step is now `resume.py --check` (INF-10), so the one command every session runs before every commit catches this even when step 1 above was skipped -- a red gate from this step alone means: stop, read its report, and go resume that task before starting anything else, the same as any other gate failure.
 
 Recovering, in order:
 

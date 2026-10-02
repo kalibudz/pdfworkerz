@@ -1,0 +1,18 @@
+{
+  "autoContinueAtUsageLimit": true,
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.venv/Scripts/python.exe\" \"$CLAUDE_PROJECT_DIR/tools/resume.py\" --hook",
+            "timeout": 30,
+            "statusMessage": "Checking for unfinished PDFWorkerz work"
+          }
+        ]
+      }
+    ]
+  }
+}
