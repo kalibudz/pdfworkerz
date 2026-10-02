@@ -91,3 +91,19 @@ def test_the_repositorys_own_checkpoint_carries_the_fields_a_cold_start_needs() 
     data = resume.load_checkpoint(ROOT / "state" / "checkpoint.json")
     for field in ("phase", "taskId", "step", "branch", "lastGreenCommit", "nextAction", "status"):
         assert data.get(field) is not None, field
+
+
+@pytest.mark.feature("INF-10")
+def test_the_gate_checks_for_an_interrupted_session_before_anything_else() -> None:
+    """`python tools/resume.py` on its own is only advisory -- nothing makes a session
+    run it. Found by the owner: a session was cut off mid-task, and several more
+    sessions' worth of unrelated work went by with the abandoned, uncommitted work
+    sitting untouched, because nothing ever re-checked. The gate is the one thing
+    every session runs before every commit, so that is where this has to be
+    enforced, as its very first step -- not buried after lint/types/tests have
+    already spent minutes on a task nobody should be starting yet."""
+    import gate
+
+    steps = gate.build_steps()
+    assert steps[0].job == "session"
+    assert steps[0].cmd[-2:] == ("tools/resume.py", "--check")

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-JOBS = ("lint", "types", "spec-sync", "tests", "security", "tracker-build")
+JOBS = ("session", "lint", "types", "spec-sync", "tests", "security", "tracker-build")
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,18 @@ def build_steps(python: str = sys.executable, npm: str | None = None) -> list[St
     web, tracker = ROOT / "web", ROOT / "tracker"
     py_dirs = ("engine", "cli", "tools", "server")
     return [
+        # First, and never skipped by a narrower --job filter's absence from the command
+        # line: INF-10's whole point is that an interrupted task is impossible to miss, not
+        # just reportable to a session that remembers to ask. `python tools/resume.py` on
+        # its own is advisory -- nothing makes a session run it. This step is what actually
+        # enforces it, since the gate is the one thing every session runs before every
+        # commit (found by the owner: a session was cut off mid-task, and three more
+        # sessions' worth of unrelated work -- including dozens of gate runs -- went by
+        # with the abandoned, uncommitted work sitting there the whole time, because
+        # nothing ever re-checked). `resume.py --check` prints the full report (what was
+        # in progress, the uncommitted files, the next action) before failing, so this
+        # step's own output is self-explanatory without digging further.
+        Step("session", "resume check", (python, "tools/resume.py", "--check")),
         Step("lint", "ruff check", (python, "-m", "ruff", "check", ".")),
         Step("lint", "ruff format --check", (python, "-m", "ruff", "format", "--check", *py_dirs, "tests")),
         Step("types", "mypy (strict)", (python, "-m", "mypy", *py_dirs)),

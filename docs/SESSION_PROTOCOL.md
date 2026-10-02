@@ -28,6 +28,8 @@ python tools/resume.py --end                                 # after the gate is
 
 A session that starts and finds `status` still `in-progress` knows the one before it was cut off. `python tools/resume.py --check` exits 1 in that case, for any wrapper that wants to branch on it.
 
+**This step 1 is only advisory** -- nothing makes a session actually run it. Found by the owner (2026-10-02): a session was cut off mid-task, and several more sessions' worth of unrelated work went by with the abandoned, uncommitted work sitting untouched the whole time, because none of them happened to run `resume.py` first and nothing forced the question. `python tools/gate.py`'s first step is now `resume.py --check` (INF-10), so the one command every session runs before every commit catches this even when step 1 above was skipped -- a red gate from this step alone means: stop, read its report, and go resume that task before starting anything else, the same as any other gate failure.
+
 Recovering, in order:
 
 1. `python tools/resume.py` — read the report in full.
